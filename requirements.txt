@@ -1,4 +1,4 @@
 streamlit
-openai==0.28
 pandas
+openai
 plotly
