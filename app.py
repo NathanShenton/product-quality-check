@@ -9,7 +9,7 @@ import plotly.graph_objects as go  # Import Plotly for the gauge
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
 #############################
-#  Custom CSS Styling Block #
+#  Custom CSS Styling Block! #
 #############################
 st.markdown(
     """
