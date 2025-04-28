@@ -1,15 +1,21 @@
+import subprocess
+import sys
+
+# Emergency install to ensure required libraries are available
+subprocess.run([sys.executable, "-m", "pip", "install", "openai", "plotly"], check=True)
+
 import streamlit as st
 import pandas as pd
-import openai
 import json
 import os
 import plotly.graph_objects as go  # Import Plotly for the gauge
+from openai import OpenAI  # New OpenAI 1.x client
 
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
 #############################
-#  Custom CSS Styling Block #
+#  Custom CSS Styling Block! #
 #############################
 st.markdown(
     """
@@ -394,7 +400,7 @@ if uploaded_file and user_prompt.strip():
                 content = ""
 
                 try:
-                    response = openai.ChatCompletion.create(
+                    response = client.chat.completions.create(
                         model=model_choice,
                         messages=[
                             {
