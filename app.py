@@ -1,12 +1,15 @@
 import streamlit as st
 import pandas as pd
-import openai
 import json
 import os
 import plotly.graph_objects as go  # Import Plotly for the gauge
+import subprocess
+import sys
 
-# Set up OpenAI client (new way)
-from openai import OpenAI
+# Emergency install to ensure 'openai' is available
+subprocess.run([sys.executable, "-m", "pip", "install", "openai"], check=True)
+
+from openai import OpenAI  # New OpenAI 1.x client
 
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
