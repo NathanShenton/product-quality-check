@@ -1,14 +1,14 @@
+import subprocess
+import sys
+
+# Emergency install to ensure required libraries are available
+subprocess.run([sys.executable, "-m", "pip", "install", "openai", "plotly"], check=True)
+
 import streamlit as st
 import pandas as pd
 import json
 import os
 import plotly.graph_objects as go  # Import Plotly for the gauge
-import subprocess
-import sys
-
-# Emergency install to ensure 'openai' is available
-subprocess.run([sys.executable, "-m", "pip", "install", "openai"], check=True)
-
 from openai import OpenAI  # New OpenAI 1.x client
 
 # Set page configuration immediately after imports!
