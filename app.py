@@ -5,6 +5,9 @@ import json
 import os
 import plotly.graph_objects as go  # Import Plotly for the gauge
 
+# Set up OpenAI client (new way)
+from openai import OpenAI
+
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
