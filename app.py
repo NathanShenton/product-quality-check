@@ -397,7 +397,7 @@ if uploaded_file and user_prompt.strip():
                 content = ""
 
                 try:
-                    response = openai.ChatCompletion.create(
+                    response = client.chat.completions.create(
                         model=model_choice,
                         messages=[
                             {
