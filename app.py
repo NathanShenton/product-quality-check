@@ -1,4 +1,4 @@
-mport subprocess
+import subprocess
 import sys
 
 # Emergency install to ensure required libraries are available
