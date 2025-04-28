@@ -126,7 +126,9 @@ with col1:
     if not api_key_input:
         st.warning("Please enter your OpenAI API key to proceed.")
         st.stop()
-    openai.api_key = api_key_input
+    # Initialize the new OpenAI client
+    client = OpenAI(api_key=api_key_input)
+
 with col2:
     # 2. File Upload
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
