@@ -405,7 +405,7 @@ if uploaded_file and user_prompt.strip():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = ""
 
-                try:
+try:
     response = client.chat.completions.create(
         model=model_choice,
         messages=[
@@ -438,46 +438,15 @@ if uploaded_file and user_prompt.strip():
     parsed = json.loads(content)
     results.append(parsed)
 
-    # ✅ Debug logging for successful rows
     if show_live_debug:
         summary = json.dumps(parsed, ensure_ascii=False)
         log_lines.append(f"✅ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
         debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
 
-except Exception as e:
-    failed_rows.append(idx)
-    error_output = {
-        "error": f"Failed to process row {idx}: {e}",
-        "raw_output": content if content else "No content returned"
-    }
-    results.append(error_output)
-
-    # ❌ Debug logging for failed rows
     if show_live_debug:
         summary = json.dumps(error_output, ensure_ascii=False)
         log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
         debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
-
-except Exception as e:
-    failed_rows.append(idx)
-    error_output = {
-        "error": f"Failed to process row {idx}: {e}",
-        "raw_output": content if content else "No content returned"
-    }
-    results.append(error_output)
-
-    # ✅ And add this block here too
-    if show_live_debug:
-        summary = json.dumps(error_output, ensure_ascii=False)
-        log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
-        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
-
-                except Exception as e:
-                    failed_rows.append(idx)
-                    results.append({
-                        "error": f"Failed to process row {idx}: {e}",
-                        "raw_output": content if content else "No content returned"
-                    })
 
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
