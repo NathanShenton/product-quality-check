@@ -4,8 +4,6 @@ import json
 import os
 import plotly.graph_objects as go
 from openai import OpenAI
-import io               # NEW
-import chardet          # NEW – add chardet==5.2.0 to requirements.txt
 
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
@@ -51,7 +49,10 @@ st.markdown(
 #  Sidebar – Branding Info  #
 #############################
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
+st.sidebar.image(
+    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
+    use_container_width=True
+)
 st.sidebar.markdown(
     """
     **Welcome to our Flexible AI Product Data Checker!**
@@ -70,50 +71,6 @@ st.sidebar.markdown(
 def approximate_tokens(text: str) -> int:
     """Approximate the number of tokens based on text length."""
     return max(1, len(text) // 4)
-
-#############################
-#   NEW: Safe CSV Reader    #
-#############################
-def safe_read_csv(uploaded_file, user_encoding: str | None = None) -> pd.DataFrame:
-    """
-    Robustly read an uploaded CSV without crashing on bad encodings.
-    Priority:
-      1) user-selected encoding (unless 'Auto-detect')
-      2) chardet guess
-      3) common fall-backs
-      4) last-ditch utf-8 with replacement
-    Raises ValueError if nothing works.
-    """
-    raw = uploaded_file.read()  # preserve original bytes
-
-    def _try(enc: str, errors: str = "strict"):
-        return pd.read_csv(io.BytesIO(raw), dtype=str, encoding=enc, encoding_errors=errors)
-
-    # 1 — explicit user choice
-    if user_encoding and user_encoding != "Auto-detect":
-        try:
-            return _try(user_encoding)
-        except UnicodeDecodeError:
-            st.warning(f"Decoding with “{user_encoding}” failed – falling back to auto-detect…")
-
-    # 2 — chardet guess
-    guess = chardet.detect(raw)["encoding"]
-    enc_cycle = [guess] if guess else []
-
-    # 3 — usual suspects
-    enc_cycle += ["utf-8", "utf-8-sig", "cp1252", "latin1", "utf-16", "utf-16le", "utf-16be"]
-
-    for enc in enc_cycle:
-        try:
-            return _try(enc)
-        except UnicodeDecodeError:
-            continue
-
-    # 4 — fallback with replacement so user can still inspect
-    try:
-        return _try("utf-8", errors="replace")
-    except Exception:
-        raise ValueError("Unable to decode the CSV with any tried encodings.")
 
 #############################
 #   Cost Estimation         #
