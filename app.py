@@ -87,7 +87,7 @@ def safe_read_csv(uploaded_file, user_encoding: str | None = None) -> pd.DataFra
     raw = uploaded_file.read()  # preserve original bytes
 
     def _try(enc: str, errors: str = "strict"):
-        return pd.read_csv(io.BytesIO(raw), dtype=str, encoding=enc, errors=errors)
+        return pd.read_csv(io.BytesIO(raw), dtype=str, encoding=enc, encoding_errors=errors)
 
     # 1 — explicit user choice
     if user_encoding and user_encoding != "Auto-detect":
