@@ -49,10 +49,7 @@ st.markdown(
 #  Sidebar – Branding Info  #
 #############################
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image(
-    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
-    use_container_width=True
-)
+st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
 st.sidebar.markdown(
     """
     **Welcome to our Flexible AI Product Data Checker!**
@@ -146,7 +143,6 @@ st.markdown("---")
 #############################
 # Pre-Written Prompts       #
 #############################
-# (UNCHANGED – your long PROMPT_OPTIONS dict stays exactly as provided)
 PROMPT_OPTIONS = {
     "--Select--": {
         "prompt": "",
@@ -326,6 +322,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 # 4. Choose a Pre-Written Prompt
 st.subheader("💬 Choose a Prompt")
 prompt_choice = st.selectbox(
@@ -359,7 +356,6 @@ user_prompt = st.text_area(
 # ---------- Main Execution Logic ----------
 if uploaded_file and user_prompt.strip():
     df = pd.read_csv(uploaded_file, dtype=str)
-
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
 
@@ -385,12 +381,7 @@ if uploaded_file and user_prompt.strip():
     # Create gauge placeholder before starting the loop
     gauge_placeholder = st.empty()
 
-    # Checkbox to optionally show real-time row output
-    show_live_debug = st.checkbox("🛠️ Show live debug output while running")
-
     # Button to run GPT
-    debug_log_placeholder = st.empty()
-    log_lines = []
     if st.button("🚀 Run GPT on CSV"):
         with st.spinner("Processing with GPT..."):
             progress_bar = st.progress(0)
@@ -424,6 +415,7 @@ if uploaded_file and user_prompt.strip():
                     )
                     content = response.choices[0].message.content.strip()
 
+                    # Clean up any triple-backtick code fences if present
                     if content.startswith("```"):
                         parts = content.split("```", maxsplit=2)
                         content = parts[1].strip()
@@ -432,28 +424,17 @@ if uploaded_file and user_prompt.strip():
                         if "```" in content:
                             content = content.split("```", maxsplit=1)[0].strip()
 
+                    # Attempt to parse JSON
                     parsed = json.loads(content)
                     results.append(parsed)
 
-                    if show_live_debug:
-                        summary = json.dumps(parsed, ensure_ascii=False)
-                        log_lines.append(f"✅ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
-                        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
-
                 except Exception as e:
                     failed_rows.append(idx)
-                    error_output = {
+                    results.append({
                         "error": f"Failed to process row {idx}: {e}",
                         "raw_output": content if content else "No content returned"
-                    }
-                    results.append(error_output)
+                    })
 
-                    if show_live_debug:
-                        summary = json.dumps(error_output, ensure_ascii=False)
-                        log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
-                        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
-
-                # Update progress bar and gauge
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
                 progress_text.markdown(
@@ -461,6 +442,7 @@ if uploaded_file and user_prompt.strip():
                     unsafe_allow_html=True
                 )
 
+                # Update the gauge indicator
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
