@@ -4,6 +4,8 @@ import json
 import os
 import plotly.graph_objects as go
 from openai import OpenAI
+import io               # NEW
+import chardet          # NEW – add chardet==5.2.0 to requirements.txt
 
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
@@ -70,6 +72,50 @@ def approximate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 #############################
+#   NEW: Safe CSV Reader    #
+#############################
+def safe_read_csv(uploaded_file, user_encoding: str | None = None) -> pd.DataFrame:
+    """
+    Robustly read an uploaded CSV without crashing on bad encodings.
+    Priority:
+      1) user-selected encoding (unless 'Auto-detect')
+      2) chardet guess
+      3) common fall-backs
+      4) last-ditch utf-8 with replacement
+    Raises ValueError if nothing works.
+    """
+    raw = uploaded_file.read()  # preserve original bytes
+
+    def _try(enc: str, errors: str = "strict"):
+        return pd.read_csv(io.BytesIO(raw), dtype=str, encoding=enc, errors=errors)
+
+    # 1 — explicit user choice
+    if user_encoding and user_encoding != "Auto-detect":
+        try:
+            return _try(user_encoding)
+        except UnicodeDecodeError:
+            st.warning(f"Decoding with “{user_encoding}” failed – falling back to auto-detect…")
+
+    # 2 — chardet guess
+    guess = chardet.detect(raw)["encoding"]
+    enc_cycle = [guess] if guess else []
+
+    # 3 — usual suspects
+    enc_cycle += ["utf-8", "utf-8-sig", "cp1252", "latin1", "utf-16", "utf-16le", "utf-16be"]
+
+    for enc in enc_cycle:
+        try:
+            return _try(enc)
+        except UnicodeDecodeError:
+            continue
+
+    # 4 — fallback with replacement so user can still inspect
+    try:
+        return _try("utf-8", errors="replace")
+    except Exception:
+        raise ValueError("Unable to decode the CSV with any tried encodings.")
+
+#############################
 #   Cost Estimation         #
 #############################
 def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: list) -> float:
@@ -132,6 +178,12 @@ with col1:
 with col2:
     # 2. File Upload
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
+    # NEW: encoding selector
+    enc_selector = st.selectbox(
+        "File encoding",
+        ["Auto-detect", "utf-8", "utf-8-sig", "cp1252", "latin1", "utf-16"],
+        index=0
+    )
 
 # 3. Column Selection
 st.subheader("📊 Select up to 3 CSV columns to pass to GPT")
@@ -143,6 +195,7 @@ st.markdown("---")
 #############################
 # Pre-Written Prompts       #
 #############################
+# (UNCHANGED – your long PROMPT_OPTIONS dict stays exactly as provided)
 PROMPT_OPTIONS = {
     "--Select--": {
         "prompt": "",
@@ -322,7 +375,6 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
-
 # 4. Choose a Pre-Written Prompt
 st.subheader("💬 Choose a Prompt")
 prompt_choice = st.selectbox(
@@ -355,7 +407,13 @@ user_prompt = st.text_area(
 
 # ---------- Main Execution Logic ----------
 if uploaded_file and user_prompt.strip():
-    df = pd.read_csv(uploaded_file, dtype=str)
+    # NEW: use safe_read_csv with error handling
+    try:
+        df = safe_read_csv(uploaded_file, user_encoding=enc_selector)
+    except ValueError as err:
+        st.error(f"❌ {err}\n\nPlease re-save the CSV with UTF-8 or choose the correct encoding.")
+        st.stop()
+
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
 
