@@ -135,12 +135,6 @@ with col1:
 with col2:
     # 2. File Upload
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
-    # NEW: encoding selector
-    enc_selector = st.selectbox(
-        "File encoding",
-        ["Auto-detect", "utf-8", "utf-8-sig", "cp1252", "latin1", "utf-16"],
-        index=0
-    )
 
 # 3. Column Selection
 st.subheader("📊 Select up to 3 CSV columns to pass to GPT")
