@@ -388,7 +388,6 @@ if uploaded_file and user_prompt.strip():
     # Checkbox to optionally show real-time row output
     show_live_debug = st.checkbox("🛠️ Show live debug output while running")
 
-    
     # Button to run GPT
     debug_log_placeholder = st.empty()
     log_lines = []
@@ -401,79 +400,103 @@ if uploaded_file and user_prompt.strip():
             failed_rows = []
 
             # Processing loop
-# Processing loop
-for idx, row in df.iterrows():
-    row_data = {c: row.get(c, "") for c in cols_to_use}
-    content = ""
+            for idx, row in df.iterrows():
+                row_data = {c: row.get(c, "") for c in cols_to_use}
+                content = ""
 
-    try:
-        response = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a JSON-producing assistant. "
-                        "No placeholders or how-to instructions — only return valid JSON."
+                try:
+                    response = client.chat.completions.create(
+                        model=model_choice,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a JSON-producing assistant. "
+                                    "No placeholders or how-to instructions — only return valid JSON."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                            }
+                        ],
+                        temperature=0.0
                     )
-                },
-                {
-                    "role": "user",
-                    "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
-                }
-            ],
-            temperature=0.0
-        )
-        content = response.choices[0].message.content.strip()
+                    content = response.choices[0].message.content.strip()
 
-        if content.startswith("```"):
-            parts = content.split("```", maxsplit=2)
-            content = parts[1].strip()
-            if content.startswith("json"):
-                content = content[len("json"):].strip()
-            if "```" in content:
-                content = content.split("```", maxsplit=1)[0].strip()
+                    if content.startswith("```"):
+                        parts = content.split("```", maxsplit=2)
+                        content = parts[1].strip()
+                        if content.startswith("json"):
+                            content = content[len("json"):].strip()
+                        if "```" in content:
+                            content = content.split("```", maxsplit=1)[0].strip()
 
-        parsed = json.loads(content)
-        results.append(parsed)
+                    parsed = json.loads(content)
+                    results.append(parsed)
 
-        if show_live_debug:
-            summary = json.dumps(parsed, ensure_ascii=False)
-            log_lines.append(f"✅ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
-            debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
+                    if show_live_debug:
+                        summary = json.dumps(parsed, ensure_ascii=False)
+                        log_lines.append(f"✅ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
+                        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
 
-    except Exception as e:
-        failed_rows.append(idx)
-        error_output = {
-            "error": f"Failed to process row {idx}: {e}",
-            "raw_output": content if content else "No content returned"
-        }
-        results.append(error_output)
+                except Exception as e:
+                    failed_rows.append(idx)
+                    error_output = {
+                        "error": f"Failed to process row {idx}: {e}",
+                        "raw_output": content if content else "No content returned"
+                    }
+                    results.append(error_output)
 
-        if show_live_debug:
-            summary = json.dumps(error_output, ensure_ascii=False)
-            log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
-            debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
+                    if show_live_debug:
+                        summary = json.dumps(error_output, ensure_ascii=False)
+                        log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
+                        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
 
-    # Update progress bar and gauge
-    progress = (idx + 1) / n_rows
-    progress_bar.progress(progress)
-    progress_text.markdown(
-        f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
-        unsafe_allow_html=True
-    )
+                # Update progress bar and gauge
+                progress = (idx + 1) / n_rows
+                progress_bar.progress(progress)
+                progress_text.markdown(
+                    f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                    unsafe_allow_html=True
+                )
 
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=progress * 100,
-        title={'text': "Progress"},
-        gauge={
-            'axis': {'range': [0, 100]},
-            'bar': {'color': "#4a90e2"},
-            'steps': [
-                {'range': [0, 50], 'color': "#e0e0e0"},
-                {'range': [50, 100], 'color': "#c8c8c8"}
-            ]
-        }
-    ))
-    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=progress * 100,
+                    title={'text': "Progress"},
+                    gauge={
+                        'axis': {'range': [0, 100]},
+                        'bar': {'color': "#4a90e2"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "#e0e0e0"},
+                            {'range': [50, 100], 'color': "#c8c8c8"}
+                        ]
+                    }
+                ))
+                gauge_placeholder.plotly_chart(fig, use_container_width=True)
+
+            # Combine original CSV with GPT results
+            results_df = pd.DataFrame(results)
+            final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
+            st.success("✅ GPT processing complete!")
+            st.markdown("### 🔍 Final Result")
+            st.dataframe(final_df)
+
+            # Download buttons
+            st.download_button(
+                "⬇️ Download Full Results CSV",
+                final_df.to_csv(index=False).encode("utf-8"),
+                "gpt_output.csv",
+                "text/csv"
+            )
+
+            if failed_rows:
+                failed_df = df.iloc[failed_rows].copy()
+                st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
+                st.download_button(
+                    "⬇️ Download Failed Rows CSV",
+                    failed_df.to_csv(index=False).encode("utf-8"),
+                    "gpt_failed_rows.csv",
+                    "text/csv"
+                )
