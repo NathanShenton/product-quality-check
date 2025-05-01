@@ -385,7 +385,13 @@ if uploaded_file and user_prompt.strip():
     # Create gauge placeholder before starting the loop
     gauge_placeholder = st.empty()
 
+    # Checkbox to optionally show real-time row output
+    show_live_debug = st.checkbox("🛠️ Show live debug output while running")
+
+    
     # Button to run GPT
+    debug_log_placeholder = st.empty()
+    log_lines = []
     if st.button("🚀 Run GPT on CSV"):
         with st.spinner("Processing with GPT..."):
             progress_bar = st.progress(0)
@@ -400,37 +406,71 @@ if uploaded_file and user_prompt.strip():
                 content = ""
 
                 try:
-                    response = client.chat.completions.create(
-                        model=model_choice,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a JSON-producing assistant. "
-                                    "No placeholders or how-to instructions — only return valid JSON."
-                                )
-                            },
-                            {
-                                "role": "user",
-                                "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
-                            }
-                        ],
-                        temperature=0.0
-                    )
-                    content = response.choices[0].message.content.strip()
+    response = client.chat.completions.create(
+        model=model_choice,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a JSON-producing assistant. "
+                    "No placeholders or how-to instructions — only return valid JSON."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+            }
+        ],
+        temperature=0.0
+    )
+    content = response.choices[0].message.content.strip()
 
-                    # Clean up any triple-backtick code fences if present
-                    if content.startswith("```"):
-                        parts = content.split("```", maxsplit=2)
-                        content = parts[1].strip()
-                        if content.startswith("json"):
-                            content = content[len("json"):].strip()
-                        if "```" in content:
-                            content = content.split("```", maxsplit=1)[0].strip()
+    # Clean up any triple-backtick code fences if present
+    if content.startswith("```"):
+        parts = content.split("```", maxsplit=2)
+        content = parts[1].strip()
+        if content.startswith("json"):
+            content = content[len("json"):].strip()
+        if "```" in content:
+            content = content.split("```", maxsplit=1)[0].strip()
 
-                    # Attempt to parse JSON
-                    parsed = json.loads(content)
-                    results.append(parsed)
+    # Attempt to parse JSON
+    parsed = json.loads(content)
+    results.append(parsed)
+
+    # ✅ Debug logging for successful rows
+    if show_live_debug:
+        summary = json.dumps(parsed, ensure_ascii=False)
+        log_lines.append(f"✅ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
+        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
+
+except Exception as e:
+    failed_rows.append(idx)
+    error_output = {
+        "error": f"Failed to process row {idx}: {e}",
+        "raw_output": content if content else "No content returned"
+    }
+    results.append(error_output)
+
+    # ❌ Debug logging for failed rows
+    if show_live_debug:
+        summary = json.dumps(error_output, ensure_ascii=False)
+        log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
+        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
+
+except Exception as e:
+    failed_rows.append(idx)
+    error_output = {
+        "error": f"Failed to process row {idx}: {e}",
+        "raw_output": content if content else "No content returned"
+    }
+    results.append(error_output)
+
+    # ✅ And add this block here too
+    if show_live_debug:
+        summary = json.dumps(error_output, ensure_ascii=False)
+        log_lines.append(f"❌ Row {idx + 1}: {summary[:200]}{'...' if len(summary) > 200 else ''}")
+        debug_log_placeholder.code("\n".join(log_lines[-10:]), language="json")
 
                 except Exception as e:
                     failed_rows.append(idx)
