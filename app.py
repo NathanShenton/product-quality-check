@@ -358,12 +358,7 @@ user_prompt = st.text_area(
 
 # ---------- Main Execution Logic ----------
 if uploaded_file and user_prompt.strip():
-    # NEW: use safe_read_csv with error handling
-    try:
-        df = safe_read_csv(uploaded_file, user_encoding=enc_selector)
-    except ValueError as err:
-        st.error(f"❌ {err}\n\nPlease re-save the CSV with UTF-8 or choose the correct encoding.")
-        st.stop()
+    df = pd.read_csv(uploaded_file, dtype=str)
 
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
