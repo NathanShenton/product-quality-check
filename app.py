@@ -389,6 +389,9 @@ if uploaded_file and user_prompt.strip():
             n_rows = len(df)
             results = []
             failed_rows = []
+            rolling_log = []
+            log_placeholder = st.empty()
+
 
             # Processing loop
             for idx, row in df.iterrows():
@@ -428,12 +431,38 @@ if uploaded_file and user_prompt.strip():
                     parsed = json.loads(content)
                     results.append(parsed)
 
+                    # Update rolling log
+                    rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
+                    if len(rolling_log) > 20:
+                        rolling_log = rolling_log[-20:]
+
+                    log_placeholder.markdown(
+                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
+                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                        + "\n".join(rolling_log) +
+                        "</pre>",
+                        unsafe_allow_html=True
+                    )
                 except Exception as e:
                     failed_rows.append(idx)
-                    results.append({
+                    error_result = {
                         "error": f"Failed to process row {idx}: {e}",
                         "raw_output": content if content else "No content returned"
-                    })
+                    }
+                    results.append(error_result)
+
+                    # Update rolling log with error
+                    rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
+                    if len(rolling_log) > 20:
+                        rolling_log = rolling_log[-20:]
+
+                    log_placeholder.markdown(
+                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
+                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                        + "\n".join(rolling_log) +
+                        "</pre>",
+                        unsafe_allow_html=True
+                    )
 
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
