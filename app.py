@@ -6,7 +6,7 @@ from openai import OpenAI
 
 """
 Flexible AI Product Data Checker
---------------------------------
+-------------------------------
 Unlimited column selection • Pre‑written prompt library • Token‑based cost estimate • Progress gauge & rolling log
 """
 
