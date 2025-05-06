@@ -234,7 +234,6 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Maps each product to its Schedule 1 PMO category and the correct unit price basis (e.g. per 100 g, per 10 ml)."
     },
-    {
   "Free From Conflict Validator": {
     "prompt": (
       "SYSTEM MESSAGE:\n"
