@@ -234,6 +234,40 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Maps each product to its Schedule 1 PMO category and the correct unit price basis (e.g. per 100 g, per 10 ml)."
     },
+    {
+  "Free From Conflict Validator": {
+    "prompt": (
+      "SYSTEM MESSAGE:\n"
+      "\"You are a careful label compliance assistant that checks whether a product's 'free_from' claims are consistent with its 'full_ingredients' list. "
+      "You are extremely thorough, capable of understanding typos, HTML tags, formatting inconsistencies, and synonyms. "
+      "You will flag any potential mismatches between claimed exclusions and ingredients.\"\n\n"
+      "USER MESSAGE:\n"
+      "Review the following product data:\n"
+      "- full_ingredients: {full_ingredients}\n"
+      "- free_from: {free_from}\n\n"
+      "Your task is to determine if there are any potential conflicts between the ingredients and the claims. "
+      "If all claims appear valid and not contradicted by the ingredient list, report status as 'ok'. "
+      "If any conflicts are found, set status to 'conflict' and list each conflicting claim and the ingredient(s) that contradict it.\n\n"
+      "Output valid JSON only, like this:\n\n"
+      "{\n"
+      "  \"status\": \"ok\" | \"conflict\",\n"
+      "  \"conflicts\": [\n"
+      "    {\"claim\": \"<free_from claim>\", \"ingredient\": \"<conflicting ingredient>\"},\n"
+      "    ...\n"
+      "  ]\n"
+      "}\n\n"
+      "**Important**:\n"
+      "1. Supported free_from claims include: Free From, Dairy Free, SLS Free, Paraben Free, Microplastics Free, Sesame Seed Free, Egg Free, Wheat Free, Soya Free, Milk Free, Gluten Free, Celery Free, Cereal Free, Crustaceans Free, Fish Free, Kiwi Free, Lupin Free, Mollusc Free, Mustard Free, Sulphites Free, Nut Free, Peanut Free, Peanut & Nut Free, Alcohol Free, Palm Oil Free, Parfum Free, Fluoride Free\n"
+      "2. Treat “Peanut & Nut Free” as two checks: “Peanut Free” and “Nut Free”\n"
+      "3. Normalize HTML, remove special characters, and handle plural/singular variations\n"
+      "4. Detect typos and ingredient synonyms (e.g., “lactose” = milk, “whey” = dairy, “casein” = dairy, “gluten” = wheat, etc.)\n"
+      "5. Do not return ingredients or claims that are not clearly conflicting\n"
+      "6. Return status 'ok' only if no issues are confidently found."
+    ),
+    "recommended_model": "gpt-4-turbo",
+    "description": "Checks product 'free_from' claims for conflicts against 'full_ingredients', accounting for typos, synonyms, and formatting irregularities."
+  }
+},
     "French Sell Copy Translator": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
