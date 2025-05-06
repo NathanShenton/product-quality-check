@@ -1,144 +1,88 @@
 import streamlit as st
 import pandas as pd
 import json
-import os
 import plotly.graph_objects as go
 from openai import OpenAI
 
-# Set page configuration immediately after imports!
+"""
+Flexible AI Product Data Checker
+--------------------------------
+Unlimited column selection • Pre‑written prompt library • Token‑based cost estimate • Progress gauge & rolling log
+"""
+
+# ──────────────────────────────── 0 · PAGE CONFIG & STYLES
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
-#############################
-#  Custom CSS Styling Block! #
-#############################
 st.markdown(
-    """
-    <style>
-    /* Global page styles */
-    body {
-      background-color: #f4f7f6;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .main {
-      padding: 2rem;
-    }
-    h1 {
-      font-size: 3.2rem;
-      color: #4a90e2;
-      text-align: center;
-      margin-bottom: 1rem;
-    }
-    h2, h3, h4 {
-      color: #333333;
-    }
-    /* Progress bar style */
-    .stProgress > div > div > div {
-        background-color: #4a90e2;
-    }
-    /* Custom sidebar style */
-    .css-1d391kg .css-1d391kg { 
-        background-color: #ffffff; 
-        border-radius: 5px; 
-        padding: 1rem; 
-    }
-    </style>
-    """, unsafe_allow_html=True
+    """<style>
+      body{background:#f4f7f6;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif}
+      .main{padding:2rem}
+      h1{font-size:3.2rem;color:#4a90e2;text-align:center;margin-bottom:1rem}
+      h2,h3,h4{color:#333}
+      .stProgress>div>div>div{background:#4a90e2}
+      .css-1d391kg .css-1d391kg{background:#fff;border-radius:5px;padding:1rem}
+    </style>""",
+    unsafe_allow_html=True,
 )
 
-#############################
-#  Sidebar – Branding Info  #
-#############################
+# ──────────────────────────────── 1 · SIDEBAR
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
+st.sidebar.image(
+    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
+    use_container_width=True,
+)
 st.sidebar.markdown(
-    """
-    **Welcome to our Flexible AI Product Data Checker!**
-
-    - Process your CSV row by row with GPT.
-    - Configure columns, select or write a prompt.
-    - Get real-time cost estimates and results.
-
-    *Demo powered by OpenAI's GPT models.*
-    """
+    """**Welcome!**  
+    • Process your CSV row‑by‑row with GPT  
+    • Pick columns, choose / write a prompt  
+    • See a live cost estimate and results""",
 )
 
-#############################
-#   Helper: Approx. Tokens  #
-#############################
+# ──────────────────────────────── 2 · HELPERS
+
 def approximate_tokens(text: str) -> int:
-    """Approximate the number of tokens based on text length."""
+    """4 chars ≈ 1 token."""
     return max(1, len(text) // 4)
 
-#############################
-#   Cost Estimation         #
-#############################
-def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: list) -> float:
-    """
-    Estimate cost based on the chosen model, number of rows,
-    approximate tokens in user prompt, and row data.
-    """
-    model_costs_per_1k = {
+def estimate_cost(model: str, df: pd.DataFrame, prompt: str, cols: list[str]) -> float:
+    prices = {
         "gpt-3.5-turbo": (0.0005, 0.0015),
-        "gpt-4.1-mini": (0.0004, 0.0016),
-        "gpt-4.1-nano": (0.0001, 0.0004),
-        "gpt-4o-mini":  (0.0006, 0.0024),
-        "gpt-4-turbo":  (0.01,   0.03)
+        "gpt-4.1-mini":  (0.0004, 0.0016),
+        "gpt-4.1-nano":  (0.0001, 0.0004),
+        "gpt-4o-mini":   (0.0006, 0.0024),
+        "gpt-4-turbo":   (0.01,   0.03),
     }
-
-    # Default fallback costs
-    cost_in, cost_out = model_costs_per_1k.get(model, (0.001, 0.003))
-    total_input_tokens = 0
-    total_output_tokens = 0
-
+    cin, cout = prices.get(model, (0.001, 0.003))
+    total_in = total_out = 0
+    base_tok = approximate_tokens(prompt)
     for _, row in df.iterrows():
-        system_tokens = 30
-        row_dict = {c: row.get(c, "") for c in cols_to_use}
-        row_json_str = json.dumps(row_dict, ensure_ascii=False)
-        prompt_tokens = approximate_tokens(user_prompt) + approximate_tokens(row_json_str)
-        total_input_tokens += (system_tokens + prompt_tokens)
-        # Estimate ~100 tokens output per row
-        total_output_tokens += 100
+        row_json = json.dumps({c: row.get(c, "") for c in cols}, ensure_ascii=False)
+        total_in += 30 + base_tok + approximate_tokens(row_json)  # 30 ≈ system msg
+        total_out += 100  # assume 100 output tokens
+    return (total_in / 1_000)*cin + (total_out / 1_000)*cout
 
-    input_ktokens = total_input_tokens / 1000
-    output_ktokens = total_output_tokens / 1000
-    return (input_ktokens * cost_in) + (output_ktokens * cost_out)
-
-#############################
-# Model Descriptions + UI   #
-#############################
+# ──────────────────────────────── 3 · MODEL INFO
 MODEL_OPTIONS = {
-    "gpt-3.5-turbo": "Cheapest, good for basic tasks with acceptable quality.",
-    "gpt-4.1-mini": "Balanced cost and intelligence, great for language tasks.",
-    "gpt-4.1-nano": "Ultra-cheap and fast, best for very lightweight checks.",
-    "gpt-4o-mini":  "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4-turbo":  "Very powerful and expensive — best for complex, high-value use cases."
+    "gpt-3.5-turbo": "Cheapest, decent for basic tasks",
+    "gpt-4.1-mini":  "Good balance of cost & reasoning",
+    "gpt-4.1-nano":  "Ultra‑cheap & fast for lightweight checks",
+    "gpt-4o-mini":   "Better quality than 4.1‑mini, still affordable",
+    "gpt-4-turbo":   "Powerful but pricey – for complex jobs",
 }
 
-# ---- Main Page Layout ----
-st.markdown("<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; font-size:16px;'>Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model.</p>", unsafe_allow_html=True)
+# ──────────────────────────────── 4 · TOP‑LEVEL UI (title, key, file)
+st.markdown("<h1>📄 Flexible AI Product Data Checker with Cost Estimate</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;font-size:16px'>Process a CSV row‑by‑row with OpenAI. Pick columns, choose a prompt, pick a model.</p>", unsafe_allow_html=True)
 
-# Using columns to separate the API key entry and file upload
-col1, col2 = st.columns(2)
-with col1:
-    # 1. API Key Entry
-    api_key_input = st.text_input("🔑 Enter your OpenAI API Key", type="password")
-    if not api_key_input:
-        st.warning("Please enter your OpenAI API key to proceed.")
+c1, c2 = st.columns(2)
+with c1:
+    api_key = st.text_input("🔑 Enter your OpenAI API key", type="password")
+    if not api_key:
+        st.warning("Please enter your API key to continue.")
         st.stop()
-    # Initialize the new OpenAI client
-    client = OpenAI(api_key=api_key_input)
-
-with col2:
-    # 2. File Upload
-    uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
-
-# 3. Column Selection
-st.subheader("📊 Select up to 3 CSV columns to pass to GPT")
-field1 = st.text_input("Field 1 Column Name (e.g. 'sku_id')", value="sku_id")
-field2 = st.text_input("Field 2 Column Name (e.g. 'ingredients')", value="ingredients")
-field3 = st.text_input("Field 3 Column Name (e.g. 'name')", value="name")
-st.markdown("---")
+    client = OpenAI(api_key=api_key)
+with c2:
+    uploaded = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
 #############################
 # Pre-Written Prompts       #
@@ -394,191 +338,103 @@ PROMPT_OPTIONS = {
     }
 }
 
-# 4. Choose a Pre-Written Prompt
+# ──────────────────────────────── 6 · PROMPT & MODEL SELECTORS
 st.subheader("💬 Choose a Prompt")
-prompt_choice = st.selectbox(
-    "Select a pre-written prompt or 'Custom':",
-    list(PROMPT_OPTIONS.keys()),
-    index=0
-)
+choice = st.selectbox("Prompt:", list(PROMPT_OPTIONS.keys()), index=0)
+sel = PROMPT_OPTIONS[choice]
+user_prompt = st.text_area("✍️ Prompt text", value=sel["prompt"], height=200)
+st.markdown(f"**Prompt Info:** {sel['description']}")
 
-# Extract chosen prompt details
-selected_prompt_data = PROMPT_OPTIONS[prompt_choice]
-selected_prompt_text = selected_prompt_data["prompt"]
-recommended_model = selected_prompt_data["recommended_model"]
-prompt_description = selected_prompt_data["description"]
-
-st.markdown(f"**Prompt Info:** {prompt_description}")
-
-# 5. Model Selector (default to recommended model, but user can override)
-all_model_keys = list(MODEL_OPTIONS.keys())
-default_index = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
-model_choice = st.selectbox("🧠 Choose GPT model", all_model_keys, index=default_index)
+models = list(MODEL_OPTIONS.keys())
+model_choice = st.selectbox("🧠 GPT model", models, index=models.index(sel["recommended_model"]))
 st.markdown(f"**Model Info:** {MODEL_OPTIONS[model_choice]}")
 st.markdown("---")
 
-# 6. User Prompt Text Area (auto-filled if a pre-written prompt is selected)
-user_prompt = st.text_area(
-    "✍️ Your prompt for GPT",
-    value=selected_prompt_text,
-    height=200
-)
-
-# ---------- Main Execution Logic ----------
-if uploaded_file and user_prompt.strip():
-    df = pd.read_csv(uploaded_file, dtype=str)
+# ──────────────────────────────── 7 · MAIN EXECUTION
+if uploaded and user_prompt.strip():
+    df = pd.read_csv(uploaded, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
 
-    # Validate columns
-    cols_to_use = [c.strip() for c in [field1, field2, field3] if c.strip() in df.columns]
-    for c in [field1, field2, field3]:
-        if c.strip() not in df.columns:
-            st.warning(f"Column '{c}' not found in CSV. It won't be used.")
-
-    if not cols_to_use:
-        st.error("No valid columns found for GPT. Please check your column names.")
+    # 7.1 Column picker
+    st.subheader("📊 Select columns to pass to GPT")
+    default_cols = [c for c in ("sku_id","name","size","ingredients") if c in df.columns]
+    cols = st.multiselect("Columns:", df.columns.tolist(), default=default_cols or df.columns[:3])
+    if not cols:
+        st.error("Please select at least one column.")
         st.stop()
 
-    # Display estimated cost
-    cost_est = estimate_cost(model_choice, df, user_prompt, cols_to_use)
-    st.markdown(
-        f"<div style='padding:10px; background-color:#2a2a2a; color:#ffffff; border-radius:5px;'>"
-        f"<strong>Estimated Cost:</strong> ${cost_est:0.4f} (rough estimate based on token usage)"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    # 7.2 Cost estimate
+    cost = estimate_cost(model_choice, df, user_prompt, cols)
+    st.markdown(f"<div style='padding:10px;background:#2a2a2a;color:#fff;border-radius:5px'>Estimated Cost: ${cost:0.4f}</div>", unsafe_allow_html=True)
 
-    # Create gauge placeholder before starting the loop
+    # 7.3 Run button
     gauge_placeholder = st.empty()
-
-    # Button to run GPT
     if st.button("🚀 Run GPT on CSV"):
         with st.spinner("Processing with GPT..."):
-            progress_bar = st.progress(0)
-            progress_text = st.empty()
             n_rows = len(df)
-            results = []
-            failed_rows = []
-            rolling_log = []
+            progress_bar = st.progress(0)
+            progress_txt = st.empty()
             log_placeholder = st.empty()
+            rolling_log = []
+            results = []
+            failed = []
 
-
-            # Processing loop
             for idx, row in df.iterrows():
-                row_data = {c: row.get(c, "") for c in cols_to_use}
+                row_data = {c: row.get(c, "") for c in cols}
                 content = ""
-
                 try:
-                    response = client.chat.completions.create(
+                    resp = client.chat.completions.create(
                         model=model_choice,
+                        temperature=0.0,
                         messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a JSON-producing assistant. "
-                                    "No placeholders or how-to instructions — only return valid JSON."
-                                )
-                            },
-                            {
-                                "role": "user",
-                                "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
-                            }
+                            {"role":"system","content":"You are a JSON‑producing assistant. Return valid JSON only."},
+                            {"role":"user","content":f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data,ensure_ascii=False)}"},
                         ],
-                        temperature=0.0
                     )
-                    content = response.choices[0].message.content.strip()
-
-                    # Clean up any triple-backtick code fences if present
+                    content = resp.choices[0].message.content.strip()
+                    # strip markdown fences if needed
                     if content.startswith("```"):
-                        parts = content.split("```", maxsplit=2)
-                        content = parts[1].strip()
-                        if content.startswith("json"):
-                            content = content[len("json"):].strip()
-                        if "```" in content:
-                            content = content.split("```", maxsplit=1)[0].strip()
-
-                    # Attempt to parse JSON
+                        chunks = content.split("```")
+                        content = chunks[1].lstrip("json").strip() if len(chunks)>1 else content
                     parsed = json.loads(content)
                     results.append(parsed)
-
-                    # Update rolling log
-                    rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
-                    if len(rolling_log) > 20:
-                        rolling_log = rolling_log[-20:]
-
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
+                    rolling_log.append(f"Row {idx+1}: {json.dumps(parsed)}")
                 except Exception as e:
-                    failed_rows.append(idx)
-                    error_result = {
-                        "error": f"Failed to process row {idx}: {e}",
-                        "raw_output": content if content else "No content returned"
-                    }
-                    results.append(error_result)
+                    failed.append(idx)
+                    results.append({"error":str(e),"raw_output":content})
+                    rolling_log.append(f"Row {idx+1}: ERROR - {e}")
+                # keep last 20 log lines
+                if len(rolling_log) > 20:
+                    rolling_log = rolling_log[-20:]
+                log_placeholder.markdown("<h4>📝 Recent Outputs (last 20)</h4><pre style='background:#f0f0f0;padding:10px;border-radius:5px;max-height:400px;overflow:auto'>"+"\n".join(rolling_log)+"</pre>", unsafe_allow_html=True)
 
-                    # Update rolling log with error
-                    rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
-                    if len(rolling_log) > 20:
-                        rolling_log = rolling_log[-20:]
-
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
-
-                progress = (idx + 1) / n_rows
+                progress = (idx+1)/n_rows
                 progress_bar.progress(progress)
-                progress_text.markdown(
-                    f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
-                    unsafe_allow_html=True
-                )
+                progress_txt.markdown(f"<h4 style='text-align:center'>Processed {idx+1}/{n_rows} ({progress*100:.1f}%)</h4>", unsafe_allow_html=True)
 
-                # Update the gauge indicator
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=progress * 100,
-                    title={'text': "Progress"},
-                    gauge={
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "#4a90e2"},
-                        'steps': [
-                            {'range': [0, 50], 'color': "#e0e0e0"},
-                            {'range': [50, 100], 'color': "#c8c8c8"}
-                        ]
-                    }
-                ))
+                fig = go.Figure(go.Indicator(mode="gauge+number", value=progress*100, title={"text":"Progress"}, gauge={"axis":{"range":[0,100]},"bar":{"color":"#4a90e2"}}))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
-            # Combine original CSV with GPT results
+            # 7.4 Merge & downloads
             results_df = pd.DataFrame(results)
             final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
             st.success("✅ GPT processing complete!")
             st.markdown("### 🔍 Final Result")
             st.dataframe(final_df)
 
-            # Download buttons
             st.download_button(
                 "⬇️ Download Full Results CSV",
                 final_df.to_csv(index=False).encode("utf-8"),
                 "gpt_output.csv",
-                "text/csv"
+                "text/csv",
             )
-
-            if failed_rows:
-                failed_df = df.iloc[failed_rows].copy()
-                st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
+            if failed:
+                failed_df = df.iloc[failed].copy()
+                st.warning(f"{len(failed)} rows failed. Download and retry.")
                 st.download_button(
                     "⬇️ Download Failed Rows CSV",
                     failed_df.to_csv(index=False).encode("utf-8"),
                     "gpt_failed_rows.csv",
-                    "text/csv"
+                    "text/csv",
                 )
