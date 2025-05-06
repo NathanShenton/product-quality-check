@@ -133,13 +133,6 @@ with col2:
     # 2. File Upload
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
-# 3. Column Selection
-st.subheader("📊 Select up to 3 CSV columns to pass to GPT")
-field1 = st.text_input("Field 1 Column Name (e.g. 'sku_id')", value="sku_id")
-field2 = st.text_input("Field 2 Column Name (e.g. 'ingredients')", value="ingredients")
-field3 = st.text_input("Field 3 Column Name (e.g. 'name')", value="name")
-st.markdown("---")
-
 #############################
 # Pre-Written Prompts       #
 #############################
@@ -429,16 +422,25 @@ if uploaded_file and user_prompt.strip():
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
+    
+    # 3. Dynamic Column Selector (up to 10 columns)
+    st.subheader("📊 Select up to 10 CSV columns to pass to GPT")
+    selected_columns = st.multiselect(
+        "Use in Processing",
+        options=df.columns.tolist(),
+        default=df.columns.tolist()[:3],      # pre-select the first 3 by default
+        help="Pick between 1 and 10 columns."
+    )
 
-    # Validate columns
-    cols_to_use = [c.strip() for c in [field1, field2, field3] if c.strip() in df.columns]
-    for c in [field1, field2, field3]:
-        if c.strip() not in df.columns:
-            st.warning(f"Column '{c}' not found in CSV. It won't be used.")
-
-    if not cols_to_use:
-        st.error("No valid columns found for GPT. Please check your column names.")
+    # Enforce user picks
+    if not selected_columns:
+        st.error("⚠️ Please select at least one column.")
         st.stop()
+    if len(selected_columns) > 10:
+        st.error("⚠️ You can select at most 10 columns. Please deselect some.")
+        st.stop()
+
+    cols_to_use = selected_columns
 
     # Display estimated cost
     cost_est = estimate_cost(model_choice, df, user_prompt, cols_to_use)
