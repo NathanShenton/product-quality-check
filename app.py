@@ -261,7 +261,7 @@ PROMPT_OPTIONS = {
         "}\n\n"
 
         "USER MESSAGE:\n"
-        "- ingredients: {Other Ingredients}\n"
+        "- ingredients: {Other ingredients}\n"
         "- claims:      {Free From}\n\n"
 
         "STEPS (the only logic you may perform):\n"
