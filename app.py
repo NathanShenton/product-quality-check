@@ -261,8 +261,8 @@ PROMPT_OPTIONS = {
         "}\n\n"
 
         "USER MESSAGE:\n"
-        "- ingredients: {full_ingredients}\n"
-        "- claims:      {free_from}\n\n"
+        "- ingredients: {Other Ingredients}\n"
+        "- claims:      {Free From}\n\n"
 
         "STEPS (the only logic you may perform):\n"
         "1. Lower-case and strip HTML/punctuation from ingredients.\n"
