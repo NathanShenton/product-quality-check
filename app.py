@@ -235,43 +235,45 @@ PROMPT_OPTIONS = {
         "description": "Maps each product to its Schedule 1 PMO category and the correct unit price basis (e.g. per 100 g, per 10 ml)."
     },
     "Free From Conflict Validator": {
-        "prompt": (
-            "SYSTEM MESSAGE:\n"
-            "You are a careful label compliance assistant that checks whether a product's 'free_from' claims "
-            "are consistent with its 'full_ingredients' list. You are extremely thorough, capable of understanding "
-            "typos, HTML tags, formatting inconsistencies, and synonyms. You will flag any potential mismatches between "
-            "claimed exclusions and ingredients.\n\n"
+    "prompt": (
+        "SYSTEM MESSAGE:\n"
+        "You are a careful label compliance assistant that checks whether a product's 'free_from' claims "
+        "are consistent with its 'full_ingredients' list. You are extremely thorough, capable of understanding "
+        "typos, HTML tags, formatting inconsistencies, and synonyms. You will flag any potential mismatches between "
+        "claimed exclusions and ingredients.\n\n"
 
-            "USER MESSAGE:\n"
-            "Review the following product data:\n"
-            "- full_ingredients: {full_ingredients}\n"
-            "- free_from: {free_from}\n\n"
+        "USER MESSAGE:\n"
+        "Review the following product data:\n"
+        "- full_ingredients: {full_ingredients}\n"
+        "- free_from: {free_from}\n\n"
 
-            "Your task is to determine if there are any potential conflicts between the ingredients and the claims.\n"
-            "If all claims appear valid and not contradicted by the ingredient list, output a single JSON object:\n"
-            "{\"status\": \"ok\"}\n\n"
+        "Your task is to determine if there are any potential conflicts between the ingredients and the claims.\n"
+        "If all claims appear valid and not contradicted by the ingredient list, output a single JSON object:\n"
+        "{\n  \"status\": \"ok\"\n}\n\n"
 
-            "If any conflicts are found, return an array of flattened JSON objects, one per conflict, like this:\n"
-            "[\n"
-            "  {\"status\": \"conflict\", \"claim\": \"<free_from claim>\", \"ingredient\": \"<conflicting ingredient>\"},\n"
-            "  ...\n"
-            "]\n\n"
+        "If any conflicts are found, return a single flattened JSON object like this:\n"
+        "{\n"
+        "  \"status\": \"conflict\",\n"
+        "  \"conflict_summary\": \"claim1->ingredient1 | claim2->ingredient2\"\n"
+        "}\n\n"
 
-            "**Important Instructions:**\n"
-            "1. Supported free_from claims include: Free From, Dairy Free, SLS Free, Paraben Free, Microplastics Free, "
-            "Sesame Seed Free, Egg Free, Wheat Free, Soya Free, Milk Free, Gluten Free, Celery Free, Cereal Free, "
-            "Crustaceans Free, Fish Free, Kiwi Free, Lupin Free, Mollusc Free, Mustard Free, Sulphites Free, Nut Free, "
-            "Peanut Free, Peanut & Nut Free, Alcohol Free, Palm Oil Free, Parfum Free, Fluoride Free.\n"
-            "2. Treat “Peanut & Nut Free” as two claims: “Peanut Free” and “Nut Free”.\n"
-            "3. Normalize HTML, remove special characters, and handle plural/singular variations.\n"
-            "4. Detect typos and ingredient synonyms (e.g., “lactose” = milk, “whey” = dairy, “casein” = dairy, "
-            "“gluten” = wheat, etc.).\n"
-            "5. Do not return ingredients or claims that are not clearly conflicting.\n"
-            "6. Return 'ok' only if no issues are confidently found.\n"
-            ),
-        "recommended_model": "gpt-4-turbo",
-        "description": "Checks product 'free_from' claims for conflicts against 'full_ingredients', accounting for typos, synonyms, and formatting irregularities."
-    },
+        "**Important Instructions:**\n"
+        "1. Supported free_from claims include: Free From, Dairy Free, SLS Free, Paraben Free, Microplastics Free, "
+        "Sesame Seed Free, Egg Free, Wheat Free, Soya Free, Milk Free, Gluten Free, Celery Free, Cereal Free, "
+        "Crustaceans Free, Fish Free, Kiwi Free, Lupin Free, Mollusc Free, Mustard Free, Sulphites Free, Nut Free, "
+        "Peanut Free, Peanut & Nut Free, Alcohol Free, Palm Oil Free, Parfum Free, Fluoride Free.\n"
+        "2. Treat “Peanut & Nut Free” as two claims: “Peanut Free” and “Nut Free”.\n"
+        "3. Normalize HTML, remove special characters, and handle plural/singular variations.\n"
+        "4. Detect typos and ingredient synonyms (e.g., “lactose” = milk, “whey” = dairy, “casein” = dairy, "
+        "“gluten” = wheat, etc.).\n"
+        "5. Do not return ingredients or claims that are not clearly conflicting.\n"
+        "6. Return 'ok' only if no issues are confidently found.\n"
+        "7. Flatten all conflicts into a single string using '->' between claim and ingredient, and separate each with ' | '.\n"
+        "8. Return valid JSON only – no arrays, markdown, or extra commentary."
+    ),
+    "recommended_model": "gpt-4-turbo",
+    "description": "Checks product 'free_from' claims for conflicts against 'full_ingredients', outputting CSV-safe conflict summaries."
+},
     "French Sell Copy Translator": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
