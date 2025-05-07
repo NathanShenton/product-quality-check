@@ -234,48 +234,39 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Maps each product to its Schedule 1 PMO category and the correct unit price basis (e.g. per 100 g, per 10 ml)."
     },
-    "Free From Conflict Validator": {
+    "Free From Quick-Check": {
     "prompt": (
         "SYSTEM MESSAGE:\n"
-        "You are a deterministic label-compliance engine.  You NEVER invent associations.\n"
-        "You must behave like this algorithm:\n"
-        "  1. Load the CLAIM_MAP JSON below (it is the only source of truth).\n"
-        "  2. Lower-case and strip punctuation/HTML from full_ingredients and free_from.\n"
-        "  3. For each individual claim in free_from, look up the allowed ingredient list\n"
-        "     in CLAIM_MAP[claim].\n"
-        "  4. If ANY of those ingredients appear as whole words in full_ingredients,\n"
-        "     record a conflict pair claim->ingredient (use the first word that matches).\n"
-        "  5. NEVER record a conflict for an ingredient that is not listed under that\n"
-        "     claim in CLAIM_MAP.\n"
-        "  6. When done:\n"
-        "       • If no conflicts, output exactly: {\"status\": \"ok\"}\n"
-        "       • Else output: {\"status\": \"conflict\", \"conflict_summary\": \"c1->i1 | c2->i2\"}\n"
-        "  7. Output must be valid minified JSON.  No arrays, no markdown, no extra keys.\n\n"
-
-        "CLAIM_MAP = {\n"
-        "  \"gluten free\": [\"gluten\",\"wheat\",\"barley\",\"rye\",\"oats\",\"spelt\",\"kamut\",\"triticale\",\"malt\",\"malt extract\",\"malt flour\",\"semolina\",\"durum\"],\n"
-        "  \"dairy free\":  [\"milk\",\"lactose\",\"whey\",\"casein\",\"cream\",\"cheese\",\"yoghurt\",\"butter\",\"curds\"],\n"
-        "  \"milk free\":   [\"milk\",\"lactose\",\"whey\",\"casein\",\"cream\",\"cheese\",\"yoghurt\",\"butter\",\"curds\"],\n"
-        "  \"egg free\":    [\"egg\",\"eggs\",\"albumin\",\"ovalbumin\",\"egg white\",\"egg yolk\"],\n"
-        "  \"soya free\":   [\"soy\",\"soya\",\"soja\",\"soy protein\",\"soya protein\",\"soy lecithin\",\"lecithin (soya)\",\"soya flour\",\"soy protein isolate\"],\n"
-        "  \"nut free\":    [\"almond\",\"hazelnut\",\"walnut\",\"cashew\",\"pecan\",\"pistachio\",\"macadamia\",\"brazil nut\",\"chestnut\"],\n"
-        "  \"peanut free\": [\"peanut\",\"peanuts\",\"peanut butter\",\"peanut paste\",\"groundnut\",\"arachis\"],\n"
-        "  \"sesame seed free\": [\"sesame\",\"sesame seed\",\"tahini\"],\n"
-        "  \"celery free\": [\"celery\",\"celeriac\"],\n"
-        "  \"fish free\":   [\"fish\",\"anchovy\",\"cod\",\"haddock\",\"tuna\",\"salmon\",\"sardine\",\"mackerel\",\"herring\"],\n"
-        "  \"crustaceans free\": [\"prawn\",\"prawns\",\"shrimp\",\"crab\",\"lobster\",\"crayfish\"],\n"
-        "  \"mollusc free\": [\"mussel\",\"squid\",\"octopus\",\"clam\",\"oyster\",\"snail\",\"whelk\",\"cockle\"],\n"
-        "  \"lupin free\":  [\"lupin\",\"lupine\"],\n"
-        "  \"mustard free\": [\"mustard\",\"mustard seed\",\"mustard flour\"],\n"
-        "  \"sulphites free\": [\"sulphite\",\"sulfur dioxide\",\"e220\",\"e221\",\"e222\",\"e223\",\"e224\",\"e225\",\"e226\",\"e227\",\"e228\"]\n"
-        "}\n\n"
+        "You are an allergen-compliance screener.  Your ONLY job is to decide if any obvious conflict exists "
+        "between a product’s declared 'free_from' claims and its 'full_ingredients'.  "
+        "You are cautious: when in doubt you choose 'needs_review'.  "
+        "You output valid minified JSON only, never markdown, never extra keys.\n\n"
 
         "USER MESSAGE:\n"
         "- full_ingredients: {full_ingredients}\n"
-        "- free_from: {free_from}\n"
+        "- free_from: {free_from}\n\n"
+
+        "Decision rules (strict):\n"
+        "1. Look ONLY for direct contradictions—an ingredient that clearly belongs to the same allergen category as a claim.\n"
+        "   • Examples that always trigger review:\n"
+        "     – 'wheat', 'barley', 'rye', 'oats' vs claim containing 'Gluten Free' or 'Cereal Free'.\n"
+        "     – 'milk', 'lactose', 'whey', 'casein' vs 'Dairy Free' or 'Milk Free'.\n"
+        "     – 'soy', 'soya', 'lecithin (soya)' vs 'Soya Free'.\n"
+        "     – 'peanut', 'groundnut', 'arachis' vs 'Peanut Free'.\n"
+        "     – named tree-nuts vs 'Nut Free'.\n"
+        "     – any of the 14 EU allergens vs a matching 'Free' claim.\n"
+        "2. Ignore words that merely *contain* an allergen string (e.g. 'wheatgrass', 'coconut').\n"
+        "3. Ignore 'may contain' or 'traces of' statements—they do NOT count as conflicts.\n"
+        "4. If you cannot find a clear contradiction, output {\"status\":\"ok\",\"reason\":\"\"}.\n"
+        "5. If you DO find at least one clear contradiction, output "
+        "{\"status\":\"needs_review\",\"reason\":\"<the first clear conflict you saw>\"}.\n\n"
+
+        "Output examples ONLY:\n"
+        "✔ When fine:  {\"status\":\"ok\",\"reason\":\"\"}\n"
+        "✔ When conflict: {\"status\":\"needs_review\",\"reason\":\"Gluten Free claim but ingredient contains wheat\"}\n"
     ),
     "recommended_model": "gpt-4-turbo",
-    "description": "Fully deterministic claim-vs-ingredient validator using an embedded JSON mapping and flat conflict output."
+    "description": "Fast binary screen: flags SKUs for manual review when any obvious allergen claim conflict is detected."
 },
     "French Sell Copy Translator": {
         "prompt": (
