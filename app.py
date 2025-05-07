@@ -237,36 +237,44 @@ PROMPT_OPTIONS = {
     "Free From Quick-Check": {
     "prompt": (
         "SYSTEM MESSAGE:\n"
-        "You are an allergen-compliance screener.  Your ONLY job is to decide if any obvious conflict exists "
-        "between a product’s declared 'free_from' claims and its 'full_ingredients'.  "
-        "You are cautious: when in doubt you choose 'needs_review'.  "
-        "You output valid minified JSON only, never markdown, never extra keys.\n\n"
+        "You are a rule-based compliance screener.  Only two outputs are allowed:\n"
+        " • {\"status\":\"ok\",\"reason\":\"\"}\n"
+        " • {\"status\":\"needs_review\",\"reason\":\"<short text>\"}\n"
+        "You MUST follow the vocabulary table below: a claim can only be challenged\n"
+        "if an ingredient token appears in its dedicated list.  Anything else is ignored.\n\n"
+
+        "VOCAB = {\n"
+        "  \"gluten free\": [\"wheat\",\"barley\",\"rye\",\"oats\",\"spelt\",\"kamut\",\"triticale\",\"gluten\",\"malt\",\"semolina\"],\n"
+        "  \"dairy free\":  [\"milk\",\"lactose\",\"whey\",\"casein\",\"cheese\",\"butter\",\"cream\"],\n"
+        "  \"egg free\":    [\"egg\",\"albumin\",\"ovalbumin\"],\n"
+        "  \"soya free\":   [\"soy\",\"soya\",\"soja\",\"lecithin (soya)\",\"soy lecithin\"],\n"
+        "  \"peanut free\": [\"peanut\",\"peanuts\",\"groundnut\",\"arachis\"],\n"
+        "  \"nut free\":    [\"almond\",\"hazelnut\",\"walnut\",\"cashew\",\"pecan\",\"pistachio\",\"macadamia\",\"brazil nut\"],\n"
+        "  \"sesame seed free\": [\"sesame\",\"tahini\"],\n"
+        "  \"fish free\":   [\"fish\",\"cod\",\"haddock\",\"tuna\",\"salmon\",\"sardine\",\"anchovy\"],\n"
+        "  \"crustaceans free\": [\"prawn\",\"shrimp\",\"crab\",\"lobster\"],\n"
+        "  \"mollusc free\": [\"mussel\",\"oyster\",\"clam\",\"squid\",\"octopus\"],\n"
+        "  \"celery free\": [\"celery\",\"celeriac\"],\n"
+        "  \"mustard free\": [\"mustard\"],\n"
+        "  \"sulphites free\": [\"sulphite\",\"sulfur dioxide\",\"e220\",\"e221\",\"e222\",\"e223\",\"e224\",\"e225\",\"e226\",\"e227\",\"e228\"],\n"
+        "  \"lupin free\": [\"lupin\",\"lupine\"]\n"
+        "}\n\n"
 
         "USER MESSAGE:\n"
-        "- full_ingredients: {full_ingredients}\n"
-        "- free_from: {free_from}\n\n"
+        "- ingredients: {full_ingredients}\n"
+        "- claims:      {free_from}\n\n"
 
-        "Decision rules (strict):\n"
-        "1. Look ONLY for direct contradictions—an ingredient that clearly belongs to the same allergen category as a claim.\n"
-        "   • Examples that always trigger review:\n"
-        "     – 'wheat', 'barley', 'rye', 'oats' vs claim containing 'Gluten Free' or 'Cereal Free'.\n"
-        "     – 'milk', 'lactose', 'whey', 'casein' vs 'Dairy Free' or 'Milk Free'.\n"
-        "     – 'soy', 'soya', 'lecithin (soya)' vs 'Soya Free'.\n"
-        "     – 'peanut', 'groundnut', 'arachis' vs 'Peanut Free'.\n"
-        "     – named tree-nuts vs 'Nut Free'.\n"
-        "     – any of the 14 EU allergens vs a matching 'Free' claim.\n"
-        "2. Ignore words that merely *contain* an allergen string (e.g. 'wheatgrass', 'coconut').\n"
-        "3. Ignore 'may contain' or 'traces of' statements—they do NOT count as conflicts.\n"
-        "4. If you cannot find a clear contradiction, output {\"status\":\"ok\",\"reason\":\"\"}.\n"
-        "5. If you DO find at least one clear contradiction, output "
-        "{\"status\":\"needs_review\",\"reason\":\"<the first clear conflict you saw>\"}.\n\n"
-
-        "Output examples ONLY:\n"
-        "✔ When fine:  {\"status\":\"ok\",\"reason\":\"\"}\n"
-        "✔ When conflict: {\"status\":\"needs_review\",\"reason\":\"Gluten Free claim but ingredient contains wheat\"}\n"
+        "STEPS (the only logic you may perform):\n"
+        "1. Lower-case and strip HTML/punctuation from ingredients.\n"
+        "2. Split into word tokens.\n"
+        "3. For each claim, look up VOCAB[claim].\n"
+        "4. If any token from that list is present → needs_review (reason: \"<Claim> conflict: <token>\").\n"
+        "5. If zero conflicts → ok.\n"
+        "6. Never flag tokens not in the list, even if they look related (e.g. lactose is *not* gluten).\n"
+        "7. Output exactly one JSON object, minified.\n"
     ),
     "recommended_model": "gpt-4-turbo",
-    "description": "Fast binary screen: flags SKUs for manual review when any obvious allergen claim conflict is detected."
+    "description": "Binary screener: flags SKUs only when a claim-specific keyword appears; no cross-claim leakage."
 },
     "French Sell Copy Translator": {
         "prompt": (
@@ -500,76 +508,71 @@ if uploaded_file and user_prompt.strip():
             log_placeholder = st.empty()
 
 
-            # Processing loop
-            for idx, row in df.iterrows():
-                row_data = {c: row.get(c, "") for c in cols_to_use}
-                content = ""
+            # ---------- Processing loop ----------
+for idx, row in df.iterrows():
+    row_data = {c: row.get(c, "") for c in cols_to_use}
+    content = ""
 
-                try:
-                    response = client.chat.completions.create(
-                        model=model_choice,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a JSON-producing assistant. "
-                                    "No placeholders or how-to instructions — only return valid JSON."
-                                )
-                            },
-                            {
-                                "role": "user",
-                                "content": f"{user_prompt}\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
-                            }
-                        ],
-                        temperature=0.0
-                    )
-                    content = response.choices[0].message.content.strip()
+    try:
+        # 1 – split the stored prompt into true roles
+        if "USER MESSAGE:" in user_prompt:
+            system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
+        else:                           # fallback: whole prompt is system
+            system_txt, user_txt = user_prompt, ""
 
-                    # Clean up any triple-backtick code fences if present
-                    if content.startswith("```"):
-                        parts = content.split("```", maxsplit=2)
-                        content = parts[1].strip()
-                        if content.startswith("json"):
-                            content = content[len("json"):].strip()
-                        if "```" in content:
-                            content = content.split("```", maxsplit=1)[0].strip()
+        system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
+        user_txt = user_txt.strip().format(**row_data)
+        user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                    # Attempt to parse JSON
-                    parsed = json.loads(content)
-                    results.append(parsed)
+        # 2 – call OpenAI chat
+        response = client.chat.completions.create(
+            model=model_choice,
+            messages=[
+                {"role": "system", "content": system_txt},
+                {"role": "user",   "content": user_txt}
+            ],
+            temperature=0.0,
+            top_p=0
+        )
+        content = response.choices[0].message.content.strip()
 
-                    # Update rolling log
-                    rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
-                    if len(rolling_log) > 20:
-                        rolling_log = rolling_log[-20:]
+        # 3 – strip any ``` fences
+        if content.startswith("```"):
+            parts = content.split("```", maxsplit=2)
+            content = parts[1].lstrip("json").strip().split("```")[0].strip()
 
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
-                except Exception as e:
-                    failed_rows.append(idx)
-                    error_result = {
-                        "error": f"Failed to process row {idx}: {e}",
-                        "raw_output": content if content else "No content returned"
-                    }
-                    results.append(error_result)
+        # 4 – parse JSON
+        parsed = json.loads(content)
+        results.append(parsed)
 
-                    # Update rolling log with error
-                    rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
-                    if len(rolling_log) > 20:
-                        rolling_log = rolling_log[-20:]
+        # 5 – rolling log (last 20 rows)
+        rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
+        rolling_log = rolling_log[-20:]
+        log_placeholder.markdown(
+            "<h4>📝 Recent Outputs (Last 20)</h4>"
+            "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+            + "\n".join(rolling_log) +
+            "</pre>",
+            unsafe_allow_html=True
+        )
 
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>" +
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
+    except Exception as e:
+        failed_rows.append(idx)
+        error_result = {
+            "error": f"Failed to process row {idx}: {e}",
+            "raw_output": content if content else "No content returned"
+        }
+        results.append(error_result)
+
+        rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
+        rolling_log = rolling_log[-20:]
+        log_placeholder.markdown(
+            "<h4>📝 Recent Outputs (Last 20)</h4>"
+            "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+            + "\n".join(rolling_log) +
+            "</pre>",
+            unsafe_allow_html=True
+        )
 
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
