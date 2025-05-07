@@ -507,81 +507,79 @@ if uploaded_file and user_prompt.strip():
             rolling_log = []
             log_placeholder = st.empty()
 
-
             # ---------- Processing loop ----------
-for idx, row in df.iterrows():
-    row_data = {c: row.get(c, "") for c in cols_to_use}
-    content = ""
+            for idx, row in df.iterrows():
+                row_data = {c: row.get(c, "") for c in cols_to_use}
+                content = ""
 
-    try:
-        # 1 – split the stored prompt into true roles
-        if "USER MESSAGE:" in user_prompt:
-            system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
-        else:                           # fallback: whole prompt is system
-            system_txt, user_txt = user_prompt, ""
+                try:
+                    # 1 – split the stored prompt into true roles
+                    if "USER MESSAGE:" in user_prompt:
+                        system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
+                    else:                       # fallback: whole prompt is system
+                        system_txt, user_txt = user_prompt, ""
 
-        system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
-        user_txt = user_txt.strip().format(**row_data)
-        user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                    system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
+                    user_txt = user_txt.strip().format(**row_data)
+                    user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-        # 2 – call OpenAI chat
-        response = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {"role": "system", "content": system_txt},
-                {"role": "user",   "content": user_txt}
-            ],
-            temperature=0.0,
-            top_p=0
-        )
-        content = response.choices[0].message.content.strip()
+                    # 2 – call OpenAI chat
+                    response = client.chat.completions.create(
+                        model=model_choice,
+                        messages=[
+                            {"role": "system", "content": system_txt},
+                            {"role": "user",   "content": user_txt}
+                        ],
+                        temperature=0.0,
+                        top_p=0
+                    )
+                    content = response.choices[0].message.content.strip()
 
-        # 3 – strip any ``` fences
-        if content.startswith("```"):
-            parts = content.split("```", maxsplit=2)
-            content = parts[1].lstrip("json").strip().split("```")[0].strip()
+                    # 3 – strip any ``` fences
+                    if content.startswith("```"):
+                        parts = content.split("```", maxsplit=2)
+                        content = parts[1].lstrip("json").strip().split("```")[0].strip()
 
-        # 4 – parse JSON
-        parsed = json.loads(content)
-        results.append(parsed)
+                    # 4 – parse JSON
+                    parsed = json.loads(content)
+                    results.append(parsed)
 
-        # 5 – rolling log (last 20 rows)
-        rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
-        rolling_log = rolling_log[-20:]
-        log_placeholder.markdown(
-            "<h4>📝 Recent Outputs (Last 20)</h4>"
-            "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-            + "\n".join(rolling_log) +
-            "</pre>",
-            unsafe_allow_html=True
-        )
+                    # 5 – rolling log (last 20 rows)
+                    rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
+                    rolling_log = rolling_log[-20:]
+                    log_placeholder.markdown(
+                        "<h4>📝 Recent Outputs (Last 20)</h4>"
+                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                        + "\n".join(rolling_log) +
+                        "</pre>",
+                        unsafe_allow_html=True
+                    )
 
-    except Exception as e:
-        failed_rows.append(idx)
-        error_result = {
-            "error": f"Failed to process row {idx}: {e}",
-            "raw_output": content if content else "No content returned"
-        }
-        results.append(error_result)
+                except Exception as e:
+                    failed_rows.append(idx)
+                    error_result = {
+                        "error": f"Failed to process row {idx}: {e}",
+                        "raw_output": content if content else "No content returned"
+                    }
+                    results.append(error_result)
 
-        rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
-        rolling_log = rolling_log[-20:]
-        log_placeholder.markdown(
-            "<h4>📝 Recent Outputs (Last 20)</h4>"
-            "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-            + "\n".join(rolling_log) +
-            "</pre>",
-            unsafe_allow_html=True
-        )
+                    rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
+                    rolling_log = rolling_log[-20:]
+                    log_placeholder.markdown(
+                        "<h4>📝 Recent Outputs (Last 20)</h4>"
+                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                        + "\n".join(rolling_log) +
+                        "</pre>",
+                        unsafe_allow_html=True
+                    )
 
+                # 6 – update progress UI
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
                 progress_text.markdown(
                     f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                     unsafe_allow_html=True
                 )
-
-                # Update the gauge indicator
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
@@ -596,6 +594,7 @@ for idx, row in df.iterrows():
                     }
                 ))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
+            # ---------- end for loop ----------
 
             # Combine original CSV with GPT results
             results_df = pd.DataFrame(results)
