@@ -326,14 +326,14 @@ PROMPT_OPTIONS = {
             "‘full_ingredients’. Never invent data or guesses.\n\n"
 
             "Return valid JSON in exactly this format:\n"
-            "{{\n"
+            "{{{{\n"                              # doubled braces
             "  \"ingredient_conflicts\": [],\n"
             "  \"overall\": \"Pass\" | \"Fail\"\n"
-            "}}\n\n"
+            "}}}}\n\n"                            # doubled braces
 
             "USER MESSAGE:\n"
             "Evaluate the following ingredient list for vegan compliance:\n"
-            "{full_ingredients}\n\n"
+            "{full_ingredients}\n\n"              # ← keep single-braced placeholder
             "If you find any animal-derived term—examples include but are not limited to: gelatin "
             "(beef, pork, fish), beeswax, whey, honey, lanolin, carmine, shellac, collagen, casein, "
             "egg, milk, lactose, albumin, tallow, anchovy, crab, lobster, oyster sauce—add the exact "
@@ -345,10 +345,11 @@ PROMPT_OPTIONS = {
             "2. Flag ONLY real matches from the provided text—no placeholders or interpretations.\n"
             "3. If any conflict is found, `overall` MUST be \"Fail\".\n"
             "4. Output the JSON object only—no prose, no explanations."
-        ).format(full_ingredients=ingredient_text),
+        ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Validates vegan status solely from ingredient text; flags any animal-derived terms."
     },
+
     "Methylated Vitamin Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
