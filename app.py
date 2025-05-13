@@ -142,6 +142,30 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-3.5-turbo",
         "description": "No pre-written prompt selected."
     },
+    "Gluten Free Contextual Check": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant for high-criticality compliance checking. Your task is to review the ingredient list of a product claimed to be \"gluten free\" and identify any ingredient entries that appear inconsistent with that claim.\n\n"
+            "You must:\n"
+            "1. Consider the context of each ingredient — do not flag just based on keyword matches.\n"
+            "2. Understand phrases like \"gluten free oats\" or \"barley malt extract (gluten removed)\" and evaluate whether the **modifier clearly negates the gluten content**.\n"
+            "3. Only flag ingredients where the gluten presence is **likely or uncertain**, even after context is considered.\n\n"
+            "Return JSON **only** in this format:\n"
+            "{\n"
+            "  \"gluten_conflicts\": [\"exact ingredient(s) causing concern\"],\n"
+            "  \"overall\": \"Pass\" | \"Fail\"\n"
+            "}\n\n"
+            "Examples of gluten-containing ingredients: wheat, rye, barley, oats (unless explicitly gluten free), spelt, kamut, triticale, malt extract, semolina, farro.\n\n"
+            "If you find such an ingredient but it's clearly labeled as gluten free (e.g., \"gluten free oats\"), do **not** flag it.\n\n"
+            "If no conflicting or uncertain ingredients are found, return an empty array and \"Pass\".\n"
+            "No disclaimers or extra commentary — JSON only.\n\n"
+            "USER MESSAGE:\n"
+            "Evaluate the following ingredient list for gluten-related concerns:\n"
+            "{full_ingredients}"
+    ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
+    },
     "Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
