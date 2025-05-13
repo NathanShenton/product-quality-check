@@ -320,35 +320,34 @@ PROMPT_OPTIONS = {
     "Vegan Flag Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant. You only output real validation results based on product origin "
-            "and ingredients. Never invent placeholder text or guesses.\n\n"
-            "Only return JSON in this format:\n"
-            "{\n"
-            "  \"is_animal_origin_flag\": \"Valid\" or \"Invalid\",\n"
-            "  \"ingredient_conflict\": \"None\" or ingredient name,\n"
-            "  \"overall\": \"Pass\" or \"Fail\"\n"
-            "}\n\n"
-            "USER MESSAGE:\n"
-            "This product has been pre-flagged as suitable for vegans based on upstream filters.\n\n"
-            "Validate its vegan status by:\n"
-            "1. Confirming 'is_animal_origin' is 0. If it is not, mark as Invalid.\n"
-            "2. Checking 'full_ingredients' for animal-derived terms like:\n"
-            "   gelatin, beeswax, whey, honey, lanolin, carmine, shellac, collagen, casein, egg, milk, lactose, "
-            "albumin, or similar.\n\n"
-            "Return JSON only, in this format:\n"
+            "You are a JSON-producing assistant performing a high-criticality data audit. "
+            "Your sole task is to verify that a product—already marked ‘suitable for vegans’—contains "
+            "no animal-derived ingredients. Use ONLY the text provided in the field "
+            "‘full_ingredients’. Never invent data or guesses.\n\n"
+
+            "Return valid JSON in exactly this format:\n"
             "{{\n"
-            "  \"is_animal_origin_flag\": \"Valid\" or \"Invalid\",\n"
-            "  \"ingredient_conflict\": \"None\" or ingredient name,\n"
-            "  \"overall\": \"Pass\" or \"Fail\"\n"
+            "  \"ingredient_conflicts\": [],\n"
+            "  \"overall\": \"Pass\" | \"Fail\"\n"
             "}}\n\n"
-            "**Important**:\n"
-            "1. Do not invent placeholder ingredient names.\n"
-            "2. Only flag real ingredient matches from the input.\n"
-            "3. If any conflict is found, overall must be \"Fail\".\n"
-            "4. No disclaimers or instructions—just return valid JSON."
-        ),
+
+            "USER MESSAGE:\n"
+            "Evaluate the following ingredient list for vegan compliance:\n"
+            "{full_ingredients}\n\n"
+            "If you find any animal-derived term—examples include but are not limited to: gelatin "
+            "(beef, pork, fish), beeswax, whey, honey, lanolin, carmine, shellac, collagen, casein, "
+            "egg, milk, lactose, albumin, tallow, anchovy, crab, lobster, oyster sauce—add the exact "
+            "spelling(s) as they appear to the array `ingredient_conflicts` and set `overall` to \"Fail\". "
+            "If none are present, return an empty array and set `overall` to \"Pass\".\n\n"
+
+            "**Important rules**:\n"
+            "1. Matching is case-insensitive, but echo the ingredient exactly as supplied.\n"
+            "2. Flag ONLY real matches from the provided text—no placeholders or interpretations.\n"
+            "3. If any conflict is found, `overall` MUST be \"Fail\".\n"
+            "4. Output the JSON object only—no prose, no explanations."
+        ).format(full_ingredients=ingredient_text),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Checks if product is truly vegan or not, marking conflicts."
+        "description": "Validates vegan status solely from ingredient text; flags any animal-derived terms."
     },
     "Methylated Vitamin Check": {
         "prompt": (
