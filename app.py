@@ -619,20 +619,23 @@ if is_image_prompt:
     st.markdown("### 🖼️ Upload Product Image & crop just the INGREDIENTS panel")
     uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg","jpeg","png"])
     cropped_bytes = None
+
     if uploaded_image:
-        img = Image.open(uploaded_image).convert("RGB")   # Pillow image
-        # --- cropping widget ---
+        img = Image.open(uploaded_image).convert("RGB")
+
+        # --- cropping widget (no live stream) ---
         cropped_img = st_cropper(
             img,
             box_color='#4a90e2',
-            realtime_update=True,
-            aspect_ratio=None,          # free-form
-            return_type="image"         # Pillow image out
+            realtime_update=False,        # ← change here
+            aspect_ratio=None,
+            return_type="image"
         )
-        # convert cropped PIL image -> bytes for GPT
-        buf = io.BytesIO()
-        cropped_img.save(buf, format="PNG")
-        cropped_bytes = buf.getvalue()
+
+        if st.button("✅ Use this crop →"):
+            buf = io.BytesIO()
+            cropped_img.save(buf, format="PNG")
+            cropped_bytes = buf.getvalue()
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
