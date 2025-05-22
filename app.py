@@ -705,7 +705,7 @@ if is_image_prompt and cropped_bytes:
                      "Please choose it above and try again.")
             st.stop()
 
-                try:
+        try:
             html_out = two_pass_extract(cropped_bytes)
 
             if html_out == "IMAGE_UNREADABLE":
