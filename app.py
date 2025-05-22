@@ -81,6 +81,7 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         "gpt-3.5-turbo": (0.0005, 0.0015),
         "gpt-4.1-mini":  (0.0004, 0.0016),
         "gpt-4.1-nano":  (0.0001, 0.0004),
+        "gpt-4o-mini": (0.0025, 0.0075),
         "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
         "gpt-4-turbo":   (0.01,   0.03)
     }
@@ -129,6 +130,68 @@ with col1:
         st.stop()
     # Initialize the new OpenAI client
     client = OpenAI(api_key=api_key_input)
+    
+    # ------------------------------------------------------------------
+# Two-pass image ingredient extractor (add right after client = OpenAI(...))
+# ------------------------------------------------------------------
+def two_pass_extract(image_bytes: bytes) -> str:
+    """
+    Run GPT-4o twice:
+      • Pass-1: pure OCR of the INGREDIENTS panel
+      • Pass-2: bold allergens & output HTML
+    Returns final HTML string or the sentinel 'IMAGE_UNREADABLE'.
+    """
+    import base64, textwrap
+    data_url = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+
+    # ---- PASS 1 ---------------------------------------------------
+    pass1_sys = (
+        "You are a specialist OCR engine. Extract the EXACT text of the INGREDIENTS "
+        "panel on a UK food label image. Preserve order, punctuation, %, brackets. "
+        "No commentary. If no ingredients visible, output IMAGE_UNREADABLE."
+    )
+    resp1 = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": pass1_sys},
+            {"role": "user",   "content": [
+                {"type": "text", "text": "Label image incoming."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ],
+        temperature=0.0, top_p=0
+    )
+    raw = resp1.choices[0].message.content.strip()
+    if "IMAGE_UNREADABLE" in raw.upper():
+        return "IMAGE_UNREADABLE"
+
+    # ---- PASS 2 ---------------------------------------------------
+    allergens = (
+        "celery,wheat,rye,barley,oats,spelt,kamut,crustaceans,eggs,fish,lupin,"
+        "milk,molluscs,mustard,almond,hazelnut,walnut,cashew,pecan,pistachio,"
+        "macadamia,brazil nut,peanut,sesame,soy,soya,sulphur dioxide,sulphites"
+    )
+    pass2_sys = textwrap.dedent(f"""
+        You are a food-label compliance agent. Format the INGREDIENT string
+        provided by the user exactly as HTML and bold (**<b>…</b>**) every word
+        that matches this UK-FIC allergen list:
+
+        {allergens}
+
+        • Bold ONLY the allergen token(s); keep all other text unchanged.
+        • Do NOT re-order, translate, or summarise.
+        • Return the HTML string only – no markdown, no commentary.
+    """).strip()
+    resp2 = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": pass2_sys},
+            {"role": "user",   "content": raw}
+        ],
+        temperature=0.0, top_p=0
+    )
+    return resp2.choices[0].message.content.strip()
+
 
 #############################
 # Pre-Written Prompts       #
@@ -560,46 +623,28 @@ if is_image_prompt:
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
-if is_image_prompt and uploaded_image and user_prompt.strip():
-    import base64
+# ---------------------------------------------------------------
+# Image-prompt flow -– two-pass high-accuracy extraction
+# ---------------------------------------------------------------
 
-    image_bytes = uploaded_image.read()
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
-    data_url = f"data:image/jpeg;base64,{b64_image}"
+if is_image_prompt and uploaded_image:
+    st.markdown("### 📤 Processing image…")
+    with st.spinner("Running high-accuracy two-pass extraction"):
+        # Enforce the correct model
+        if model_choice != "gpt-4o":
+            st.error("🛑  Image prompts require the **gpt-4o** model. "
+                     "Please choose it above and try again.")
+            st.stop()
 
-    system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
-
-    st.markdown("### 📤 Processing Image with GPT-4o...")
-    with st.spinner("Reading image and extracting info..."):
         try:
-            if model_choice != "gpt-4o":
-                st.warning("⚠️ Image prompts only work with the 'gpt-4o' model. Please select it above.")
-                st.stop()
+            # run the helper you added earlier
+            html_out = two_pass_extract(uploaded_image.read())
 
-            # ✅ Confirm model being used
-            st.info(f"⏳ Actually calling model: {model_choice}")
-
-            response = client.chat.completions.create(
-                model=model_choice,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Please analyse the product image."},
-                        {"type": "image_url", "image_url": {"url": data_url}}
-                    ]}
-                ],
-                temperature=0.0,
-                top_p=0
-            )
-
-            output_text = response.choices[0].message.content.strip()
-            if output_text.startswith("```"):
-                parts = output_text.split("```", maxsplit=2)
-                output_text = parts[1].lstrip("json").strip().split("```")[-1].strip()
-
-            st.success("✅ GPT Image Processing Complete!")
-            st.code(output_text, language="html" if "Ingredient" in prompt_choice else "csv")
-
+            if html_out == "IMAGE_UNREADABLE":
+                st.error("🛑  The ingredients panel is unreadable in this photo.")
+            else:
+                st.success("✅ GPT image processing complete!")
+                st.code(html_out, language="html")
         except Exception as e:
             st.error(f"Image processing failed: {e}")
 
@@ -764,3 +809,4 @@ if uploaded_file and user_prompt.strip():
                     "gpt_failed_rows.csv",
                     "text/csv"
                 )
+
