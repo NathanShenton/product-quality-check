@@ -139,19 +139,19 @@ with col1:
 # ------------------------------------------------------------------
 def two_pass_extract(image_bytes: bytes) -> str:
     """
-    Run GPT-4o twice:
-      • Pass-1: pure OCR of the INGREDIENTS panel
-      • Pass-2: bold allergens & output HTML
-    Returns final HTML string or the sentinel 'IMAGE_UNREADABLE'.
+    Run GPT-4o three times:
+      • Pass-1: OCR of ingredients panel
+      • Pass-2: Format and bold allergens
+      • Pass-3: Double-check and correct OCR misreads
     """
     import base64, textwrap
     data_url = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
 
-    # ---- PASS 1 ---------------------------------------------------
+    # ---- PASS 1 ----
     pass1_sys = (
         "You are a specialist OCR engine. Extract the EXACT text of the INGREDIENTS "
-        "panel on a UK food label image. Preserve order, punctuation, %, brackets. "
-        "No commentary. If no ingredients visible, output IMAGE_UNREADABLE."
+        "panel on a UK food label image. Preserve punctuation, %, brackets. "
+        "If the section is unreadable, output IMAGE_UNREADABLE."
     )
     resp1 = client.chat.completions.create(
         model="gpt-4o",
@@ -168,7 +168,7 @@ def two_pass_extract(image_bytes: bytes) -> str:
     if "IMAGE_UNREADABLE" in raw.upper():
         return "IMAGE_UNREADABLE"
 
-    # ---- PASS 2 ---------------------------------------------------
+    # ---- PASS 2 ----
     allergens = (
         "celery,wheat,rye,barley,oats,spelt,kamut,crustaceans,eggs,fish,lupin,"
         "milk,molluscs,mustard,almond,hazelnut,walnut,cashew,pecan,pistachio,"
@@ -193,7 +193,24 @@ def two_pass_extract(image_bytes: bytes) -> str:
         ],
         temperature=0.0, top_p=0
     )
-    return resp2.choices[0].message.content.strip()
+    html_out = resp2.choices[0].message.content.strip()
+
+    # ---- PASS 3 ----
+    pass3_sys = (
+        "You previously extracted an ingredient list from a UK food label image. "
+        "Please double-check for spelling errors or OCR misreads in these items. "
+        "If any corrections are needed, return the corrected string, preserving original HTML formatting. "
+        "Otherwise return the input unchanged."
+    )
+    resp3 = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": pass3_sys},
+            {"role": "user",   "content": html_out}
+        ],
+        temperature=0.0, top_p=0
+    )
+    return resp3.choices[0].message.content.strip()
 
 
 #############################
