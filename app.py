@@ -616,21 +616,32 @@ user_prompt = st.text_area(
 # Show image uploader only for image prompts
 # Show image uploader only for image prompts
 if is_image_prompt:
-    st.markdown("### 🖼️ Upload Product Image")
-    st.markdown(
-        "Upload a **clear, readable image** of the product's back-of-pack label. "
-        "Supported formats: **JPG** or **PNG**.\n\n"
-        "Ensure the full label is visible — GPT will extract data directly from what it sees."
-    )
-    uploaded_image = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+    st.markdown("### 🖼️ Upload Product Image & crop just the INGREDIENTS panel")
+    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg","jpeg","png"])
+    cropped_bytes = None
+    if uploaded_image:
+        img = Image.open(uploaded_image).convert("RGB")   # Pillow image
+        # --- cropping widget ---
+        cropped_img = st_cropper(
+            img,
+            box_color='#4a90e2',
+            realtime_update=True,
+            aspect_ratio=None,          # free-form
+            return_type="image"         # Pillow image out
+        )
+        # convert cropped PIL image -> bytes for GPT
+        buf = io.BytesIO()
+        cropped_img.save(buf, format="PNG")
+        cropped_bytes = buf.getvalue()
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
+
 
 # ---------------------------------------------------------------
 # Image-prompt flow -– two-pass high-accuracy extraction
 # ---------------------------------------------------------------
 
-if is_image_prompt and uploaded_image:
+if is_image_prompt and cropped_bytes:
     st.markdown("### 📤 Processing image…")
     with st.spinner("Running high-accuracy two-pass extraction"):
         # Enforce the correct model
@@ -641,7 +652,7 @@ if is_image_prompt and uploaded_image:
 
         try:
             # run the helper you added earlier
-            html_out = two_pass_extract(uploaded_image.read())
+            html_out = two_pass_extract(cropped_bytes)
 
             if html_out == "IMAGE_UNREADABLE":
                 st.error("🛑  The ingredients panel is unreadable in this photo.")
