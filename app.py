@@ -706,8 +706,32 @@ if is_image_prompt and cropped_bytes:
             st.stop()
 
         try:
-            html_out = two_pass_extract(cropped_bytes)
+            # Use the general crop+prompt pipeline for non-ingredient prompts
+            if "Ingredient Scrape" in prompt_choice:
+                html_out = two_pass_extract(cropped_bytes)
+            else:
+                import base64
+                data_url = f"data:image/jpeg;base64,{base64.b64encode(cropped_bytes).decode()}"
 
+                # System prompt from user config
+                system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
+
+                # Call OpenAI with cropped image and prompt
+                response = client.chat.completions.create(
+                    model=model_choice,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "Cropped label image below."},
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        ]}
+                    ],
+                    temperature=0.0,
+                    top_p=0
+                )
+                html_out = response.choices[0].message.content.strip()
+
+            # Show result
             if html_out == "IMAGE_UNREADABLE":
                 st.error("🛑  The image was unreadable or missing the required section.")
             else:
