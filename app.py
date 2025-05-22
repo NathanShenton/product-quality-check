@@ -166,6 +166,46 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Image: Ingredient Scrape (HTML)": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are an expert in food compliance and product data entry for UK grocery retail. "
+            "Your task is to extract the **full ingredient list** from the **product pack image provided**.\n\n"
+            "**Instructions:**\n"
+            "- Return only the final HTML-formatted ingredient string.\n"
+            "- Bold all allergens using <b></b> tags.\n"
+            "- Use the 14 allergens defined by UK FIC regulations: celery, cereals containing gluten, crustaceans, eggs, fish, lupin, milk, molluscs, mustard, tree nuts, peanuts, sesame seeds, soybeans, sulphur dioxide/sulphites.\n"
+            "- Use your own reasoning to identify implied allergens (e.g., “almonds” = tree nuts).\n"
+            "- Do not include any commentary, plain-text copy, or disclaimers — just the final HTML-formatted string.\n"
+            "- Treat this like you are carefully reading the pack in your hand, not just OCR text."
+    ),
+        "recommended_model": "gpt-4o",
+        "description": "Extracts and formats the ingredients as an HTML string with <b> tags for allergens based on image input."
+},
+    "Image: Nutrition Table (CSV)": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a Product Master Data Specialist. Based on the **product pack image provided**, extract the full nutritional table.\n\n"
+            "**Output format:** CSV table with the following headers:\n"
+            "Nutrient,Amount per 100g,Amount per serving,UOM\n\n"
+            "**Always include these core nutrients (even if blank):**\n"
+            "- Energy (kj)\n"
+            "- Energy (kcal)\n"
+            "- Fat (g)\n"
+            "- of which saturates (g)\n"
+            "- Carbohydrates (g)\n"
+            "- of which sugars (g)\n"
+            "- Protein (g)\n"
+            "- Salt (g)\n\n"
+            "**Also extract any additional nutrients listed** (vitamins, minerals, fibre, etc).\n\n"
+            "**Rules:**\n"
+            "- Use correct UOM (e.g. g, kcal, kj, mg, µg).\n"
+            "- Calculate values if possible (e.g. kcal from kj, serving size from %).\n"
+            "- Return only the CSV output — no summaries, notes, or extra text."
+    ),
+        "recommended_model": "gpt-4o",
+        "description": "Extracts structured nutrition table from a pack image and outputs as CSV with headers and unit-aware values."
+},
     "Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
