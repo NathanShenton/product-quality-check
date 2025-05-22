@@ -174,7 +174,7 @@ PROMPT_OPTIONS = {
             "- Use the 14 allergens defined by UK FIC regulations: celery, cereals containing gluten, crustaceans, eggs, fish, lupin, milk, molluscs, mustard, tree nuts, peanuts, sesame seeds, soybeans, sulphur dioxide/sulphites.\n"
             "- Use your own reasoning to identify implied allergens (e.g., “almonds” = tree nuts).\n"
             "- Do not include any commentary, plain-text copy, or disclaimers — just the final HTML-formatted string.\n"
-            "- Treat this like you are carefully reading the pack in your hand, not just OCR text."
+            "- Treat this like you are carefully reading the pack in your hand, not just OCR text. Do not include any disclaimers or qualifiers like “I can’t read the image.” Just extract and return the formatted ingredient string."
     ),
         "recommended_model": "gpt-4o",
         "description": "Extracts and formats the ingredients as an HTML string with <b> tags for allergens based on image input."
