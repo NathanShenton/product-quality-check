@@ -166,18 +166,36 @@ PROMPT_OPTIONS = {
     "Image: Ingredient Scrape (HTML)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are an expert in food compliance and product data entry for UK grocery retail. "
-            "Your task is to extract the **full ingredient list** from the **product pack image provided**.\n\n"
-            "**Instructions:**\n"
-            "- Return only the final HTML-formatted ingredient string.\n"
-            "- Bold all allergens using <b></b> tags.\n"
-            "- Use the 14 allergens defined by UK FIC regulations: celery, cereals containing gluten, crustaceans, eggs, fish, lupin, milk, molluscs, mustard, tree nuts, peanuts, sesame seeds, soybeans, sulphur dioxide/sulphites.\n"
-            "- Use your own reasoning to identify implied allergens (e.g., “almonds” = tree nuts).\n"
-            "- Do not include any commentary, plain-text copy, or disclaimers — just the final HTML-formatted string.\n"
-            "- Treat this like you are carefully reading the pack in your hand, not just OCR text. Do not include any disclaimers or qualifiers like “I can’t read the image.” Just extract and return the formatted ingredient string."
+            "You are a **regulatory-grade data-capture agent** for UK food labels.\n"
+            "Your sole task is to extract the EXACT ingredient list from the supplied product-pack image.\n"
+            "Accuracy is **safety-critical**. Follow every rule below to the letter.\n\n"
+
+            "STEP-BY-STEP RULES (do not skip):\n"
+            "1. Perform high-fidelity OCR of the INGREDIENTS section only. Capture ALL text, including\n"
+            "   bracketed sub-ingredients, percentages, E-numbers, and processing aids.\n"
+            "2. **DO NOT** invent, re-order, translate, normalise, paraphrase, or summarise anything.\n"
+            "   • If a word is illegible, replace just that word with \"[???]\" (max 3 unknowns allowed).\n"
+            "3. Preserve original punctuation and capitalisation **except**:\n"
+            "   • Convert a trailing full-stop to none (most UK packs do not end with a period).\n"
+            "4. Bold every occurrence of the 14 UK FIC allergens **and their obvious synonyms**:\n"
+            "   celery; cereals containing gluten (wheat, rye, barley, oats, spelt, kamut); crustaceans;\n"
+            "   eggs; fish; lupin; milk; molluscs; mustard; **tree nuts** (almond, hazelnut, walnut,\n"
+            "   cashew, pecan, pistachio, macadamia, Brazil nut); peanuts; sesame; soy/soya; sulphur\n"
+            "   dioxide / sulphites.\n"
+            "   • Example: <b>almonds</b>; <b>wheat</b>; <b>soya lecithin</b> (bold only the allergen token).\n"
+            "5. Deduplicate nothing. If the label repeats an ingredient, you must repeat it.\n"
+            "6. After processing, output **ONLY** the final HTML string — no disclaimers, no commentary,\n"
+            "   no markdown fences.\n"
+            "7. If the INGREDIENTS section is genuinely unreadable (e.g. obscured, missing, <3 words),\n"
+            "   output exactly the text:  IMAGE_UNREADABLE  (all caps, no HTML).\n\n"
+
+            "BEGIN EXTRACTION NOW."
     ),
         "recommended_model": "gpt-4o",
-        "description": "Extracts and formats the ingredients as an HTML string with <b> tags for allergens based on image input."
+        "description": (
+            "Literal OCR-grade extraction of the INGREDIENTS list with allergen tokens wrapped in "
+            "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
+    )
 },
     "Image: Nutrition Table (CSV)": {
         "prompt": (
