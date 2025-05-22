@@ -280,7 +280,22 @@ PROMPT_OPTIONS = {
             "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
     )
 },
-
+    "Image: Directions for Use": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a product data capture assistant for UK food and supplement labels.\n"
+            "Your sole task is to extract the full DIRECTIONS section from the supplied pack image.\n\n"
+            "RULES:\n"
+            "1. Locate a heading like 'Directions', 'Usage', 'How to use', or 'Directions for use' (case-insensitive).\n"
+            "2. Extract all text that directly follows this heading, line by line, until a new section or heading begins.\n"
+            "3. Do NOT summarise, paraphrase, invent, or reword any content.\n"
+            "4. Do NOT return HTML, markdown, or commentary.\n"
+            "5. If the relevant text is completely unreadable, return exactly: IMAGE_UNREADABLE\n\n"
+            "Your output must be a clean plaintext block only."
+        ),
+        "recommended_model": "gpt-4o",
+        "description": "Extracts the full usage instructions from cropped label text. Returns plain text only or IMAGE_UNREADABLE."
+},
     "Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -301,6 +316,49 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-3.5-turbo",
         "description": "Use gpt-3.5-turbo for a balance of cost and complexity."
+    },
+    "Image: Storage Instructions": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a product data extraction assistant. Your job is to extract the STORAGE INSTRUCTIONS section\n"
+            "from a cropped product label image used in the UK retail context.\n\n"
+            "RULES:\n"
+            "1. Look for headings like: 'Storage', 'Keep in a cool place', 'How to store', or similar.\n"
+            "2. Extract all nearby or indented text that forms part of the storage instruction.\n"
+            "3. Do not paraphrase, reword, or summarise.\n"
+            "4. Return only the exact printed text — no bullet points, no formatting, no markdown or HTML.\n"
+            "5. If you cannot find the storage section or it is unreadable, return exactly: IMAGE_UNREADABLE"
+        ),
+        "recommended_model": "gpt-4o",
+        "description": "Extracts storage guidance from the cropped label. Returns plain text only or IMAGE_UNREADABLE."
+    },
+    "Image: Warnings and Advisory (JSON)": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a food safety and regulatory assistant. You will extract and classify 3 types of messages from a UK label image:\n"
+            "- Warnings (e.g., health risks, dosage errors, legal warnings)\n"
+            "- Advisory notes (e.g., guidance such as 'consult a doctor')\n"
+            "- May Contain statements (e.g., 'may contain traces of milk')\n\n"
+            "TASK:\n"
+            "1. Review the label text and extract any sentences that clearly belong to one of these three types.\n"
+            "2. Classify each item into the correct category.\n"
+            "3. If multiple messages appear in one category, concatenate them with line breaks.\n\n"
+            "OUTPUT:\n"
+            "Return a valid minified JSON object using this structure:\n\n"
+            "{\n"
+            "  \"filename\": \"[EXACT_FILENAME].png\",\n"
+            "  \"warnings\": \"...\",\n"
+            "  \"advisory\": \"...\",\n"
+            "  \"may_contain\": \"...\"\n"
+            "}\n\n"
+            "RULES:\n"
+            "- Fill each field with only the text directly from the image.\n"
+            "- Leave any missing category as an empty string.\n"
+            "- If the text is unreadable or the section is missing, set all fields to blank except 'may_contain': \"IMAGE_UNREADABLE\"\n"
+            "- Return JSON only. No markdown, no commentary, no extra notes."
+        ),
+        "recommended_model": "gpt-4o",
+        "description": "Extracts warnings, advisory, and may contain info from label. Outputs valid JSON with four fields."
     },
     "Price Marking Order Category": {
         "prompt": (
@@ -647,15 +705,23 @@ if is_image_prompt and cropped_bytes:
                      "Please choose it above and try again.")
             st.stop()
 
-        try:
-            # run the helper you added earlier
+                try:
             html_out = two_pass_extract(cropped_bytes)
 
             if html_out == "IMAGE_UNREADABLE":
-                st.error("🛑  The ingredients panel is unreadable in this photo.")
+                st.error("🛑  The image was unreadable or missing the required section.")
             else:
                 st.success("✅ GPT image processing complete!")
-                st.code(html_out, language="html")
+
+                # Auto-detect output format
+                output_type = "html"
+                if "Directions" in prompt_choice or "Storage" in prompt_choice:
+                    output_type = "text"
+                elif "Warnings and Advisory" in prompt_choice:
+                    output_type = "json"
+
+                st.code(html_out, language=output_type)
+
         except Exception as e:
             st.error(f"Image processing failed: {e}")
 
