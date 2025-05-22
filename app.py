@@ -530,6 +530,7 @@ user_prompt = st.text_area(
 )
 
 # Show image uploader only for image prompts
+# Show image uploader only for image prompts
 if is_image_prompt:
     st.markdown("### 🖼️ Upload Product Image")
     st.markdown(
@@ -557,6 +558,9 @@ if is_image_prompt and uploaded_image and user_prompt.strip():
                 st.warning("⚠️ Image prompts only work with the 'gpt-4o' model. Please select it above.")
                 st.stop()
 
+            # ✅ Confirm model being used
+            st.info(f"⏳ Actually calling model: {model_choice}")
+
             response = client.chat.completions.create(
                 model=model_choice,
                 messages=[
@@ -569,10 +573,12 @@ if is_image_prompt and uploaded_image and user_prompt.strip():
                 temperature=0.0,
                 top_p=0
             )
+
             output_text = response.choices[0].message.content.strip()
             if output_text.startswith("```"):
                 parts = output_text.split("```", maxsplit=2)
                 output_text = parts[1].lstrip("json").strip().split("```")[-1].strip()
+
             st.success("✅ GPT Image Processing Complete!")
             st.code(output_text, language="html" if "Ingredient" in prompt_choice else "csv")
 
