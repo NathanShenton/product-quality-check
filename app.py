@@ -263,30 +263,7 @@ PROMPT_OPTIONS = {
             "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
     )
 },
-    "Image: Nutrition Table (CSV)": {
-        "prompt": (
-            "SYSTEM MESSAGE:\n"
-            "You are a Product Master Data Specialist. Based on the **product pack image provided**, extract the full nutritional table.\n\n"
-            "**Output format:** CSV table with the following headers:\n"
-            "Nutrient,Amount per 100g,Amount per serving,UOM\n\n"
-            "**Always include these core nutrients (even if blank):**\n"
-            "- Energy (kj)\n"
-            "- Energy (kcal)\n"
-            "- Fat (g)\n"
-            "- of which saturates (g)\n"
-            "- Carbohydrates (g)\n"
-            "- of which sugars (g)\n"
-            "- Protein (g)\n"
-            "- Salt (g)\n\n"
-            "**Also extract any additional nutrients listed** (vitamins, minerals, fibre, etc).\n\n"
-            "**Rules:**\n"
-            "- Use correct UOM (e.g. g, kcal, kj, mg, µg).\n"
-            "- Calculate values if possible (e.g. kcal from kj, serving size from %).\n"
-            "- Return only the CSV output — no summaries, notes, or extra text."
-    ),
-        "recommended_model": "gpt-4o",
-        "description": "Extracts structured nutrition table from a pack image and outputs as CSV with headers and unit-aware values."
-},
+
     "Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
