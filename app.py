@@ -506,6 +506,15 @@ prompt_description = selected_prompt_data["description"]
 
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
+# --- Determine if image-based ---
+is_image_prompt = prompt_choice.startswith("Image:")
+uploaded_image = None
+uploaded_file = None
+
+# Force gpt-4o if image prompt is selected
+if is_image_prompt:
+    recommended_model = "gpt-4o"
+
 # 5. Model Selector (default to recommended model, but user can override)
 all_model_keys = list(MODEL_OPTIONS.keys())
 default_index = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
@@ -519,11 +528,6 @@ user_prompt = st.text_area(
     value=selected_prompt_text,
     height=200
 )
-
-# --- Determine if image-based ---
-is_image_prompt = prompt_choice.startswith("Image:")
-uploaded_image = None
-uploaded_file = None
 
 # Show image uploader only for image prompts
 if is_image_prompt:
@@ -549,6 +553,10 @@ if is_image_prompt and uploaded_image and user_prompt.strip():
     st.markdown("### 📤 Processing Image with GPT-4o...")
     with st.spinner("Reading image and extracting info..."):
         try:
+            if model_choice != "gpt-4o":
+                st.warning("⚠️ Image prompts only work with the 'gpt-4o' model. Please select it above.")
+                st.stop()
+
             response = client.chat.completions.create(
                 model=model_choice,
                 messages=[
