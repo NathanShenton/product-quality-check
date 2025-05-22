@@ -3,6 +3,9 @@ import pandas as pd
 import json
 import os
 import plotly.graph_objects as go
+from streamlit_cropper import st_cropper    # NEW
+from PIL import Image                       # NEW
+import io                                   # NEW
 from openai import OpenAI
 
 # Set page configuration immediately after imports!
