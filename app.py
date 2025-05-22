@@ -79,10 +79,10 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
     """
     model_costs_per_1k = {
         "gpt-3.5-turbo": (0.0005, 0.0015),
-        "gpt-4.1-mini": (0.0004, 0.0016),
-        "gpt-4.1-nano": (0.0001, 0.0004),
-        "gpt-4o-mini":  (0.0006, 0.0024),
-        "gpt-4-turbo":  (0.01,   0.03)
+        "gpt-4.1-mini":  (0.0004, 0.0016),
+        "gpt-4.1-nano":  (0.0001, 0.0004),
+        "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
+        "gpt-4-turbo":   (0.01,   0.03)
     }
 
     # Default fallback costs
@@ -111,6 +111,7 @@ MODEL_OPTIONS = {
     "gpt-4.1-mini": "Balanced cost and intelligence, great for language tasks.",
     "gpt-4.1-nano": "Ultra-cheap and fast, best for very lightweight checks.",
     "gpt-4o-mini":  "Higher quality than 4.1-mini, still affordable.",
+    "gpt-4o": "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
     "gpt-4-turbo":  "Very powerful and expensive — best for complex, high-value use cases."
 }
 
@@ -128,10 +129,6 @@ with col1:
         st.stop()
     # Initialize the new OpenAI client
     client = OpenAI(api_key=api_key_input)
-
-with col2:
-    # 2. File Upload
-    uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
 #############################
 # Pre-Written Prompts       #
@@ -522,6 +519,57 @@ user_prompt = st.text_area(
     value=selected_prompt_text,
     height=200
 )
+
+# --- Determine if image-based ---
+is_image_prompt = prompt_choice.startswith("Image:")
+uploaded_image = None
+uploaded_file = None
+
+# Show image uploader only for image prompts
+if is_image_prompt:
+    st.markdown("### 🖼️ Upload Product Image")
+    st.markdown(
+        "Upload a **clear, readable image** of the product's back-of-pack label. "
+        "Supported formats: **JPG** or **PNG**.\n\n"
+        "Ensure the full label is visible — GPT will extract data directly from what it sees."
+    )
+    uploaded_image = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+else:
+    uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
+
+if is_image_prompt and uploaded_image and user_prompt.strip():
+    import base64
+
+    image_bytes = uploaded_image.read()
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    data_url = f"data:image/jpeg;base64,{b64_image}"
+
+    system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
+
+    st.markdown("### 📤 Processing Image with GPT-4o...")
+    with st.spinner("Reading image and extracting info..."):
+        try:
+            response = client.chat.completions.create(
+                model=model_choice,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "Please analyse the product image."},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ]}
+                ],
+                temperature=0.0,
+                top_p=0
+            )
+            output_text = response.choices[0].message.content.strip()
+            if output_text.startswith("```"):
+                parts = output_text.split("```", maxsplit=2)
+                output_text = parts[1].lstrip("json").strip().split("```")[-1].strip()
+            st.success("✅ GPT Image Processing Complete!")
+            st.code(output_text, language="html" if "Ingredient" in prompt_choice else "csv")
+
+        except Exception as e:
+            st.error(f"Image processing failed: {e}")
 
 # ---------- Main Execution Logic ----------
 if uploaded_file and user_prompt.strip():
