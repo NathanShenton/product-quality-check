@@ -693,8 +693,8 @@ if is_image_prompt:
     uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
 
     if uploaded_image:
-    img = Image.open(uploaded_image).convert("RGB")
-    st.markdown("### ✂️ Crop the label to the relevant section below:")
+        img = Image.open(uploaded_image).convert("RGB")
+        st.markdown("### ✂️ Crop the label to the relevant section below:")
 
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
@@ -704,7 +704,6 @@ if is_image_prompt:
                 aspect_ratio=None,
                 return_type="image"
             )
-
 
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
@@ -932,4 +931,5 @@ if uploaded_file and user_prompt.strip():
                     "gpt_failed_rows.csv",
                     "text/csv"
                 )
+
 
