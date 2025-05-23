@@ -719,7 +719,7 @@ if is_image_prompt:
         # ✅ Only show preview if an image was uploaded and a crop was made
         if st.session_state.get("cropped_preview"):
             st.markdown("### 🔎 Zoomed Cropped Area")
-            st.image(st.session_state["cropped_preview"], use_column_width=True, caption="Zoomed Cropped Area")
+            st.image(st.session_state["cropped_preview"], use_container_width=True, caption="Zoomed Cropped Area")
 
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
