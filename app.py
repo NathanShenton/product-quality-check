@@ -646,12 +646,20 @@ prompt_choice = st.selectbox(
     index=0
 )
 
+# Track last selected prompt and reset crop if changed
+if "last_prompt" not in st.session_state:
+    st.session_state["last_prompt"] = prompt_choice
+if "cropped_bytes" not in st.session_state:
+    st.session_state["cropped_bytes"] = None
+if st.session_state["last_prompt"] != prompt_choice:
+    st.session_state["last_prompt"] = prompt_choice
+    st.session_state["cropped_bytes"] = None
+
 # Extract chosen prompt details
 selected_prompt_data = PROMPT_OPTIONS[prompt_choice]
 selected_prompt_text = selected_prompt_data["prompt"]
 recommended_model = selected_prompt_data["recommended_model"]
 prompt_description = selected_prompt_data["description"]
-
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
 # --- Determine if image-based ---
@@ -670,36 +678,35 @@ model_choice = st.selectbox("🧠 Choose GPT model", all_model_keys, index=defau
 st.markdown(f"**Model Info:** {MODEL_OPTIONS[model_choice]}")
 st.markdown("---")
 
-# 6. User Prompt Text Area (auto-filled if a pre-written prompt is selected)
+# 6. User Prompt Text Area
 user_prompt = st.text_area(
     "✍️ Your prompt for GPT",
     value=selected_prompt_text,
     height=200
 )
 
-# Show image uploader only for image prompts
-# Show image uploader only for image prompts
+# -------------------------------
+# Image uploader and crop logic
+# -------------------------------
 if is_image_prompt:
-    st.markdown("### 🖼️ Upload Product Image & crop just the INGREDIENTS panel")
-    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg","jpeg","png"])
-    cropped_bytes = None
+    st.markdown("### 🖼️ Upload Product Image & crop just the relevant panel")
+    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
 
     if uploaded_image:
         img = Image.open(uploaded_image).convert("RGB")
-
-        # --- cropping widget (no live stream) ---
-        cropped_img = st_cropper(
-            img,
-            box_color='#4a90e2',
-            realtime_update=False,        # ← change here
-            aspect_ratio=None,
-            return_type="image"
-        )
+        with st.spinner("🖼️ Loading crop tool..."):
+            cropped_img = st_cropper(
+                img,
+                box_color='#4a90e2',
+                realtime_update=False,
+                aspect_ratio=None,
+                return_type="image"
+            )
 
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
             cropped_img.save(buf, format="PNG")
-            cropped_bytes = buf.getvalue()
+            st.session_state["cropped_bytes"] = buf.getvalue()
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
