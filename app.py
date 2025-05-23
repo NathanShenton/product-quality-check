@@ -296,18 +296,18 @@ PROMPT_OPTIONS = {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a product data capture assistant for UK food and supplement labels.\n"
-            "Your sole task is to extract the full DIRECTIONS section from the supplied pack image.\n\n"
+            "Your task is to extract any clear instructions about how the product should be consumed or used, based on the cropped image provided.\n\n"
             "RULES:\n"
-            "1. Locate a heading like 'Directions', 'Usage', 'How to use', or 'Directions for use' (case-insensitive).\n"
-            "2. Extract all text that directly follows this heading, line by line, until a new section or heading begins.\n"
-            "3. Do NOT summarise, paraphrase, invent, or reword any content.\n"
-            "4. Do NOT return HTML, markdown, or commentary.\n"
-            "5. If the relevant text is completely unreadable, return exactly: IMAGE_UNREADABLE\n\n"
-            "Your output must be a clean plaintext block only."
+            "1. Look for a section that includes consumption guidance — including phrases like 'Directions', 'How to use', 'Recommended use', 'Usage', or other instructions that explain how or when to take the product.\n"
+            "2. Even if there is no heading, extract the block of text if the meaning clearly implies instructions for use.\n"
+            "3. Do NOT invent or paraphrase. Return only the visible, legible printed text.\n"
+            "4. Do NOT return HTML, markdown, or formatting — just plain text.\n"
+            "5. If the image is unreadable or no usage guidance is clearly found, return exactly: IMAGE_UNREADABLE\n\n"
+            "Your output must be clean plain text only."
         ),
         "recommended_model": "gpt-4o",
-        "description": "Extracts the full usage instructions from cropped label text. Returns plain text only or IMAGE_UNREADABLE."
-},
+        "description": "More flexible extraction of usage instructions from cropped label. Looks for any clearly implied direction, even without a heading."
+    },
     "Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
