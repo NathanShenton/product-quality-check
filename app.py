@@ -693,7 +693,9 @@ if is_image_prompt:
     uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
 
     if uploaded_image:
-        img = Image.open(uploaded_image).convert("RGB")
+    img = Image.open(uploaded_image).convert("RGB")
+    st.markdown("### ✂️ Crop the label to the relevant section below:")
+
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
                 img,
@@ -702,6 +704,7 @@ if is_image_prompt:
                 aspect_ratio=None,
                 return_type="image"
             )
+
 
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
@@ -715,7 +718,7 @@ else:
 # Image-prompt flow -– two-pass high-accuracy extraction
 # ---------------------------------------------------------------
 
-if is_image_prompt and cropped_bytes:
+if is_image_prompt and st.session_state.get("cropped_bytes"):
     st.markdown("### 📤 Processing image…")
     with st.spinner("Running high-accuracy two-pass extraction"):
         # Enforce the correct model
@@ -727,7 +730,7 @@ if is_image_prompt and cropped_bytes:
         try:
             # Use the general crop+prompt pipeline for non-ingredient prompts
             if "Ingredient Scrape" in prompt_choice:
-                html_out = two_pass_extract(cropped_bytes)
+                html_out = two_pass_extract(st.session_state["cropped_bytes"])
             else:
                 import base64
                 data_url = f"data:image/jpeg;base64,{base64.b64encode(cropped_bytes).decode()}"
