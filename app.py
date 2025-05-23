@@ -733,7 +733,7 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
                 html_out = two_pass_extract(st.session_state["cropped_bytes"])
             else:
                 import base64
-                data_url = f"data:image/jpeg;base64,{base64.b64encode(cropped_bytes).decode()}"
+                data_url = f"data:image/jpeg;base64,{base64.b64encode(st.session_state['cropped_bytes']).decode()}"
 
                 # System prompt from user config
                 system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
