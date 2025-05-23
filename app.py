@@ -332,17 +332,18 @@ PROMPT_OPTIONS = {
     "Image: Storage Instructions": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a product data extraction assistant. Your job is to extract the STORAGE INSTRUCTIONS section\n"
-            "from a cropped product label image used in the UK retail context.\n\n"
+            "You are a product data capture assistant. Your task is to extract storage-related instructions from a cropped product label image in a UK retail context.\n\n"
             "RULES:\n"
-            "1. Look for headings like: 'Storage', 'Keep in a cool place', 'How to store', or similar.\n"
-            "2. Extract all nearby or indented text that forms part of the storage instruction.\n"
-            "3. Do not paraphrase, reword, or summarise.\n"
-            "4. Return only the exact printed text — no bullet points, no formatting, no markdown or HTML.\n"
-            "5. If you cannot find the storage section or it is unreadable, return exactly: IMAGE_UNREADABLE"
+            "1. Look for any text that provides information about how the product should be stored — even if there is no heading like 'Storage'.\n"
+            "   Examples include: 'Store in a cool dry place', 'Refrigerate after opening', 'Keep away from direct sunlight'.\n"
+            "2. If there *is* a heading (e.g. 'Storage', 'Keep', 'How to store'), include the full relevant text that follows it.\n"
+            "3. Do NOT paraphrase, summarise, or correct the text — copy it exactly as printed.\n"
+            "4. Return only the exact visible text. No HTML, markdown, labels, or commentary.\n"
+            "5. If the image is unreadable or no relevant storage guidance is found, return exactly: IMAGE_UNREADABLE\n\n"
+            "Your output must be plain text only."
         ),
         "recommended_model": "gpt-4o",
-        "description": "Extracts storage guidance from the cropped label. Returns plain text only or IMAGE_UNREADABLE."
+        "description": "Extracts storage instructions from a label. Recognises standalone phrases even without section headings."
     },
     "Image: Warnings and Advisory (JSON)": {
         "prompt": (
