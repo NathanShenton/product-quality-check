@@ -705,7 +705,7 @@ if is_image_prompt:
             cropped_img = st_cropper(
                 img,
                 box_color='#ff1744',
-                realtime_update=False,
+                realtime_update=True,
                 aspect_ratio=None,
                 return_type="image"
             )
