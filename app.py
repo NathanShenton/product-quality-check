@@ -704,22 +704,13 @@ if is_image_prompt:
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
                 img,
-                box_color='#ff1744',  # vibrant red
+                box_color='#ff1744',
                 realtime_update=False,
                 aspect_ratio=None,
                 return_type="image"
             )
 
-        if st.button("✅ Use this crop →"):
-            buf = io.BytesIO()
-            cropped_img.save(buf, format="PNG")
-            st.session_state["cropped_bytes"] = buf.getvalue()
-            st.session_state["cropped_preview"] = cropped_img
 
-        # ✅ Only show preview if an image was uploaded and a crop was made
-        if st.session_state.get("cropped_preview"):
-            st.markdown("### 🔎 Zoomed Cropped Area")
-            st.image(st.session_state["cropped_preview"], use_container_width=True, caption="Zoomed Cropped Area")
 
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
