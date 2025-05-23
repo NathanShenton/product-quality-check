@@ -710,6 +710,22 @@ if is_image_prompt:
                 return_type="image"
             )
 
+        if st.button("✅ Use this crop →"):
+            buf = io.BytesIO()
+            cropped_img.save(buf, format="PNG")
+            st.session_state["cropped_bytes"] = buf.getvalue()
+            st.session_state["cropped_preview"] = cropped_img
+
+            st.success("✅ Crop captured! Preview below:")
+            st.image(cropped_img, use_container_width=True, caption="Cropped Area Sent to GPT")
+
+            st.download_button(
+                label="⬇️ Download Cropped Image Sent to GPT",
+                data=st.session_state["cropped_bytes"],
+                file_name="cropped_label.png",
+                mime="image/png"
+            )
+
 
 
 else:
