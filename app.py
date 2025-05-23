@@ -332,32 +332,34 @@ PROMPT_OPTIONS = {
     "Image: Storage Instructions": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a product data capture assistant. Your task is to extract storage-related instructions from a cropped product label image in a UK retail context.\n\n"
+            "You are a product label transcription assistant. Your task is to extract the product's STORAGE instructions from the supplied UK food or supplement label image.\n\n"
             "RULES:\n"
-            "1. Look for any text that provides information about how the product should be stored — even if there is no heading like 'Storage'.\n"
-            "   Examples include: 'Store in a cool dry place', 'Refrigerate after opening', 'Keep away from direct sunlight'.\n"
-            "2. If there *is* a heading (e.g. 'Storage', 'Keep', 'How to store'), include the full relevant text that follows it.\n"
-            "3. Do NOT paraphrase, summarise, or correct the text — copy it exactly as printed.\n"
-            "4. Return only the exact visible text. No HTML, markdown, labels, or commentary.\n"
-            "5. If the image is unreadable or no relevant storage guidance is found, return exactly: IMAGE_UNREADABLE\n\n"
-            "Your output must be plain text only."
-        ),
-        "recommended_model": "gpt-4o",
-        "description": "Extracts storage instructions from a label. Recognises standalone phrases even without section headings."
+            "1. Only copy text that clearly refers to **how or where the product should be stored**.\n"
+            "   Examples: 'Store in a cool, dry place.', 'Keep refrigerated.', 'Do not freeze.'\n"
+            "2. The text may or may not follow a heading like 'Storage', 'Keep', or 'How to store'. That’s okay.\n"
+            "3. **Do NOT paraphrase, invent, summarise, or complete sentences** — only transcribe what's visible.\n"
+            "4. Keep original punctuation and spelling. Do not correct grammar or add structure.\n"
+            "5. Return plain text only. No HTML, markdown, or commentary.\n"
+            "6. If you see no valid storage text, or the image is unreadable, return exactly: IMAGE_UNREADABLE\n\n"
+            "Begin by copying the storage text exactly as it appears. Return nothing else."
+    ),
+    "recommended_model": "gpt-4o",
+    "description": "Safely extracts storage text from label images, verbatim only. Avoids paraphrasing or guessing."
     },
     "Image: Warnings and Advisory (JSON)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a food safety and regulatory assistant. You will extract and classify 3 types of messages from a UK label image:\n"
-            "- Warnings (e.g., health risks, dosage errors, legal warnings)\n"
-            "- Advisory notes (e.g., guidance such as 'consult a doctor')\n"
-            "- May Contain statements (e.g., 'may contain traces of milk')\n\n"
+            "You are a food safety and regulatory extraction assistant. You will identify and classify any relevant text from a UK product label image into the following categories:\n"
+            "- **warnings** (e.g., health risks, dosage risks, serious safety notices)\n"
+            "- **advisory** notes (e.g., consult a doctor, not suitable for...)\n"
+            "- **may_contain** statements (e.g., 'may contain traces of nuts')\n\n"
             "TASK:\n"
-            "1. Review the label text and extract any sentences that clearly belong to one of these three types.\n"
-            "2. Classify each item into the correct category.\n"
-            "3. If multiple messages appear in one category, concatenate them with line breaks.\n\n"
+            "1. Read the entire image text. Do **not** rely only on headings — also check for standalone lines that match the meaning of each category.\n"
+            "2. If a line clearly matches one of the three types, assign it to that category.\n"
+            "3. If you're unsure where something fits, use 'advisory' as the fallback.\n"
+            "4. If multiple items appear in one category, separate them using line breaks ('\\n').\n\n"
             "OUTPUT:\n"
-            "Return a valid minified JSON object using this structure:\n\n"
+            "Return a valid, minified JSON object using this structure:\n"
             "{\n"
             "  \"filename\": \"[EXACT_FILENAME].png\",\n"
             "  \"warnings\": \"...\",\n"
@@ -365,13 +367,15 @@ PROMPT_OPTIONS = {
             "  \"may_contain\": \"...\"\n"
             "}\n\n"
             "RULES:\n"
-            "- Fill each field with only the text directly from the image.\n"
-            "- Leave any missing category as an empty string.\n"
-            "- If the text is unreadable or the section is missing, set all fields to blank except 'may_contain': \"IMAGE_UNREADABLE\"\n"
-            "- Return JSON only. No markdown, no commentary, no extra notes."
+            "- Only copy exact label text. Do NOT invent or complete sentences.\n"
+            "- Do not summarise or reword anything.\n"
+            "- If a field is empty, use an empty string (\"\").\n"
+            "- If nothing relevant is readable, use this output exactly:\n"
+            "{ \"filename\": \"[FILENAME].png\", \"warnings\": \"\", \"advisory\": \"\", \"may_contain\": \"IMAGE_UNREADABLE\" }\n"
+            "- Output JSON only. No extra text, no markdown."
         ),
         "recommended_model": "gpt-4o",
-        "description": "Extracts warnings, advisory, and may contain info from label. Outputs valid JSON with four fields."
+        "description": "Flexibly extracts warnings, advisory, and 'may contain' text based on content, not just headings. Outputs exact JSON."
     },
     "Price Marking Order Category": {
         "prompt": (
