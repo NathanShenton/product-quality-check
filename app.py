@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import json
 import os
-import fitz  # PyMuPDF
 import plotly.graph_objects as go
 from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
@@ -695,71 +694,40 @@ user_prompt = st.text_area(
 # Image uploader and crop logic
 # -------------------------------
 if is_image_prompt:
-    st.markdown("### 🖼️ Upload Product Image or PDF Label & crop just the relevant panel")
-
-    uploaded_image = st.file_uploader("Choose JPG, PNG, or PDF", type=["jpg", "jpeg", "png", "pdf"])
-    img = None  # Ensure img is defined
+    st.markdown("### 🖼️ Upload Product Image & crop just the relevant panel")
+    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
 
     if uploaded_image:
-        file_type = uploaded_image.type
+        img = Image.open(uploaded_image).convert("RGB")
+        st.markdown("### ✂️ Crop the label to the relevant section below:")
 
-        # --- Handle Image Upload ---
-        if file_type in ["image/jpeg", "image/png"]:
-            img = Image.open(uploaded_image).convert("RGB")
-            st.image(img, caption="Uploaded Image", use_container_width=True)
+        with st.spinner("🖼️ Loading crop tool..."):
+            cropped_img = st_cropper(
+                img,
+                box_color='#ff1744',
+                realtime_update=True,
+                aspect_ratio=None,
+                return_type="image"
+            )
 
-        # --- Handle PDF Upload with Zoom Options ---
-        elif file_type == "application/pdf":
-            try:
-                # Select zoom before rendering
-                zoom_options = {"1x": 1.0, "2x": 2.0, "3x": 3.0}
-                selected_zoom_label = st.radio("🔍 Select Zoom Level for PDF Page", options=list(zoom_options.keys()), horizontal=True)
-                selected_zoom = zoom_options[selected_zoom_label]
+        if st.button("✅ Use this crop →"):
+            buf = io.BytesIO()
+            cropped_img.save(buf, format="PNG")
+            st.session_state["cropped_bytes"] = buf.getvalue()
+            st.session_state["cropped_preview"] = cropped_img
 
-                # Render PDF
-                pdf_bytes = uploaded_image.read()
-                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                page = doc.load_page(0)  # First page only
-                mat = fitz.Matrix(selected_zoom, selected_zoom)
-                pix = page.get_pixmap(matrix=mat)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            st.success("✅ Crop captured! Preview below:")
+            st.image(cropped_img, use_container_width=True, caption="Cropped Area Sent to GPT")
 
-                st.image(img, caption=f"PDF Page 1 at {selected_zoom_label} zoom ({pix.width}×{pix.height}px)", use_container_width=True)
-                st.info("📝 Only first page is currently supported.")
-            except Exception as e:
-                st.error(f"❌ Failed to process PDF: {e}")
-                st.stop()
-        else:
-            st.error("Unsupported file type.")
-            st.stop()
+            st.download_button(
+                label="⬇️ Download Cropped Image Sent to GPT",
+                data=st.session_state["cropped_bytes"],
+                file_name="cropped_label.png",
+                mime="image/png"
+            )
 
-        # --- Crop UI if we have a valid image ---
-        if img:
-            st.markdown("### ✂️ Crop the label to the relevant section below:")
-            with st.spinner("🖼️ Loading crop tool..."):
-                cropped_img = st_cropper(
-                    img,
-                    box_color='#ff1744',
-                    realtime_update=True,
-                    aspect_ratio=None,
-                    return_type="image"
-                )
 
-            if st.button("✅ Use this crop →"):
-                buf = io.BytesIO()
-                cropped_img.save(buf, format="PNG")
-                st.session_state["cropped_bytes"] = buf.getvalue()
-                st.session_state["cropped_preview"] = cropped_img
 
-                st.success("✅ Crop captured! Preview below:")
-                st.image(cropped_img, use_container_width=True, caption="Cropped Area Sent to GPT")
-
-                st.download_button(
-                    label="⬇️ Download Cropped Image Sent to GPT",
-                    data=st.session_state["cropped_bytes"],
-                    file_name="cropped_label.png",
-                    mime="image/png"
-                )
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
@@ -982,5 +950,4 @@ if uploaded_file and user_prompt.strip():
                     "gpt_failed_rows.csv",
                     "text/csv"
                 )
-
 
