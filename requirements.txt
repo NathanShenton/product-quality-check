@@ -4,3 +4,4 @@ plotly>=5.20.0
 openai>=1.16.2
 streamlit-cropper==0.2.0
 Pillow>=9.5.0
+pymupdf>=1.23.20
