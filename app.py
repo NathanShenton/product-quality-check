@@ -706,17 +706,22 @@ if is_image_prompt:
         if file_type in ["image/jpeg", "image/png"]:
             img = Image.open(uploaded_image).convert("RGB")
 
-        # --- Handle PDF Upload ---
+        # --- Handle PDF Upload with zoom options ---
         elif file_type == "application/pdf":
             try:
+                zoom_options = {"1x": 1.0, "2x": 2.0, "3x": 3.0}
+                selected_zoom_label = st.radio("🔍 Select Zoom Level for PDF Page", options=list(zoom_options.keys()), horizontal=True)
+                selected_zoom = zoom_options[selected_zoom_label]
+
                 pdf_bytes = uploaded_image.read()
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                page = doc.load_page(0)  # First page
-                zoom = 2  # You can increase for higher res (e.g. 3)
-                mat = fitz.Matrix(zoom, zoom)
+                page = doc.load_page(0)  # Only first page for now
+                mat = fitz.Matrix(selected_zoom, selected_zoom)
                 pix = page.get_pixmap(matrix=mat)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                st.info("📝 Showing page 1 of the PDF. Only single-page support for now.")
+
+                st.image(img, caption=f"PDF Page 1 rendered at {selected_zoom_label} ({pix.width}×{pix.height}px)", use_container_width=True)
+                st.info("📝 Only first page is currently supported.")
             except Exception as e:
                 st.error(f"❌ Failed to process PDF: {e}")
                 st.stop()
@@ -725,6 +730,7 @@ if is_image_prompt:
             st.error("Unsupported file type.")
             st.stop()
 
+        # --- Crop UI ---
         st.markdown("### ✂️ Crop the label to the relevant section below:")
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
@@ -750,6 +756,7 @@ if is_image_prompt:
                 file_name="cropped_label.png",
                 mime="image/png"
             )
+
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
