@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import fitz  # PyMuPDF
 import plotly.graph_objects as go
 from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
@@ -694,13 +695,37 @@ user_prompt = st.text_area(
 # Image uploader and crop logic
 # -------------------------------
 if is_image_prompt:
-    st.markdown("### 🖼️ Upload Product Image & crop just the relevant panel")
-    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
+    st.markdown("### 🖼️ Upload Product Image or PDF Label & crop just the relevant panel")
+
+    uploaded_image = st.file_uploader("Choose JPG, PNG, or PDF", type=["jpg", "jpeg", "png", "pdf"])
 
     if uploaded_image:
-        img = Image.open(uploaded_image).convert("RGB")
-        st.markdown("### ✂️ Crop the label to the relevant section below:")
+        file_type = uploaded_image.type
 
+        # --- Handle Image Upload ---
+        if file_type in ["image/jpeg", "image/png"]:
+            img = Image.open(uploaded_image).convert("RGB")
+
+        # --- Handle PDF Upload ---
+        elif file_type == "application/pdf":
+            try:
+                pdf_bytes = uploaded_image.read()
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                page = doc.load_page(0)  # First page
+                zoom = 2  # You can increase for higher res (e.g. 3)
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                st.info("📝 Showing page 1 of the PDF. Only single-page support for now.")
+            except Exception as e:
+                st.error(f"❌ Failed to process PDF: {e}")
+                st.stop()
+
+        else:
+            st.error("Unsupported file type.")
+            st.stop()
+
+        st.markdown("### ✂️ Crop the label to the relevant section below:")
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
                 img,
@@ -725,9 +750,6 @@ if is_image_prompt:
                 file_name="cropped_label.png",
                 mime="image/png"
             )
-
-
-
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
