@@ -707,12 +707,7 @@ if is_image_prompt:
                 box_color='#ff1744',
                 realtime_update=True,
                 aspect_ratio=None,
-                return_type="image",
-                cropper_kwargs={
-                    "minContainerWidth": 800,   # or higher depending on your layout
-                    "minContainerHeight": 600,  # increase height as well
-                    "viewMode": 1               # restrict panning outside of image
-                }
+                return_type="image"
             )
 
         if st.button("✅ Use this crop →"):
