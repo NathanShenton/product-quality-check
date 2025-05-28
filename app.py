@@ -699,20 +699,22 @@ if is_image_prompt:
 
     if uploaded_image:
         img = Image.open(uploaded_image).convert("RGB")
+
+        # Resize image for better cropper UI scale
+        target_width = 1000
+        w_percent = target_width / float(img.size[0])
+        target_height = int((float(img.size[1]) * float(w_percent)))
+        img_resized = img.resize((target_width, target_height), Image.LANCZOS)
+
         st.markdown("### ✂️ Crop the label to the relevant section below:")
 
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
-                img,
+                img_resized,
                 box_color='#ff1744',
                 realtime_update=True,
                 aspect_ratio=None,
-                return_type="image",
-                cropper_kwargs={
-                    "minContainerWidth": 800,   # or higher depending on your layout
-                    "minContainerHeight": 600,  # increase height as well
-                    "viewMode": 1               # restrict panning outside of image
-                }
+                return_type="image"
             )
 
         if st.button("✅ Use this crop →"):
@@ -730,8 +732,6 @@ if is_image_prompt:
                 file_name="cropped_label.png",
                 mime="image/png"
             )
-
-
 
 else:
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
