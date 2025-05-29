@@ -874,17 +874,29 @@ if uploaded_file and user_prompt.strip():
             for idx, row in df.iterrows():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = ""
-
+            
                 try:
                     # 1 – split the stored prompt into true roles
                     if "USER MESSAGE:" in user_prompt:
                         system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
-                    else:                       # fallback: whole prompt is system
+                    else:  # fallback: whole prompt is system
                         system_txt, user_txt = user_prompt, ""
-
+            
                     system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
-                    user_txt = user_txt.strip().format(**row_data)
-                    user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                    row_json_str = json.dumps(row_data, ensure_ascii=False)
+            
+                    # First replace the special placeholder
+                    user_txt = user_txt.replace("{product_data_json_here}", row_json_str).strip()
+            
+                    # Then handle any remaining field-specific placeholders (like {sku_name})
+                    try:
+                        user_txt = user_txt.format(**row_data)
+                    except KeyError as e:
+                        st.warning(f"⚠️ Missing placeholder value: {e}. Consider updating your prompt or CSV columns.")
+                        user_txt = user_txt  # Leave it as-is if substitution fails
+            
+                    # Optionally append the selected fields for context
+                    user_txt += f"\n\nSelected fields:\n{row_json_str}"
 
                     # 2 – call OpenAI chat
                     response = client.chat.completions.create(
