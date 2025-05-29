@@ -258,6 +258,39 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "VHMS FP&A Category Classifier": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a **regulatory-grade product data classifier** for FP&A reporting in the VHMS category.\n"
+            "Your task is to assign each product to **exactly one** FP&A Level 4 category, chosen only from the approved list below.\n\n"
+    
+            "RULES:\n"
+            "1. Use the following fields to guide your classification:\n"
+            "   - sku_name\n"
+            "   - product_description_en\n"
+            "   - variants_description or web_description\n"
+            "   - full_ingredients\n"
+            "   - brand_name\n"
+            "2. If more than one category could apply, explain briefly and choose the **best overall fit**.\n"
+            "3. If no confident classification is possible, return: 'Unclear Placement'.\n"
+            "4. **NEVER** invent or suggest a category not listed.\n"
+            "5. Return valid JSON **only** in this exact format:\n"
+            "{\n"
+            "  \"sku\": \"<sku>\",\n"
+            "  \"fpna_l4\": \"<one of the categories below or 'Unclear Placement'>\",\n"
+            "  \"rationale\": \"<clear and concise justification>\"\n"
+            "}\n\n"
+    
+            "APPROVED FP&A L4 CATEGORIES:\n"
+            "Collagen\nNutrition support/Meal replacement\nIsolate\nBroad Spectrum\nFull Spectrum\nBaby\nCold & Flu Relief\nSkin Health\nCalm & Mood Herbal Other\nMenopause\nSleep Herbal Other\nBrain Support\nHerbal remedies\nImmunity Herbals\nPeppermint\nBladder Support\nSexual health\nMultiVits\nFish Omegas\nFibre\nProbiotics\nHeart Support\nMilk Thistle\nGlucosamine\nHormone Support\nHair Health\nWellness\nCLO\nVit B Complexes\nProstate Support\nVit B\nVit C\nTurmeric\nSuperfoods & Antioxidants\nHerbal & Mineral\nSkin Hair & Nails\nKids Multi-Vits\nVitamin D\nWeight Loss Supplements\nPregnancy\nPlant-Based Omegas\nHerbals\nCalcium\nVision Support\nMagnesium\nIron\n5-HTP\nZinc\nKids Single Vits\nLutein\nLecithin\nCharcoal\nHerbal\nFat Binders\nGinkgo\nGarlic\nEchinacea\nConception\nValerian\nTeen\nAshwagandha\nSt Johns Wort\nVHMS Nootropics\nVHMS Recovery\nAllergy Relief\nBeauty - Broad Spectrum\nCapsules - Broad Spectrum\nFood - Broad Spectrum\nGummy - Broad Spectrum\nOil - Broad Spectrum\nSpray - Broad Spectrum\nTopical - Broad Spectrum\nBeauty - Full Spectrum\nCapsules - Full Spectrum\nFood - Full Spectrum\nGummy - Full Spectrum\nOil - Full Spectrum\nSpray - Full Spectrum\nTopical - Full Spectrum\nBeauty - Isolate\nCapsules - Isolate\nFood - Isolate\nGummy - Isolate\nOil - Isolate\nSpray - Isolate\nTopical - Isolate\nGeneral Pain Relief\nMigraine Relief\nMouth Pain, Toothache, Teething, and Ulcers\nMuscular & Joint Pain Relief\nAntidiarrhoeals\nLaxatives\nStomach Remedies - Other\nCoughs & Colds - Other\nSore Throat\nHealthy Teeth & Gums\nEar Care\nGlue Ear\nHeart Health\nEye Care\nGenitourinary Tract\nPremenstrual, Menstrual and Menopause\nFootcare\nHaemorrhoids\nDandruff\nPattern Baldness\nSkin & Scalp - Hair and Scalp\nHayfever & Other Allergies - Other\nCoughs & Colds - Infant & Babies\nHayfever & Other Allergies - Infant & Babies\nNappy Rash\nPain and Teething\nSkin & Scalp - Infants and Babies\nStomach Remedies - Infants & Babies\nDry Mouth and Mouth Health\nSkin & Scalp - Skin\nAntifungals\nAntiseptics\nSkin & Scalp - Skin Care and Antiseptics\nCalming and Sleeping\nInsect repellents\nSnoring/breathing devices\nSmoking Cessation\nFunctional Mushrooms\nSexual Health - OTC\nSuncream – OTC\nBites – OTC\nTargeted - Sachets\nTargeted - Other\nGeneral Hydration - Sachets\nGeneral Hydration - Other\n\n"
+    
+            "USER MESSAGE:\n"
+            "Classify the following product using the above rules and category list:\n"
+            "{product_data_json_here}"
+    ),
+        "recommended_model": "gpt-4",
+        "description": "Classifies a product to VHMS FP&A L4 using structured fields and strict JSON output. Never invents categories."
+},
     "Image: Ingredient Scrape (HTML)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
