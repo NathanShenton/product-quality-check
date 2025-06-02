@@ -593,54 +593,44 @@ PROMPT_OPTIONS = {
         "description": "Flags products that contain methylfolate or methylcobalamin, returning Yes/No/Unsure plus the matched string."
     },
     "Legal Category Classifier": {
-            "prompt": (
-                "SYSTEM MESSAGE:\\n"
-                "\"You are a JSON-producing assistant. Valid output:\\n\\n""
-                "{\\n  \\\"legal_category\\\": \\\"Ambient Food\\\" | \\\"Chilled Food\\\" | "
-                "\\\"Cosmetic\\\" | \\\"Food Supplement (Liquid)\\\" | \\\"Food Supplement (Solid)\\\" | "
-                "\\\"GSL Medicine\\\" | \\\"Homeopathic\\\" | \\\"Medical Device\\\" | "
-                "\\\"Other - General Merchandise\\\" | \\\"Traditional Herbal Remedy\\\" | \\\"unsure\\\"\\n}\\n\\n"
-                "Rules:\\n"
-                "• Return exactly one value.\\n"
-                "• Use \\\"unsure\\\" when the information provided is insufficient to choose confidently.\\n"
-                "• Use \\\"Other - General Merchandise\\\" only when the product is clearly a non-food, "
-                "non-supplement, non-cosmetic, non-medical item.\\n"
-                "• If is_medical_device is true, choose \\\"Medical Device\\\".\\n"
-                "• If thr contains a valid THR code (format \\\"THR00000/0000\\\"), choose "
-                "\\\"Traditional Herbal Remedy\\\"; otherwise never assign that category.\\n"
-                "• If product_licence starts with \\\"PL \\\" (e.g. \\\"PL 01234/0567\\\"), choose "
-                "\\\"GSL Medicine\\\" unless the text explicitly states a different class (P, POM, etc.).\\n"
-                "• Assign \\\"Food Supplement (Liquid/Solid)\\\" **only when** EITHER:\\n"
-                "    – the product text (name, description, warnings) calls itself a \\\"food supplement\\\" "
-                "or \\\"dietary supplement\\\", OR\\n"
-                "    – it provides a *measured daily dose* **and** lists NRVs/\\u0025RIs or says "
-                "\\\"do not exceed the recommended intake\\\".\\n"
-                "  Simple functional claims (e.g. \\\"packed with live cultures\\\", \\\"supports energy\\\") "
-                "are not enough.\\n"
-                "• For supplements, distinguish Liquid vs Solid by keywords in lexmark_pack_size: "
-                "\\\"ml\\\", \\\"l\\\", \\\"liquid\\\", \\\"shot\\\", \\\"syrup\\\" → Liquid; "
-                "\\\"g\\\", \\\"tablet\\\", \\\"capsule\\\", \\\"sachet\\\", \\\"bar\\\" → Solid.\\n"
-                "• Assign \\\"Homeopathic\\\" only when product_licence starts with \\\"NR \\\" "
-                "or the text explicitly says \\\"homeopathic medicine\\\".\\n"
-                "• Distinguish \\\"Ambient Food\\\" vs \\\"Chilled Food\\\" via storage cues "
-                "(e.g. \\\"store below 5 °C\\\", \\\"keep refrigerated\\\").\\n\\n"
-                "No explanations, disclaimers or extra keys — only valid JSON.\"\\n\\n"
-                "USER MESSAGE:\\n"
-                "Classify the following product:\\n\\n"
-                "- sku: {sku}\\n"
-                "- sku_name: {sku_name}\\n"
-                "- variants_description: {variants_description}\\n"
-                "- full_ingredients: {full_ingredients}\\n"
-                "- directions_info: {directions_info}\\n"
-                "- warning_info: {warning_info}\\n"
-                "- lexmark_pack_size: {lexmark_pack_size}\\n"
-                "- is_medical_device: {is_medical_device}\\n"
-                "- thr: {thr}\\n"
-                "- product_licence: {product_licence}\\n\\n"
-                "Only respond with the JSON described above."
-            ),
-            "recommended_model": "gpt-4.1-mini",
-            "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
+        "prompt": (
+            """SYSTEM MESSAGE:\\n
+                "You are a JSON-producing assistant. Valid output:\\n\\n
+                {\\n  \\\"legal_category\\\": \\\"Ambient Food\\\" | \\\"Chilled Food\\\" | \\\"Cosmetic\\\" | \\\"Food Supplement (Liquid)\\\" | \\\"Food Supplement (Solid)\\\" | 
+                \\\"GSL Medicine\\\" | \\\"Homeopathic\\\" | \\\"Medical Device\\\" | \\\"Other - General Merchandise\\\" | \\\"Traditional Herbal Remedy\\\" | \\\"unsure\\\"\\n}\\n\\n
+                Rules (read carefully):\\n
+                • Return **exactly one** value. If any doubt remains, output \\\"unsure\\\".\\n
+                • Use \\\"Other - General Merchandise\\\" only when the product is clearly a non-food, non-supplement, non-cosmetic, non-medical item.\\n
+                • Assign \\\"Medical Device\\\", \\\"Homeopathic\\\", \\\"GSL Medicine\\\", or \\\"Traditional Herbal Remedy\\\" **only when there is explicit, authoritative evidence** (e.g. the text literally states the class or provides the correct regulatory code/number). Otherwise choose \\\"unsure\\\".\\n
+                    – If is_medical_device is true **and** the text states \\\"medical device\\\", choose \\\"Medical Device\\\".\\n
+                    – If thr contains a valid THR code (format \\\"THR00000/0000\\\"), choose \\\"Traditional Herbal Remedy\\\"; otherwise never assign that category.\\n
+                    – If product_licence starts with \\\"PL \\\" (e.g. \\\"PL 01234/0567\\\") and the text confirms GSL status, choose \\\"GSL Medicine\\\".\\n
+                    – If product_licence starts with \\\"NR \\\" or the text says \\\"homeopathic medicine\\\", choose \\\"Homeopathic\\\".\\n
+                • Assign \\\"Food Supplement (Liquid/Solid)\\\" **only when** BOTH conditions hold:\\n
+                    1. The product text (name, description, or warnings) explicitly calls itself a \\\"food supplement\\\" or \\\"dietary supplement\\\" (exact phrase).\\n
+                    2. It provides a measured daily dose **and** lists NRVs/\\u0025RIs or says \\\"do not exceed the recommended intake\\\".\\n
+                  Measured dose alone is **not** enough.\\n
+                  Products described as \\\"tea\\\", \\\"herbal infusion\\\", \\\"tisane\\\", or sold in \\\"tea bags\\\" are **not** supplements unless they meet both criteria above.\\n
+                • For supplements, distinguish Liquid vs Solid by keywords in lexmark_pack_size:\\n
+                    \\\"ml\\\", \\\"l\\\", \\\"liquid\\\", \\\"shot\\\", \\\"syrup\\\" → Liquid; \\\"g\\\", \\\"tablet\\\", \\\"capsule\\\", \\\"sachet\\\", \\\"bar\\\" → Solid.\\n
+                • Distinguish \\\"Ambient Food\\\" vs \\\"Chilled Food\\\" via storage cues (e.g. \\\"store below 5 °C\\\", \\\"keep refrigerated\\\").\\n\\n
+                No explanations, disclaimers, or extra keys — output only the valid JSON."\\n\\n
+                USER MESSAGE:\\n
+                Classify the following product:\\n\\n
+                - sku: {sku}\\n
+                - sku_name: {sku_name}\\n
+                - variants_description: {variants_description}\\n
+                - full_ingredients: {full_ingredients}\\n
+                - directions_info: {directions_info}\\n
+                - warning_info: {warning_info}\\n
+                - lexmark_pack_size: {lexmark_pack_size}\\n
+                - is_medical_device: {is_medical_device}\\n
+                - thr: {thr}\\n
+                - product_licence: {product_licence}\\n\\n
+                Only respond with the JSON described above."""
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
     },
     "Allergen Bold Check": {
         "prompt": (
