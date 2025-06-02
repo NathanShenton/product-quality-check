@@ -563,7 +563,6 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Validates vegan status solely from ingredient text; flags any animal-derived terms."
     },
-
     "Methylated Vitamin Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -595,8 +594,8 @@ PROMPT_OPTIONS = {
     },
     "Legal Category Classifier": {
             "prompt": (
-                "SYSTEM MESSAGE:\n"
-                \"You are a JSON-producing assistant. Valid output:\n\n"
+                "SYSTEM MESSAGE:\\n"
+                "\"You are a JSON-producing assistant. Valid output:\\n\\n"
                 "{\\n  \\\"legal_category\\\": \\\"Ambient Food\\\" | \\\"Chilled Food\\\" | \\\"Cosmetic\\\" | "
                 "\\\"Food Supplement (Liquid)\\\" | \\\"Food Supplement (Solid)\\\" | \\\"GSL Medicine\\\" | "
                 "\\\"Homeopathic\\\" | \\\"Medical Device\\\" | \\\"Other - General Merchandise\\\" | "
@@ -616,7 +615,7 @@ PROMPT_OPTIONS = {
                 "\\\"g\\\", \\\"tablet\\\", \\\"capsule\\\", \\\"sachet\\\", etc. → Solid.\\n"
                 "• Distinguish \\\"Ambient Food\\\" vs \\\"Chilled Food\\\" from storage cues anywhere in the text "
                 "(e.g. \\\"store below 5 °C\\\", \\\"keep refrigerated\\\").\\n\\n"
-                "No explanations, disclaimers or extra keys—only valid JSON.\"\\n\\n"
+                "No explanations, disclaimers or extra keys — only valid JSON.\"\\n\\n"
                 "USER MESSAGE:\\n"
                 "Classify the following product:\\n\\n"
                 "- sku: {sku}\\n"
