@@ -593,6 +593,47 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Flags products that contain methylfolate or methylcobalamin, returning Yes/No/Unsure plus the matched string."
     },
+    "Legal Category Classifier": {
+            "prompt": (
+                "SYSTEM MESSAGE:\n"
+                "\"You are a JSON-producing assistant. Valid output:\n\n"
+                "{\\n  \\\"legal_category\\\": \\\"Ambient Food\\\" | \\\"Chilled Food\\\" | \\\"Cosmetic\\\" | "
+                "\\\"Food Supplement (Liquid)\\\" | \\\"Food Supplement (Solid)\\\" | \\\"GSL Medicine\\\" | "
+                "\\\"Homeopathic\\\" | \\\"Medical Device\\\" | \\\"Other - General Merchandise\\\" | "
+                "\\\"Traditional Herbal Remedy\\\" | \\\"unsure\\\"\\n}\\n\\n"
+                "Rules:\\n"
+                "• Return exactly one value.\\n"
+                "• Use \\\"unsure\\\" when the information provided is insufficient to choose confidently.\\n"
+                "• Use \\\"Other - General Merchandise\\\" only when the product is clearly a non-food, "
+                "non-supplement, non-cosmetic, non-medical item.\\n"
+                "• If is_medical_device is true, choose \\\"Medical Device\\\".\\n"
+                "• If thr indicates a valid THR registration, choose \\\"Traditional Herbal Remedy\\\".\\n"
+                "• If product_licence starts with a PL-number (e.g. \\\"PL 01234/0567\\\"), the product is a "
+                "licensed medicine – choose \\\"GSL Medicine\\\" unless the pack or description specifies "
+                "another class (P, POM, etc.).\\n"
+                "• Distinguish \\\"Food Supplement (Liquid)\\\" vs \\\"Food Supplement (Solid)\\\" by "
+                "lexmark_uom / pack clues (ml, l, liquid → Liquid; g, capsule, tablet, sachet → Solid).\\n"
+                "• Distinguish \\\"Ambient Food\\\" vs \\\"Chilled Food\\\" by storage cues such as "
+                "\\\"store below 5 °C\\\" or \\\"keep refrigerated\\\".\\n\\n"
+                "No explanations, disclaimers or extra keys—only valid JSON.\"\\n\\n"
+                "USER MESSAGE:\\n"
+                "Classify the following product:\\n\\n"
+                "- sku: {sku}\\n"
+                "- sku_name: {sku_name}\\n"
+                "- variants_description: {variants_description}\\n"
+                "- full_ingredients: {full_ingredients}\\n"
+                "- directions_info: {directions_info}\\n"
+                "- warning_info: {warning_info}\\n"
+                "- lexmark_pack_size: {lexmark_pack_size}\\n"
+                "- lexmark_uom: {lexmark_uom}\\n"
+                "- is_medical_device: {is_medical_device}\\n"
+                "- thr: {thr}\\n"
+                "- product_licence: {product_licence}\\n\\n"
+                "Only respond with the JSON described above."
+            ),
+            "recommended_model": "gpt-4.1-mini",
+            "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
+    },
     "Allergen Bold Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
