@@ -93,10 +93,10 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
     approximate tokens in user prompt, and row data.
     """
     model_costs_per_1k = {
-        "gpt-3.5-turbo": (0.0005, 0.0015),
+        "gpt-3.5-turbo": (0.0005, 0.002),
         "gpt-4.1-mini":  (0.0004, 0.0016),
         "gpt-4.1-nano":  (0.0001, 0.0004),
-        "gpt-4o-mini": (0.0025, 0.0075),
+        "gpt-4o-mini": (0.00015, 0.0006),
         "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
         "gpt-4-turbo":   (0.01,   0.03)
     }
