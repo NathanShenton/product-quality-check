@@ -349,16 +349,27 @@ PROMPT_OPTIONS = {
     "Product Name & Variant Extractor": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant. …\"\n\n"
+            "\"You are a JSON-producing assistant. You never invent placeholder text. "
+            "You must respond with valid JSON in this exact format:\n\n"
+            "{\n"
+            "  \"product_name\": \"<Product Name>\",\n"
+            "  \"variant_name\": \"<Variant Name>\"\n"
+            "}\n\n"
+            "No other fields are allowed.\"\n\n"
             "USER MESSAGE:\n"
-            "Using the product data provided in **Selected fields**, generate two values that meet the definitions below.\n\n"
-            "► **Product Name** … (unchanged) …\n\n"
+            "Using the product data in **Selected fields**, return values for the two attributes below.\n\n"
+            "► **Product Name**\n"
+            "• Brand + primary product description (product type).\n"
+            "• Exclude strength, flavour or scent unless their removal makes the name unclear.\n"
+            "• **MUST NOT repeat any words that appear in Variant Name. Remove them.**\n"
+            "• Always Proper Case; drop trademark symbols (™, ®, &trade;, etc.).\n"
+            "• Examples: Holland & Barrett Vitamin D3; Nakd Raw Fruit & Nut Bar.\n\n"
             "► **Variant Name**\n"
             "• Only the key distinguishing element *other than* size/pack-count.\n"
             "• Acceptable: flavour, strength, scent, functional claim.\n"
-            "• **Never** include quantity (ml, g) or pack size (e.g. “3×50 g”).\n"
-            "• If size/pack is the *only* difference, set Variant Name to an empty string \"\".\n"
-            "• Proper Case, no trademark symbols.\n"
+            "• **Never** include quantity (ml, g, L, kg) or pack size (e.g. “3×50 g”).\n"
+            "• If size/pack is the only difference, set Variant Name to an empty string \"\".\n"
+            "• Proper Case; no trademark symbols.\n"
             "• Examples:\n"
             "    – Salted Caramel\n"
             "    – 1000 mg\n"
@@ -371,7 +382,7 @@ PROMPT_OPTIONS = {
             "- Quantity: {{quantity_string}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Normalises each row into `product_name` and `variant_name`, leaving variant blank when size is the only differentiator."
+        "description": "Extracts `product_name` and `variant_name`, ensuring variant never contains size/pack info and product name never repeats variant content."
 },
     "Image: Warnings and Advisory (JSON)": {
         "prompt": (
