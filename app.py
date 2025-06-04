@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import requests
+import base64
 import plotly.graph_objects as go
 from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
@@ -224,6 +226,20 @@ def two_pass_extract(image_bytes: bytes) -> str:
     )
     return resp3.choices[0].message.content.strip()
 
+def fetch_image_as_base64(url: str) -> str:
+    """
+    Fetch an image from a URL and return it as a base64-encoded string.
+    Returns None if the image cannot be fetched.
+    """
+    try:
+        if not url.startswith("https"):
+            url = "https://" + url.strip().lstrip("/")
+        response = requests.get(url)
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode("utf-8")
+    except Exception:
+        return None
+
 
 #############################
 # Pre-Written Prompts       #
@@ -307,6 +323,27 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4o",
         "description": "More flexible extraction of usage instructions from cropped label. Looks for any clearly implied direction, even without a heading."
+    },
+    "Image: Multi-Image Ingredient Extract & Compare": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a high-accuracy image OCR assistant for UK food product packaging.\n\n"
+            "Your job is to extract only the INGREDIENTS section text from product label images provided as base64.\n\n"
+            "RULES:\n"
+            "1. Ignore all other sections (e.g. usage, warnings, storage).\n"
+            "2. Preserve all original punctuation, capitalisation, E-numbers, and sub-ingredients.\n"
+            "3. Bold every UK FIC allergen or known variant using <b>…</b> tags — even partial matches inside words.\n"
+            "4. Return an HTML string or IMAGE_UNREADABLE if no INGREDIENTS are found.\n\n"
+            "UK FIC allergens to bold: celery, cereals containing gluten (wheat, rye, barley, oats, spelt, kamut), crustaceans, eggs, fish, lupin, milk, molluscs, mustard, nuts (almond, hazelnut, walnut, cashew, pecan, pistachio, macadamia, Brazil nut), peanuts, sesame, soy/soya, sulphur dioxide/sulphites.\n\n"
+            "Your output must be either:\n"
+            "• a full HTML <p>…</p> string with allergens bolded, or\n"
+            "• IMAGE_UNREADABLE (exact text) if the section is illegible."
+        ),
+        "recommended_model": "gpt-4o",
+        "description": (
+            "Extracts INGREDIENTS from multiple product image URLs and highlights allergens "
+            "using <b>…</b>. Compares result to the 'full_ingredients' field from the same row."
+        )
     },
     "Spelling Checker": {
         "prompt": (
@@ -919,66 +956,81 @@ if uploaded_file and user_prompt.strip():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = ""
 
-                try:
-                    # 1 – split the stored prompt into true roles
-                    if "USER MESSAGE:" in user_prompt:
-                        system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
-                    else:                       # fallback: whole prompt is system
-                        system_txt, user_txt = user_prompt, ""
+                # Handle multi-image ingredient extract
+                if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
+                    image_urls = row.get("image URLs", "")
+                    image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
+                    extracted = []
 
-                    system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
-                    user_txt = user_txt.strip().format(**row_data)
-                    user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                    for url in image_list:
+                        encoded_img = fetch_image_as_base64(url)
+                        if not encoded_img:
+                            continue
 
-                    # 2 – call OpenAI chat
-                    response = client.chat.completions.create(
-                        model=model_choice,
-                        messages=[
-                            {"role": "system", "content": system_txt},
-                            {"role": "user",   "content": user_txt}
-                        ],
-                        temperature=0.0,
-                        top_p=0
-                    )
-                    content = response.choices[0].message.content.strip()
+                        try:
+                            response = client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=[
+                                    {"role": "system", "content": selected_prompt_text},
+                                    {"role": "user", "content": [
+                                        {"type": "text", "text": "Extract the INGREDIENTS section only."},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
+                                    ]}
+                                ],
+                                temperature=0.0
+                            )
+                            result = response.choices[0].message.content.strip()
+                            if result and "IMAGE_UNREADABLE" not in result.upper():
+                                extracted.append(result)
+                        except Exception as e:
+                            extracted.append(f"[ERROR processing image: {e}]")
 
-                    # 3 – strip any ``` fences
-                    if content.startswith("```"):
-                        parts = content.split("```", maxsplit=2)
-                        content = parts[1].lstrip("json").strip().split("```")[0].strip()
+                    combined_html = "\n".join(extracted).strip()
+                    reference = row.get("full_ingredients", "")
+                    match = "Pass" if combined_html in reference else "Needs Review"
 
-                    # 4 – parse JSON
-                    parsed = json.loads(content)
-                    results.append(parsed)
+                    results.append({
+                        "extracted_ingredients": combined_html,
+                        "comparison_result": match
+                    })
 
-                    # 5 – rolling log (last 20 rows)
-                    rolling_log.append(f"Row {idx + 1}: {json.dumps(parsed)}")
-                    rolling_log = rolling_log[-20:]
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>"
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
+                else:
+                    try:
+                        # 1 – split the stored prompt into true roles
+                        if "USER MESSAGE:" in user_prompt:
+                            system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
+                        else:
+                            system_txt, user_txt = user_prompt, ""
 
-                except Exception as e:
-                    failed_rows.append(idx)
-                    error_result = {
-                        "error": f"Failed to process row {idx}: {e}",
-                        "raw_output": content if content else "No content returned"
-                    }
-                    results.append(error_result)
+                        system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
+                        user_txt = user_txt.strip().format(**row_data)
+                        user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                    rolling_log.append(f"Row {idx + 1}: ERROR - {e}")
-                    rolling_log = rolling_log[-20:]
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>"
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
+                        response = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[
+                                {"role": "system", "content": system_txt},
+                                {"role": "user",   "content": user_txt}
+                            ],
+                            temperature=0.0,
+                            top_p=0
+                        )
+                        content = response.choices[0].message.content.strip()
+
+                        if content.startswith("```"):
+                            parts = content.split("```", maxsplit=2)
+                            content = parts[1].lstrip("json").strip().split("```")[0].strip()
+
+                        parsed = json.loads(content)
+                        results.append(parsed)
+
+                    except Exception as e:
+                        failed_rows.append(idx)
+                        error_result = {
+                            "error": f"Failed to process row {idx}: {e}",
+                            "raw_output": content if content else "No content returned"
+                        }
+                        results.append(error_result)
 
                 # 6 – update progress UI
                 progress = (idx + 1) / n_rows
@@ -987,6 +1039,17 @@ if uploaded_file and user_prompt.strip():
                     f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                     unsafe_allow_html=True
                 )
+
+                rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
+                rolling_log = rolling_log[-20:]
+                log_placeholder.markdown(
+                    "<h4>📝 Recent Outputs (Last 20)</h4>"
+                    "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                    + "\n".join(rolling_log) +
+                    "</pre>",
+                    unsafe_allow_html=True
+                )
+
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
