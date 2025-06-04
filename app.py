@@ -965,6 +965,7 @@ if uploaded_file and user_prompt.strip():
                     image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
                     extracted = []
 
+                    # 1) Run OCR on each URL
                     for url in image_list:
                         encoded_img = fetch_image_as_base64(url)
                         if not encoded_img:
@@ -990,11 +991,61 @@ if uploaded_file and user_prompt.strip():
 
                     combined_html = "\n".join(extracted).strip()
                     reference = row.get("full_ingredients", "")
-                    match = "Pass" if combined_html in reference else "Needs Review"
+
+                    # 2) Simple containment check to give a quick Pass/Needs Review
+                    match_flag = "Pass" if combined_html in reference else "Needs Review"
+
+                    # 3) Ask GPT to compare combined_html vs. reference in detail
+                    diff_prompt = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a detailed comparison assistant for UK food label ingredients. "
+                                "You will be given two strings:\n"
+                                "  • OCR_OUTPUT (HTML-bolded ingredients from the image)\n"
+                                "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
+                                "Your task:\n"
+                                "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
+                                "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
+                                "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
+                                "Return exactly one JSON object (no extra commentary) with these fields:\n"
+                                "{\n"
+                                "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
+                                "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
+                                "}"
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "OCR_OUTPUT:\n"
+                                + combined_html
+                                + "\n\nREFERENCE:\n"
+                                + reference
+                            )
+                        }
+                    ]
+
+                    try:
+                        diff_resp = client.chat.completions.create(
+                            model="gpt-4.1-mini",
+                            messages=diff_prompt,
+                            temperature=0.0
+                        )
+                        diff_content = diff_resp.choices[0].message.content.strip()
+                        # Parse GPT output (JSON)
+                        diff_json = json.loads(diff_content)
+                    except Exception as e:
+                        diff_json = {
+                            "severity": "Major",
+                            "diff_explanation": f"[Error comparing: {e}]"
+                        }
 
                     results.append({
                         "extracted_ingredients": combined_html,
-                        "comparison_result": match
+                        "comparison_result": match_flag,
+                        "severity": diff_json.get("severity", ""),
+                        "diff_explanation": diff_json.get("diff_explanation", "")
                     })
 
                 else:
