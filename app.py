@@ -781,8 +781,15 @@ recommended_model = selected_prompt_data["recommended_model"]
 prompt_description = selected_prompt_data["description"]
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
-# --- Determine if image-based ---
-is_image_prompt = prompt_choice.startswith("Image:")
+# --- Determine if image-based (single-image cropping prompts only) ---
+single_image_prompts = {
+    "Image: Ingredient Scrape (HTML)",
+    "Image: Directions for Use",
+    "Image: Storage Instructions",
+    "Image: Warnings and Advisory (JSON)",
+    # add any other single-image crop prompts here
+}
+is_image_prompt = prompt_choice in single_image_prompts
 uploaded_image = None
 uploaded_file = None
 
@@ -840,23 +847,20 @@ if is_image_prompt:
                 mime="image/png"
             )
 
-
-
 else:
+    # For all other prompts (including multi-image URL), show CSV uploader
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
 
 
 # ---------------------------------------------------------------
-# Image-prompt flow -– two-pass high-accuracy extraction
+# Image-prompt flow – two-pass high-accuracy extraction (single-image)
 # ---------------------------------------------------------------
-
 if is_image_prompt and st.session_state.get("cropped_bytes"):
     st.markdown("### 📤 Processing image…")
     with st.spinner("Running high-accuracy two-pass extraction"):
         # Enforce the correct model
         if model_choice != "gpt-4o":
-            st.error("🛑  Image prompts require the **gpt-4o** model. "
-                     "Please choose it above and try again.")
+            st.error("🛑  Image prompts require the **gpt-4o** model. Please choose it above and try again.")
             st.stop()
 
         try:
@@ -864,7 +868,6 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
             if "Ingredient Scrape" in prompt_choice:
                 html_out = two_pass_extract(st.session_state["cropped_bytes"])
             else:
-                import base64
                 data_url = f"data:image/jpeg;base64,{base64.b64encode(st.session_state['cropped_bytes']).decode()}"
 
                 # System prompt from user config
