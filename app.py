@@ -957,100 +957,149 @@ if uploaded_file and user_prompt.strip():
             # ---------- Processing loop ----------
             for idx, row in df.iterrows():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
-                content = ""
+                content = {}
 
-                # Handle multi-image ingredient extract
+                # Handle multi-image ingredient extraction + compare
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
                     image_urls = row.get("image URLs", "")
-                    image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
-                    extracted = []
+                    image_list = [u.strip().replace('"', "") for u in image_urls.split(",") if u.strip()]
 
-                    # 1) Run OCR on each URL
+                    # 1) First pass: find which image actually contains "Ingredients"
+                    ingredient_image_base64 = None
                     for url in image_list:
-                        encoded_img = fetch_image_as_base64(url)
-                        if not encoded_img:
+                        encoded = fetch_image_as_base64(url)
+                        if not encoded:
                             continue
 
+                        # Quick yes/no classifier: does this image show the ingredients panel?
+                        classifier_prompt = [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a concise image classifier. "
+                                    "Given a single product label image (as base64), "
+                                    "answer exactly YES or NO to the question: "
+                                    "\"Does this image contain the INGREDIENTS block/text?\""
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Image incoming for ingredient‐panel check:"},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
+                                ]
+                            }
+                        ]
                         try:
-                            response = client.chat.completions.create(
+                            cls_resp = client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=classifier_prompt,
+                                temperature=0.0
+                            )
+                            ans = cls_resp.choices[0].message.content.strip().upper()
+                            # Accept “YES” exactly
+                            if ans.startswith("YES"):
+                                ingredient_image_base64 = encoded
+                                break
+                        except Exception:
+                            # If classifier fails, skip this image
+                            continue
+
+                    # If no image was flagged, record “unable to locate”
+                    if not ingredient_image_base64:
+                        results.append({
+                            "extracted_ingredients": "",
+                            "comparison_result": "IMAGE_NOT_FOUND",
+                            "severity": "",
+                            "diff_explanation": "No image in the set was identified as containing ingredients."
+                        })
+                    else:
+                        # 2) Run detailed extraction on the identified image
+                        try:
+                            extract_resp = client.chat.completions.create(
                                 model="gpt-4o",
                                 messages=[
                                     {"role": "system", "content": selected_prompt_text},
                                     {"role": "user", "content": [
                                         {"type": "text", "text": "Extract the INGREDIENTS section only."},
-                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{ingredient_image_base64}"}}
                                     ]}
                                 ],
                                 temperature=0.0
                             )
-                            result = response.choices[0].message.content.strip()
-                            if result and "IMAGE_UNREADABLE" not in result.upper():
-                                extracted.append(result)
+                            ocr_result = extract_resp.choices[0].message.content.strip()
                         except Exception as e:
-                            extracted.append(f"[ERROR processing image: {e}]")
+                            ocr_result = "IMAGE_UNREADABLE"
 
-                    combined_html = "\n".join(extracted).strip()
-                    reference = row.get("full_ingredients", "")
+                        # If OCR says unreadable, skip diff
+                        if not ocr_result or "IMAGE_UNREADABLE" in ocr_result.upper():
+                            results.append({
+                                "extracted_ingredients": ocr_result,
+                                "comparison_result": "OCR_FAILED",
+                                "severity": "",
+                                "diff_explanation": "OCR failed or no ingredients were readable from the identified image."
+                            })
+                        else:
+                            # 3) Now compare only if OCR succeeded
+                            reference = row.get("full_ingredients", "")
+                            # Quick “containment” check
+                            match_flag = "Pass" if ocr_result in reference else "Needs Review"
 
-                    # 2) Simple containment check to give a quick Pass/Needs Review
-                    match_flag = "Pass" if combined_html in reference else "Needs Review"
+                            # Build the diff prompt
+                            diff_prompt = [
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "You are a detailed comparison assistant for UK food label ingredients. "
+                                        "You will be given two strings:\n"
+                                        "  • OCR_OUTPUT (HTML‐bolded ingredients from the image)\n"
+                                        "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
+                                        "Your task:\n"
+                                        "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
+                                        "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
+                                        "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
+                                        "Return exactly one JSON object (no extra commentary) with these fields:\n"
+                                        "{\n"
+                                        "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
+                                        "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
+                                        "}"
+                                    )
+                                },
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "OCR_OUTPUT:\n"
+                                        + ocr_result
+                                        + "\n\nREFERENCE:\n"
+                                        + reference
+                                    )
+                                }
+                            ]
 
-                    # 3) Ask GPT to compare combined_html vs. reference in detail
-                    diff_prompt = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a detailed comparison assistant for UK food label ingredients. "
-                                "You will be given two strings:\n"
-                                "  • OCR_OUTPUT (HTML-bolded ingredients from the image)\n"
-                                "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
-                                "Your task:\n"
-                                "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
-                                "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
-                                "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
-                                "Return exactly one JSON object (no extra commentary) with these fields:\n"
-                                "{\n"
-                                "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
-                                "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
-                                "}"
-                            )
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                "OCR_OUTPUT:\n"
-                                + combined_html
-                                + "\n\nREFERENCE:\n"
-                                + reference
-                            )
-                        }
-                    ]
+                            try:
+                                diff_resp = client.chat.completions.create(
+                                    model="gpt-4.1-mini",
+                                    messages=diff_prompt,
+                                    temperature=0.0
+                                )
+                                diff_content = diff_resp.choices[0].message.content.strip()
+                                diff_json = json.loads(diff_content)
+                            except Exception as e:
+                                diff_json = {
+                                    "severity": "Major",
+                                    "diff_explanation": f"[Error comparing: {e}]"
+                                }
 
-                    try:
-                        diff_resp = client.chat.completions.create(
-                            model="gpt-4.1-mini",
-                            messages=diff_prompt,
-                            temperature=0.0
-                        )
-                        diff_content = diff_resp.choices[0].message.content.strip()
-                        # Parse GPT output (JSON)
-                        diff_json = json.loads(diff_content)
-                    except Exception as e:
-                        diff_json = {
-                            "severity": "Major",
-                            "diff_explanation": f"[Error comparing: {e}]"
-                        }
-
-                    results.append({
-                        "extracted_ingredients": combined_html,
-                        "comparison_result": match_flag,
-                        "severity": diff_json.get("severity", ""),
-                        "diff_explanation": diff_json.get("diff_explanation", "")
-                    })
+                            results.append({
+                                "extracted_ingredients": ocr_result,
+                                "comparison_result": match_flag,
+                                "severity": diff_json.get("severity", ""),
+                                "diff_explanation": diff_json.get("diff_explanation", "")
+                            })
 
                 else:
+                    # Non–multi‐image flows stay the same
                     try:
-                        # 1 – split the stored prompt into true roles
                         if "USER MESSAGE:" in user_prompt:
                             system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
                         else:
@@ -1064,7 +1113,7 @@ if uploaded_file and user_prompt.strip():
                             model=model_choice,
                             messages=[
                                 {"role": "system", "content": system_txt},
-                                {"role": "user",   "content": user_txt}
+                                {"role": "user", "content": user_txt}
                             ],
                             temperature=0.0,
                             top_p=0
@@ -1080,13 +1129,12 @@ if uploaded_file and user_prompt.strip():
 
                     except Exception as e:
                         failed_rows.append(idx)
-                        error_result = {
+                        results.append({
                             "error": f"Failed to process row {idx}: {e}",
                             "raw_output": content if content else "No content returned"
-                        }
-                        results.append(error_result)
+                        })
 
-                # 6 – update progress UI
+                # 6 – update progress UI
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
                 progress_text.markdown(
