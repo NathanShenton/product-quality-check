@@ -956,7 +956,7 @@ if uploaded_file and user_prompt.strip():
 
             # ---------- Processing loop ----------
             # ---------- Processing loop ----------
-                                    for idx, row in df.iterrows():
+                        for idx, row in df.iterrows():
                             row_data = {c: row.get(c, "") for c in cols_to_use}
                             content = {}
 
