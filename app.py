@@ -953,11 +953,14 @@ if uploaded_file and user_prompt.strip():
 
     # Button to run GPT
     if st.button("🚀 Run GPT on CSV"):
-        # Phase 1: CROPPING
-        if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare" and st.session_state["multiimg_phase"] == "cropping":
+        # Phase 1: CROPPING (only for the multi-image prompt)
+        if (
+            prompt_choice == "Image: Multi-Image Ingredient Extract & Compare"
+            and st.session_state["multiimg_phase"] == "cropping"
+        ):
             # Find next row that still needs cropping
             for idx, row in df.iterrows():
-                if st.session_state["did_crop_rows"].get(idx, False) is not True:
+                if not st.session_state["did_crop_rows"].get(idx, False):
                     # Show cropper for this row
                     image_urls = row.get("image URLs", "")
                     image_list = [
@@ -1009,10 +1012,11 @@ if uploaded_file and user_prompt.strip():
                             continue
 
                     if not ingredient_image_base64:
-                        # If no image was flagged, store a placeholder and mark as done
+                        # No image was flagged → record a blank result and mark as done
                         st.session_state["ocr_results"][idx] = ""
                         st.session_state["did_crop_rows"][idx] = True
-                        # After marking, rerun to move to next row immediately
+
+                        # After marking this row done, re-run so that it moves to the next row (or to processing)
                         st.experimental_rerun()
 
                     # If we found an image, ask user to crop it
@@ -1048,30 +1052,33 @@ if uploaded_file and user_prompt.strip():
                         except Exception:
                             extracted_html = "IMAGE_UNREADABLE"
 
+                        # Save this row's OCR result, mark row done
                         st.session_state["ocr_results"][idx] = extracted_html
                         st.session_state["did_crop_rows"][idx] = True
 
-                        # After saving this row’s OCR result, rerun to either show next cropper or
-                        # switch to processing phase if everything is done.
-                        # But first check if all rows are done:
+                        # Check if all rows are done; if so, switch to processing phase
                         all_done = all(
                             st.session_state["did_crop_rows"].get(i, False)
                             for i in range(len(df))
                         )
                         if all_done:
                             st.session_state["multiimg_phase"] = "processing"
+
+                        # Rerun so that either next row is shown or we move to processing
                         st.experimental_rerun()
 
                     # Always stop here until the user confirms the crop for this row
                     st.stop()
 
-            # If we exit the for-loop without hitting 'st.stop()', it means all rows got cropped somehow,
-            # so move to processing:
+            # If we finish the for-loop (every row got a crop or blank), switch to processing
             st.session_state["multiimg_phase"] = "processing"
             st.experimental_rerun()
 
-        # Phase 2: PROCESSING (multi-image OCR/comparison)
-        if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare" and st.session_state["multiimg_phase"] == "processing":
+        # Phase 2: PROCESSING (multi-image OCR + comparison)
+        if (
+            prompt_choice == "Image: Multi-Image Ingredient Extract & Compare"
+            and st.session_state["multiimg_phase"] == "processing"
+        ):
             with st.spinner("Running OCR + comparison on all cropped rows..."):
                 progress_bar = st.progress(0)
                 progress_text = st.empty()
@@ -1082,11 +1089,10 @@ if uploaded_file and user_prompt.strip():
                 log_placeholder = st.empty()
 
                 for idx, row in df.iterrows():
-                    # We already have the OCR result (or empty) in session_state
                     ocr_result = st.session_state["ocr_results"].get(idx, "")
 
                     if not ocr_result:
-                        # No image found or OCR_UNREADABLE
+                        # No image found or blank result
                         results.append({
                             "extracted_ingredients": "",
                             "comparison_result": "IMAGE_NOT_FOUND",
@@ -1101,7 +1107,7 @@ if uploaded_file and user_prompt.strip():
                             "diff_explanation": "OCR failed or no ingredients were readable after cropping."
                         })
                     else:
-                        # We have a valid OCR HTML string; now compare to full_ingredients
+                        # We have a valid OCR HTML string → compare to full_ingredients
                         reference = row.get("full_ingredients", "")
                         match_flag = "Pass" if (ocr_result in reference) else "Needs Review"
 
@@ -1215,7 +1221,7 @@ if uploaded_file and user_prompt.strip():
                         "text/csv"
                     )
 
-        # If it wasn’t a multi-image prompt, just fall back to the normal “single pass” loop
+        # If it wasn’t a multi-image prompt, use the normal single-pass loop
         elif prompt_choice != "Image: Multi-Image Ingredient Extract & Compare":
             with st.spinner("Processing with GPT..."):
                 progress_bar = st.progress(0)
@@ -1323,3 +1329,4 @@ if uploaded_file and user_prompt.strip():
                         "gpt_failed_rows.csv",
                         "text/csv"
                     )
+
