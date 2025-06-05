@@ -274,6 +274,58 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Medicinal Language Compliance Checker": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that evaluates product marketing copy for regulatory compliance. "
+            "You must NOT hallucinate or assume context beyond what is written. "
+            "Your job is to determine whether the description contains *medicinal language* that is likely non-compliant for food and drink products.\n\n"
+    
+            "You must respond with valid JSON in this exact format:\n\n"
+            "{\n"
+            "  \"medicinal_language_flag\": \"Yes\" | \"No\",\n"
+            "  \"matched_category\": \"<reason category or 'None'>\",\n"
+            "  \"explanation\": \"<brief explanation if flagged, or empty if 'No'>\"\n"
+            "}\n\n"
+    
+            "Return only one of the allowed values for `medicinal_language_flag`: 'Yes' or 'No'. "
+            "Return only the categories listed below. Never output any other string or free text. "
+            "Return nothing except the JSON object.\"\n\n"
+    
+            "USER MESSAGE:\n"
+            "Review the provided product description in isolation. Contextually assess whether it contains any language that implies a medicinal function, such as treating, preventing, or curing a medical condition. "
+            "You must evaluate the full sentence meaning — not just look for keywords.\n\n"
+    
+            "Flag as 'Yes' if the description:\n"
+            "- Suggests it can treat or relieve symptoms of a condition (e.g. pain, IBS, fatigue)\n"
+            "- Implies disease prevention or protection (e.g. immune defense, stops colds)\n"
+            "- Uses therapeutic framing like detox, cleanse, or regeneration\n"
+            "- Refers to menopause symptom treatment or hormonal balancing\n"
+            "- Suggests mental health impact (e.g. reduces anxiety or depression)\n"
+            "- Mentions disease names or implies targeting medical states\n"
+            "- Uses action language like 'heals', 'repairs', 'boosts', 'fights' in a medical sense\n\n"
+    
+            "Do NOT flag if the phrasing is clearly compliant and grounded in approved health claim structure (e.g. 'contributes to normal function of...') or if the effect is vague and not tied to disease or medical symptom relief.\n\n"
+    
+            "Allowed values for `matched_category`:\n"
+            "• \"Symptom Relief\"\n"
+            "• \"Disease Treatment or Cure\"\n"
+            "• \"Disease Prevention\"\n"
+            "• \"Detox or Organ Repair\"\n"
+            "• \"Mental Health Claims\"\n"
+            "• \"Hormonal or Menopause Claims\"\n"
+            "• \"Immune Claims\"\n"
+            "• \"Medical Condition References\"\n"
+            "• \"Pharmacological Action\"\n"
+            "• \"None\" ← if compliant\n\n"
+    
+            "Return nothing but the JSON object.\n\n"
+            "Selected field:\n"
+            "- Product Description: {{product_description}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Flags food and drink product descriptions that contextually contain non-compliant medicinal phrasing, based on ASA/FSA guidelines."
+    },
     "Image: Ingredient Scrape (HTML)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
