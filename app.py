@@ -421,6 +421,35 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Extracts `product_name` and `variant_name`, ensuring variant never contains size/pack info and product name never repeats variant content."
 },
+    "Gelatin Source Classifier": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant. You must not hallucinate or assume information. "
+            "You must respond with valid JSON in this exact format:\n\n"
+            "{\n"
+            "  \"gelatin_source\": \"<Gelatin - Beef | Gelatin - Porcine | Gelatin - Unknown Origin>\"\n"
+            "}\n\n"
+            "Return only one of the three allowed values. Never output any other string or text. "
+            "Only choose 'Beef' or 'Porcine' if the ingredient statement **explicitly** states the animal source. "
+            "If no animal is stated, select 'Gelatin - Unknown Origin'.\"\n\n"
+            "USER MESSAGE:\n"
+            "Review the provided product data to determine the origin of gelatin used. "
+            "Use the ingredient statement as the **primary source of truth**. "
+            "Only use the variant description if it provides additional explicit information. "
+            "Never infer or guess the source. Do not use brand reputation or assumed product category.\n\n"
+            "Allowed values for `gelatin_source`:\n"
+            "• \"Gelatin - Beef\"        ← if the ingredient statement mentions beef gelatin, bovine gelatin, or equivalent\n"
+            "• \"Gelatin - Porcine\"     ← if the ingredient statement mentions pork gelatin, porcine gelatin, or equivalent\n"
+            "• \"Gelatin - Unknown Origin\" ← if the source is not mentioned or unclear\n\n"
+            "Return nothing but the JSON object.\n\n"
+            "Selected fields:\n"
+            "- SKU: {{sku}}\n"
+            "- Full Ingredients: {{full_ingredients}}\n"
+            "- Variant Description: {{variants_description}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Classifies the animal origin of gelatin using only explicit evidence from the ingredient statement or variant description."
+    },
     "Image: Warnings and Advisory (JSON)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
