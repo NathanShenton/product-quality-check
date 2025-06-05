@@ -958,19 +958,19 @@ if uploaded_file and user_prompt.strip():
             for idx, row in df.iterrows():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = {}
-
+            
                 # Handle multi-image ingredient extraction + compare
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
                     image_urls = row.get("image URLs", "")
                     image_list = [u.strip().replace('"', "") for u in image_urls.split(",") if u.strip()]
-
+            
                     # 1) First pass: find which image actually contains "Ingredients"
                     ingredient_image_base64 = None
                     for url in image_list:
                         encoded = fetch_image_as_base64(url)
                         if not encoded:
                             continue
-
+            
                         # Quick yes/no classifier: does this image show the ingredients panel?
                         classifier_prompt = [
                             {
@@ -1004,7 +1004,7 @@ if uploaded_file and user_prompt.strip():
                         except Exception:
                             # If classifier fails, skip this image
                             continue
-
+            
                     # If no image was flagged, record “unable to locate”
                     if not ingredient_image_base64:
                         results.append({
@@ -1014,111 +1014,113 @@ if uploaded_file and user_prompt.strip():
                             "diff_explanation": "No image in the set was identified as containing ingredients."
                         })
                     else:
-                        # 2) Run detailed extraction on the identified image
-                                                # 2) Interactive crop + two-pass OCR on the identified image
-                        import io, base64
+                        # 2) Interactive crop + two-pass OCR on the identified image
+                        import io as _io, base64 as _base64
                         from PIL import Image
-
+            
                         # Decode base64 to a PIL image so we can display it
-                        raw_bytes = base64.b64decode(ingredient_image_base64)
-                        pil_img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-
-                        # Show the image and let the user draw a crop around the INGREDIENTS block
-                        st.markdown(f"#### ✂️ Row {idx + 1}: Please crop the INGREDIENTS block below")
-                        st.image(pil_img, use_container_width=True, caption="Original image identified as containing INGREDIENTS")
-
-                        cropped_img = st_cropper(
-                            pil_img,
-                            box_color='#ff1744',
-                            realtime_update=True,
-                            aspect_ratio=None,
-                            return_type="image"
-                        )
-
-                        # Wait for the user to confirm the crop
-                        if st.button(f"✅ Use this crop for row {idx + 1}"):
-                            buf = io.BytesIO()
-                            cropped_img.save(buf, format="PNG")
-                            cropped_bytes = buf.getvalue()
-
-                            try:
-                                ocr_result = two_pass_extract(cropped_bytes)
-                            except Exception:
-                                ocr_result = "IMAGE_UNREADABLE"
-
-                            # Remember that OCR has been done for this row
-                            st.session_state[f"ocr_done_row_{idx}"] = True
-                            st.session_state[f"ocr_result_row_{idx}"] = ocr_result
-                        else:
-                            # Pause here until the user clicks the button
-                            st.stop()
-
-                        # Once the user has confirmed the crop, proceed with comparison
-                        if st.session_state.get(f"ocr_done_row_{idx}", False):
-                            ocr_result = st.session_state[f"ocr_result_row_{idx}"]
-
-                            if not ocr_result or "IMAGE_UNREADABLE" in ocr_result.upper():
-                                results.append({
-                                    "extracted_ingredients": ocr_result,
-                                    "comparison_result": "OCR_FAILED",
-                                    "severity": "",
-                                    "diff_explanation": "OCR failed or no ingredients were readable after cropping."
-                                })
-                            else:
-                                reference = row.get("full_ingredients", "")
-                                match_flag = "Pass" if ocr_result in reference else "Needs Review"
-
-                                diff_prompt = [
-                                    {
-                                        "role": "system",
-                                        "content": (
-                                            "You are a detailed comparison assistant for UK food label ingredients. "
-                                            "You will be given two strings:\n"
-                                            "  • OCR_OUTPUT (HTML‐bolded ingredients from the image)\n"
-                                            "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
-                                            "Your task:\n"
-                                            "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
-                                            "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
-                                            "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
-                                            "Return exactly one JSON object (no extra commentary) with these fields:\n"
-                                            "{\n"
-                                            "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
-                                            "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
-                                            "}"
-                                        )
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": (
-                                            "OCR_OUTPUT:\n"
-                                            + ocr_result
-                                            + "\n\nREFERENCE:\n"
-                                            + reference
-                                        )
-                                    }
-                                ]
-
+                        raw_bytes = _base64.b64decode(ingredient_image_base64)
+                        pil_img = Image.open(_io.BytesIO(raw_bytes)).convert("RGB")
+            
+                        # Keys for session_state
+                        did_crop_key = f"did_crop_{idx}"
+                        ocr_result_key = f"ocr_result_{idx}"
+            
+                        # If we haven’t yet cropped this row, show cropper UI
+                        if not st.session_state.get(did_crop_key, False):
+                            st.markdown(f"#### ✂️ Row {idx + 1}: Please crop the INGREDIENTS block below")
+                            st.image(pil_img, use_container_width=True, caption="Original image identified as containing INGREDIENTS")
+            
+                            cropped_img = st_cropper(
+                                pil_img,
+                                box_color="#ff1744",
+                                realtime_update=True,
+                                aspect_ratio=None,
+                                return_type="image",
+                                key=f"cropper_{idx}"
+                            )
+            
+                            # User clicks to confirm this crop
+                            if st.button(f"✅ Use this crop for row {idx + 1}", key=f"confirm_{idx}"):
+                                buf = _io.BytesIO()
+                                cropped_img.save(buf, format="PNG")
+                                cropped_bytes = buf.getvalue()
+            
                                 try:
-                                    diff_resp = client.chat.completions.create(
-                                        model="gpt-4.1-mini",
-                                        messages=diff_prompt,
-                                        temperature=0.0
+                                    extracted_html = two_pass_extract(cropped_bytes)
+                                except Exception:
+                                    extracted_html = "IMAGE_UNREADABLE"
+            
+                                # Store OCR result and mark as done for this row
+                                st.session_state[ocr_result_key] = extracted_html
+                                st.session_state[did_crop_key] = True
+            
+                                # Rerun so we skip the cropper on next pass
+                                st.experimental_rerun()
+            
+                            # Stop here to wait for the user to confirm crop
+                            return
+            
+                        # If we reach here, cropping has been confirmed already
+                        ocr_result = st.session_state.get(ocr_result_key, "")
+            
+                        if not ocr_result or "IMAGE_UNREADABLE" in ocr_result.upper():
+                            results.append({
+                                "extracted_ingredients": ocr_result,
+                                "comparison_result": "OCR_FAILED",
+                                "severity": "",
+                                "diff_explanation": "OCR failed or no ingredients were readable after cropping."
+                            })
+                        else:
+                            reference = row.get("full_ingredients", "")
+                            match_flag = "Pass" if (ocr_result in reference) else "Needs Review"
+            
+                            diff_prompt = [
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "You are a detailed comparison assistant for UK food label ingredients. "
+                                        "You will be given two strings:\n"
+                                        "  • OCR_OUTPUT (HTML‐bolded ingredients from the image)\n"
+                                        "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
+                                        "Your task:\n"
+                                        "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
+                                        "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
+                                        "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
+                                        "Return exactly one JSON object (no extra commentary) with these fields:\n"
+                                        "{\n"
+                                        "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
+                                        "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
+                                        "}"
                                     )
-                                    diff_content = diff_resp.choices[0].message.content.strip()
-                                    diff_json = json.loads(diff_content)
-                                except Exception as e:
-                                    diff_json = {
-                                        "severity": "Major",
-                                        "diff_explanation": f"[Error comparing: {e}]"
-                                    }
-
-                                results.append({
-                                    "extracted_ingredients": ocr_result,
-                                    "comparison_result": match_flag,
-                                    "severity": diff_json.get("severity", ""),
-                                    "diff_explanation": diff_json.get("diff_explanation", "")
-                                })
-
+                                },
+                                {
+                                    "role": "user",
+                                    "content": "OCR_OUTPUT:\n" + ocr_result + "\n\nREFERENCE:\n" + reference
+                                }
+                            ]
+            
+                            try:
+                                diff_resp = client.chat.completions.create(
+                                    model="gpt-4.1-mini",
+                                    messages=diff_prompt,
+                                    temperature=0.0
+                                )
+                                diff_content = diff_resp.choices[0].message.content.strip()
+                                diff_json = json.loads(diff_content)
+                            except Exception as e:
+                                diff_json = {
+                                    "severity": "Major",
+                                    "diff_explanation": f"[Error comparing: {e}]"
+                                }
+            
+                            results.append({
+                                "extracted_ingredients": ocr_result,
+                                "comparison_result": match_flag,
+                                "severity": diff_json.get("severity", ""),
+                                "diff_explanation": diff_json.get("diff_explanation", "")
+                            })
+            
                 else:
                     # Non–multi‐image flows stay the same
                     try:
@@ -1126,11 +1128,11 @@ if uploaded_file and user_prompt.strip():
                             system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
                         else:
                             system_txt, user_txt = user_prompt, ""
-
+            
                         system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
                         user_txt = user_txt.strip().format(**row_data)
                         user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
-
+            
                         response = client.chat.completions.create(
                             model=model_choice,
                             messages=[
@@ -1141,14 +1143,14 @@ if uploaded_file and user_prompt.strip():
                             top_p=0
                         )
                         content = response.choices[0].message.content.strip()
-
+            
                         if content.startswith("```"):
                             parts = content.split("```", maxsplit=2)
                             content = parts[1].lstrip("json").strip().split("```")[0].strip()
-
+            
                         parsed = json.loads(content)
                         results.append(parsed)
-
+            
                     except Exception as e:
                         failed_rows.append(idx)
                         results.append({
