@@ -279,7 +279,7 @@ PROMPT_OPTIONS = {
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that evaluates product marketing copy for regulatory compliance. "
             "You must NOT hallucinate or assume context beyond what is written. "
-            "Your job is to determine whether the description contains *medicinal language* that is likely non-compliant for food and drink products.\n\n"
+            "Your task is to assess whether the product description contains *medicinal language* likely to be non-compliant for food and drink products under ASA/FSA guidance.\n\n"
     
             "You must respond with valid JSON in this exact format:\n\n"
             "{\n"
@@ -293,19 +293,24 @@ PROMPT_OPTIONS = {
             "Return nothing except the JSON object.\"\n\n"
     
             "USER MESSAGE:\n"
-            "Review the provided product description in isolation. Contextually assess whether it contains any language that implies a medicinal function, such as treating, preventing, or curing a medical condition. "
-            "You must evaluate the full sentence meaning — not just look for keywords.\n\n"
+            "Evaluate the following product description **in isolation**. Determine whether it includes language that clearly suggests a *medicinal function*, such as treating, preventing, or curing a disease or adverse health condition.\n\n"
     
-            "Flag as 'Yes' if the description:\n"
-            "- Suggests it can treat or relieve symptoms of a condition (e.g. pain, IBS, fatigue)\n"
-            "- Implies disease prevention or protection (e.g. immune defense, stops colds)\n"
-            "- Uses therapeutic framing like detox, cleanse, or regeneration\n"
-            "- Refers to menopause symptom treatment or hormonal balancing\n"
-            "- Suggests mental health impact (e.g. reduces anxiety or depression)\n"
-            "- Mentions disease names or implies targeting medical states\n"
-            "- Uses action language like 'heals', 'repairs', 'boosts', 'fights' in a medical sense\n\n"
+            "Only flag if the text clearly implies a functional effect on health **beyond general wellness**. Avoid flagging vague lifestyle claims, traditional uses, or non-medical benefits.\n\n"
     
-            "Do NOT flag if the phrasing is clearly compliant and grounded in approved health claim structure (e.g. 'contributes to normal function of...') or if the effect is vague and not tied to disease or medical symptom relief.\n\n"
+            "Flag as 'Yes' **only if** the description:\n"
+            "- Clearly suggests treatment, relief, or reduction of a specific symptom or condition (e.g. pain, anxiety, IBS, hot flushes)\n"
+            "- Claims to prevent or protect against a health condition (e.g. colds, viruses, stress-related illness)\n"
+            "- References detoxification or cleansing of organs in a therapeutic sense\n"
+            "- Mentions hormonal regulation or menopause symptom management with an implied health benefit\n"
+            "- Indicates mood or psychological enhancement with medical framing (e.g. depression, burnout)\n"
+            "- References named medical conditions in the context of effect or benefit (e.g. cancer, high blood pressure)\n"
+            "- Uses words like 'heal', 'repair', 'fight', 'boost', or 'restore' **in a way that implies medical action**\n\n"
+    
+            "Do NOT flag if:\n"
+            "- The effect is framed as traditional, cosmetic, or personal care (e.g. skin moisturising, used in Ayurveda)\n"
+            "- The language is clearly compliant and aligned to approved health claim structure (e.g. 'contributes to the normal function of...')\n"
+            "- The product describes general lifestyle positioning without linking to specific health improvements\n"
+            "- No health-related benefit is actually claimed\n\n"
     
             "Allowed values for `matched_category`:\n"
             "• \"Symptom Relief\"\n"
@@ -324,7 +329,7 @@ PROMPT_OPTIONS = {
             "- Product Description: {{product_description}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Flags food and drink product descriptions that contextually contain non-compliant medicinal phrasing, based on ASA/FSA guidelines."
+        "description": "Contextually flags non-compliant medicinal language in food and drink product copy, reducing false positives by focusing on explicit therapeutic claims."
     },
     "Image: Ingredient Scrape (HTML)": {
         "prompt": (
