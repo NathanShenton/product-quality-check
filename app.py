@@ -911,7 +911,7 @@ if uploaded_file and user_prompt.strip():
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
-
+    
     # 3. Dynamic Column Selector (up to 10 columns)
     st.subheader("📊 Select up to 10 CSV columns to pass to GPT")
     selected_columns = st.multiselect(
@@ -943,298 +943,114 @@ if uploaded_file and user_prompt.strip():
     # Create gauge placeholder before starting the loop
     gauge_placeholder = st.empty()
 
-    # Initialize session_state flags if missing
-    if "multiimg_phase" not in st.session_state:
-        st.session_state["multiimg_phase"] = "cropping"  # can be "cropping" or "processing"
-    if "did_crop_rows" not in st.session_state:
-        st.session_state["did_crop_rows"] = {}          # will store { idx: True/False }
-    if "ocr_results" not in st.session_state:
-        st.session_state["ocr_results"] = {}             # will store { idx: "<HTML or IMAGE_UNREADABLE>" }
-
     # Button to run GPT
     if st.button("🚀 Run GPT on CSV"):
-        # Phase 1: CROPPING (only for the multi-image prompt)
-        if (
-            prompt_choice == "Image: Multi-Image Ingredient Extract & Compare"
-            and st.session_state["multiimg_phase"] == "cropping"
-        ):
-            # Find next row that still needs cropping
+        with st.spinner("Processing with GPT..."):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+            n_rows = len(df)
+            results = []
+            failed_rows = []
+            rolling_log = []
+            log_placeholder = st.empty()
+
+            # ---------- Processing loop ----------
             for idx, row in df.iterrows():
-                if not st.session_state["did_crop_rows"].get(idx, False):
-                    # Show cropper for this row
+                row_data = {c: row.get(c, "") for c in cols_to_use}
+                content = ""
+
+                # Handle multi-image ingredient extract
+                if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
                     image_urls = row.get("image URLs", "")
-                    image_list = [
-                        u.strip().replace('"', "")
-                        for u in image_urls.split(",")
-                        if u.strip()
+                    image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
+                    extracted = []
+
+                    # 1) Run OCR on each URL
+                    for url in image_list:
+                        encoded_img = fetch_image_as_base64(url)
+                        if not encoded_img:
+                            continue
+
+                        try:
+                            response = client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=[
+                                    {"role": "system", "content": selected_prompt_text},
+                                    {"role": "user", "content": [
+                                        {"type": "text", "text": "Extract the INGREDIENTS section only."},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
+                                    ]}
+                                ],
+                                temperature=0.0
+                            )
+                            result = response.choices[0].message.content.strip()
+                            if result and "IMAGE_UNREADABLE" not in result.upper():
+                                extracted.append(result)
+                        except Exception as e:
+                            extracted.append(f"[ERROR processing image: {e}]")
+
+                    combined_html = "\n".join(extracted).strip()
+                    reference = row.get("full_ingredients", "")
+
+                    # 2) Simple containment check to give a quick Pass/Needs Review
+                    match_flag = "Pass" if combined_html in reference else "Needs Review"
+
+                    # 3) Ask GPT to compare combined_html vs. reference in detail
+                    diff_prompt = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a detailed comparison assistant for UK food label ingredients. "
+                                "You will be given two strings:\n"
+                                "  • OCR_OUTPUT (HTML-bolded ingredients from the image)\n"
+                                "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
+                                "Your task:\n"
+                                "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
+                                "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
+                                "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
+                                "Return exactly one JSON object (no extra commentary) with these fields:\n"
+                                "{\n"
+                                "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
+                                "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
+                                "}"
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "OCR_OUTPUT:\n"
+                                + combined_html
+                                + "\n\nREFERENCE:\n"
+                                + reference
+                            )
+                        }
                     ]
 
-                    # 1) First pass: find which image actually contains "Ingredients"
-                    ingredient_image_base64 = None
-                    for url in image_list:
-                        encoded = fetch_image_as_base64(url)
-                        if not encoded:
-                            continue
-
-                        # Quick yes/no classifier: does this image show the ingredients panel?
-                        classifier_prompt = [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a concise image classifier. "
-                                    "Given a single product label image (as base64), "
-                                    "answer exactly YES or NO to the question: "
-                                    "\"Does this image contain the INGREDIENTS block/text?\""
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": "Image incoming for ingredient‐panel check:"},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}
-                                    }
-                                ]
-                            }
-                        ]
-                        try:
-                            cls_resp = client.chat.completions.create(
-                                model="gpt-4o",
-                                messages=classifier_prompt,
-                                temperature=0.0
-                            )
-                            ans = cls_resp.choices[0].message.content.strip().upper()
-                            if ans.startswith("YES"):
-                                ingredient_image_base64 = encoded
-                                break
-                        except Exception:
-                            continue
-
-                    if not ingredient_image_base64:
-                        # No image was flagged → record a blank result and mark as done
-                        st.session_state["ocr_results"][idx] = ""
-                        st.session_state["did_crop_rows"][idx] = True
-
-                        # After marking this row done, re-run so that it moves to the next row (or to processing)
-                        st.experimental_rerun()
-
-                    # If we found an image, ask user to crop it
-                    import io as _io, base64 as _base64
-                    from PIL import Image
-
-                    raw_bytes = _base64.b64decode(ingredient_image_base64)
-                    pil_img = Image.open(_io.BytesIO(raw_bytes)).convert("RGB")
-
-                    st.markdown(f"#### ✂️ Row {idx + 1}: Please crop the INGREDIENTS block below")
-                    st.image(
-                        pil_img,
-                        use_container_width=True,
-                        caption="Original image identified as containing INGREDIENTS"
-                    )
-
-                    cropped_img = st_cropper(
-                        pil_img,
-                        box_color="#ff1744",
-                        realtime_update=True,
-                        aspect_ratio=None,
-                        return_type="image",
-                        key=f"cropper_{idx}"
-                    )
-
-                    if st.button(f"✅ Use this crop for row {idx + 1}", key=f"confirm_{idx}"):
-                        buf = _io.BytesIO()
-                        cropped_img.save(buf, format="PNG")
-                        cropped_bytes = buf.getvalue()
-
-                        try:
-                            extracted_html = two_pass_extract(cropped_bytes)
-                        except Exception:
-                            extracted_html = "IMAGE_UNREADABLE"
-
-                        # Save this row's OCR result, mark row done
-                        st.session_state["ocr_results"][idx] = extracted_html
-                        st.session_state["did_crop_rows"][idx] = True
-
-                        # Check if all rows are done; if so, switch to processing phase
-                        all_done = all(
-                            st.session_state["did_crop_rows"].get(i, False)
-                            for i in range(len(df))
-                        )
-                        if all_done:
-                            st.session_state["multiimg_phase"] = "processing"
-
-                        # Rerun so that either next row is shown or we move to processing
-                        st.experimental_rerun()
-
-                    # Always stop here until the user confirms the crop for this row
-                    st.stop()
-
-            # If we finish the for-loop (every row got a crop or blank), switch to processing
-            st.session_state["multiimg_phase"] = "processing"
-            st.experimental_rerun()
-
-        # Phase 2: PROCESSING (multi-image OCR + comparison)
-        if (
-            prompt_choice == "Image: Multi-Image Ingredient Extract & Compare"
-            and st.session_state["multiimg_phase"] == "processing"
-        ):
-            with st.spinner("Running OCR + comparison on all cropped rows..."):
-                progress_bar = st.progress(0)
-                progress_text = st.empty()
-                n_rows = len(df)
-                results = []
-                failed_rows = []
-                rolling_log = []
-                log_placeholder = st.empty()
-
-                for idx, row in df.iterrows():
-                    ocr_result = st.session_state["ocr_results"].get(idx, "")
-
-                    if not ocr_result:
-                        # No image found or blank result
-                        results.append({
-                            "extracted_ingredients": "",
-                            "comparison_result": "IMAGE_NOT_FOUND",
-                            "severity": "",
-                            "diff_explanation": "No image in the set was identified as containing ingredients."
-                        })
-                    elif "IMAGE_UNREADABLE" in ocr_result.upper():
-                        results.append({
-                            "extracted_ingredients": ocr_result,
-                            "comparison_result": "OCR_FAILED",
-                            "severity": "",
-                            "diff_explanation": "OCR failed or no ingredients were readable after cropping."
-                        })
-                    else:
-                        # We have a valid OCR HTML string → compare to full_ingredients
-                        reference = row.get("full_ingredients", "")
-                        match_flag = "Pass" if (ocr_result in reference) else "Needs Review"
-
-                        diff_prompt = [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a detailed comparison assistant for UK food label ingredients. "
-                                    "You will be given two strings:\n"
-                                    "  • OCR_OUTPUT (HTML‐bolded ingredients from the image)\n"
-                                    "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
-                                    "Your task:\n"
-                                    "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
-                                    "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
-                                    "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
-                                    "Return exactly one JSON object (no extra commentary) with these fields:\n"
-                                    "{\n"
-                                    "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
-                                    "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
-                                    "}"
-                                )
-                            },
-                            {
-                                "role": "user",
-                                "content": "OCR_OUTPUT:\n"
-                                           + ocr_result
-                                           + "\n\nREFERENCE:\n"
-                                           + reference
-                            }
-                        ]
-
-                        try:
-                            diff_resp = client.chat.completions.create(
-                                model="gpt-4.1-mini",
-                                messages=diff_prompt,
-                                temperature=0.0
-                            )
-                            diff_content = diff_resp.choices[0].message.content.strip()
-                            diff_json = json.loads(diff_content)
-                        except Exception as e:
-                            diff_json = {
-                                "severity": "Major",
-                                "diff_explanation": f"[Error comparing: {e}]"
-                            }
-
-                        results.append({
-                            "extracted_ingredients": ocr_result,
-                            "comparison_result": match_flag,
-                            "severity": diff_json.get("severity", ""),
-                            "diff_explanation": diff_json.get("diff_explanation", "")
-                        })
-
-                    # Update progress UI
-                    progress = (idx + 1) / n_rows
-                    progress_bar.progress(progress)
-                    progress_text.markdown(
-                        f"<h4 style='text-align:center;'>"
-                        f"Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)"
-                        f"</h4>",
-                        unsafe_allow_html=True
-                    )
-
-                    rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
-                    rolling_log = rolling_log[-20:]
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>"
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; "
-                        "max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
-
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=progress * 100,
-                        title={'text': "Progress"},
-                        gauge={
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': "#4a90e2"},
-                            'steps': [
-                                {'range': [0, 50], 'color': "#e0e0e0"},
-                                {'range': [50, 100], 'color': "#c8c8c8"}
-                            ]
-                        }
-                    ))
-                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
-
-                # Combine original CSV with GPT results
-                results_df = pd.DataFrame(results)
-                final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
-                st.success("✅ GPT processing complete!")
-                st.markdown("### 🔍 Final Result")
-                st.dataframe(final_df)
-
-                # Download buttons
-                st.download_button(
-                    "⬇️ Download Full Results CSV",
-                    final_df.to_csv(index=False).encode("utf-8"),
-                    "gpt_output.csv",
-                    "text/csv"
-                )
-
-                if failed_rows:
-                    failed_df = df.iloc[failed_rows].copy()
-                    st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
-                    st.download_button(
-                        "⬇️ Download Failed Rows CSV",
-                        failed_df.to_csv(index=False).encode("utf-8"),
-                        "gpt_failed_rows.csv",
-                        "text/csv"
-                    )
-
-        # If it wasn’t a multi-image prompt, use the normal single-pass loop
-        elif prompt_choice != "Image: Multi-Image Ingredient Extract & Compare":
-            with st.spinner("Processing with GPT..."):
-                progress_bar = st.progress(0)
-                progress_text = st.empty()
-                n_rows = len(df)
-                results = []
-                failed_rows = []
-                rolling_log = []
-                log_placeholder = st.empty()
-
-                for idx, row in df.iterrows():
-                    row_data = {c: row.get(c, "") for c in cols_to_use}
                     try:
+                        diff_resp = client.chat.completions.create(
+                            model="gpt-4.1-mini",
+                            messages=diff_prompt,
+                            temperature=0.0
+                        )
+                        diff_content = diff_resp.choices[0].message.content.strip()
+                        # Parse GPT output (JSON)
+                        diff_json = json.loads(diff_content)
+                    except Exception as e:
+                        diff_json = {
+                            "severity": "Major",
+                            "diff_explanation": f"[Error comparing: {e}]"
+                        }
+
+                    results.append({
+                        "extracted_ingredients": combined_html,
+                        "comparison_result": match_flag,
+                        "severity": diff_json.get("severity", ""),
+                        "diff_explanation": diff_json.get("diff_explanation", "")
+                    })
+
+                else:
+                    try:
+                        # 1 – split the stored prompt into true roles
                         if "USER MESSAGE:" in user_prompt:
                             system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
                         else:
@@ -1248,7 +1064,7 @@ if uploaded_file and user_prompt.strip():
                             model=model_choice,
                             messages=[
                                 {"role": "system", "content": system_txt},
-                                {"role": "user", "content": user_txt}
+                                {"role": "user",   "content": user_txt}
                             ],
                             temperature=0.0,
                             top_p=0
@@ -1264,69 +1080,67 @@ if uploaded_file and user_prompt.strip():
 
                     except Exception as e:
                         failed_rows.append(idx)
-                        results.append({
+                        error_result = {
                             "error": f"Failed to process row {idx}: {e}",
                             "raw_output": content if content else "No content returned"
-                        })
-
-                    # Update progress UI
-                    progress = (idx + 1) / n_rows
-                    progress_bar.progress(progress)
-                    progress_text.markdown(
-                        f"<h4 style='text-align:center;'>"
-                        f"Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)"
-                        f"</h4>",
-                        unsafe_allow_html=True
-                    )
-
-                    rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
-                    rolling_log = rolling_log[-20:]
-                    log_placeholder.markdown(
-                        "<h4>📝 Recent Outputs (Last 20)</h4>"
-                        "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; "
-                        "max-height:400px; overflow:auto;'>"
-                        + "\n".join(rolling_log) +
-                        "</pre>",
-                        unsafe_allow_html=True
-                    )
-
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=progress * 100,
-                        title={'text': "Progress"},
-                        gauge={
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': "#4a90e2"},
-                            'steps': [
-                                {'range': [0, 50], 'color': "#e0e0e0"},
-                                {'range': [50, 100], 'color': "#c8c8c8"}
-                            ]
                         }
-                    ))
-                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                        results.append(error_result)
 
-                # Combine original CSV with GPT results
-                results_df = pd.DataFrame(results)
-                final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
-                st.success("✅ GPT processing complete!")
-                st.markdown("### 🔍 Final Result")
-                st.dataframe(final_df)
-
-                # Download buttons
-                st.download_button(
-                    "⬇️ Download Full Results CSV",
-                    final_df.to_csv(index=False).encode("utf-8"),
-                    "gpt_output.csv",
-                    "text/csv"
+                # 6 – update progress UI
+                progress = (idx + 1) / n_rows
+                progress_bar.progress(progress)
+                progress_text.markdown(
+                    f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                    unsafe_allow_html=True
                 )
 
-                if failed_rows:
-                    failed_df = df.iloc[failed_rows].copy()
-                    st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
-                    st.download_button(
-                        "⬇️ Download Failed Rows CSV",
-                        failed_df.to_csv(index=False).encode("utf-8"),
-                        "gpt_failed_rows.csv",
-                        "text/csv"
-                    )
+                rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
+                rolling_log = rolling_log[-20:]
+                log_placeholder.markdown(
+                    "<h4>📝 Recent Outputs (Last 20)</h4>"
+                    "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                    + "\n".join(rolling_log) +
+                    "</pre>",
+                    unsafe_allow_html=True
+                )
 
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=progress * 100,
+                    title={'text': "Progress"},
+                    gauge={
+                        'axis': {'range': [0, 100]},
+                        'bar': {'color': "#4a90e2"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "#e0e0e0"},
+                            {'range': [50, 100], 'color': "#c8c8c8"}
+                        ]
+                    }
+                ))
+                gauge_placeholder.plotly_chart(fig, use_container_width=True)
+            # ---------- end for loop ----------
+
+            # Combine original CSV with GPT results
+            results_df = pd.DataFrame(results)
+            final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
+            st.success("✅ GPT processing complete!")
+            st.markdown("### 🔍 Final Result")
+            st.dataframe(final_df)
+
+            # Download buttons
+            st.download_button(
+                "⬇️ Download Full Results CSV",
+                final_df.to_csv(index=False).encode("utf-8"),
+                "gpt_output.csv",
+                "text/csv"
+            )
+
+            if failed_rows:
+                failed_df = df.iloc[failed_rows].copy()
+                st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
+                st.download_button(
+                    "⬇️ Download Failed Rows CSV",
+                    failed_df.to_csv(index=False).encode("utf-8"),
+                    "gpt_failed_rows.csv",
+                    "text/csv"
+                )
