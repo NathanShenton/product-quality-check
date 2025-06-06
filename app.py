@@ -56,7 +56,7 @@ st.markdown(
 #############################
 @st.cache_data
 def load_health_claims():
-    return pd.read_csv(".devcontainer/eu_health_claims.csv")
+    return pd.read_csv("eu_health_claims.csv")
 
 register_df = load_health_claims()
 approved_claims_df = register_df[register_df["Status"].str.lower() == "authorised"]
