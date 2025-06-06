@@ -720,22 +720,34 @@ if uploaded_file and user_prompt.strip():
                     unsafe_allow_html=True
                 )
 
+                # … inside your row‐processing loop, after updating progress_text and rolling_log …
+
+                # Build a Plotly gauge that uses our brand colours:
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
-                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                    title={
+                        'text': "Progress",
+                        'font': {'color': '#4A4443'}    # Grey title text
+                    },
                     gauge={
-                        'axis': {'range': [0, 100], 'tickcolor': '#4A4443'},
-                        'bar': {'color': "#C2EA46"},          /* Lime Green */
-                        'bgcolor': "#E1FAD1",                /* Mint Green background */
+                        'axis': {
+                            'range': [0, 100],
+                            'tickcolor': '#4A4443'        # Grey ticks/labels
+                        },
+                        'bar': {
+                            'color': "#C2EA46"            # Lime Green fill
+                        },
+                        'bgcolor': "#E1FAD1",            # Mint Green background
                         'borderwidth': 0,
                         'steps': [
-                            {'range': [0, 50], 'color': "#E1FAD1"},
-                            {'range': [50, 100], 'color': "#F2FAF4"}
+                            {'range': [0, 50], 'color': "#E1FAD1"},   # Mint Green
+                            {'range': [50, 100], 'color': "#F2FAF4"}  # Powder White
                         ]
                     }
                 ))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
+
 
             # ---------- end for loop ----------
 
