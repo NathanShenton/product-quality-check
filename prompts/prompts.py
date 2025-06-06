@@ -63,11 +63,11 @@ PROMPT_OPTIONS = {
             "USER MESSAGE:\n"
             "Review the following product data:\n"
             "\"ingredients\": {full_ingredients},\n"
-            "\"description\": {web_copy},\n"
-            "\"nutritionals\": {nutritionals_info},\n"
+            "\"description\": {product_description},\n"
+            "\"nutritionals\": {nutritional_info},\n"
             "\"sell_copy\": {sell_copy_text},\n"
-            "\"directions\": {directions_info},\n"
-            "\"warnings\": {warning_info}\n"
+            "\"directions\": {directions_text},\n"
+            "\"warnings\": {warnings_text}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Determines whether a product is a food supplement from ingredients/description/nutritionals, then checks sell copy/directions/warnings for all required food supplement labeling elements."
