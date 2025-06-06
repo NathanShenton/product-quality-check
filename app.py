@@ -51,6 +51,21 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+# ─────────────────────────────────────────────────
+# 1) Ask for API Key immediately when the app loads
+# ─────────────────────────────────────────────────
+st.sidebar.markdown("### 🔑 OpenAI API Key")
+api_key_input = st.sidebar.text_input(
+    "Enter your OpenAI API Key", type="password", placeholder="sk-…"
+)
+if not api_key_input:
+    st.sidebar.warning("Please enter your OpenAI API key to proceed.")
+    st.stop()  # Stop here until they add a key
+
+# Now we know api_key_input exists; create the client once
+client = OpenAI(api_key=api_key_input)
+
+
 #############################
 # Health Claims Register Loader
 #############################
