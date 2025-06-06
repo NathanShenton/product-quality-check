@@ -9,6 +9,7 @@ from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
 import io                                   # NEW
 from openai import OpenAI
+import re
 
 # 1. Ask for API Key right away, before anything else
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
@@ -20,6 +21,50 @@ if not api_key_input:
 
 # Initialize the OpenAI client now that we have a key
 client = OpenAI(api_key=api_key_input)
+
+# ─── Step A: Load the EU health-claims CSV ───
+@st.cache_data
+def load_claims():
+    return pd.read_csv("data/eu_health_claims.csv")
+
+claims_df = load_claims()
+
+
+# ─── Step B: Claim-extraction and matching helpers ───
+CLAIM_VERBS = [
+    "contributes to", "helps to", "helps", "supports",
+    "reduces", "promotes", "maintains", "protects", "aids", "improves"
+]
+
+def extract_candidate_claims(text: str) -> list[str]:
+    """
+    Split text into clauses, look for any verb in CLAIM_VERBS.
+    Return the substring from that verb onward as a candidate claim.
+    """
+    candidates: list[str] = []
+    sentences = re.split(r"[\.!?]\s*", text)
+    for sent in sentences:
+        lower_sent = sent.lower()
+        for verb in CLAIM_VERBS:
+            if verb in lower_sent:
+                idx = lower_sent.index(verb)
+                candidate = sent[idx:].strip()
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+                break
+    return candidates
+
+def find_exact_match(candidate: str) -> pd.Series | None:
+    """
+    Return the first row from claims_df where 'Claim' (lowercased)
+    contains candidate (lowercased). If none, return None.
+    """
+    low_cand = candidate.lower()
+    for _, row in claims_df.iterrows():
+        if low_cand in str(row["Claim"]).lower():
+            return row
+    return None
+
 
 #############################
 #  Custom CSS Styling Block! #
@@ -62,7 +107,10 @@ st.markdown(
 #  Sidebar – Branding Info  #
 #############################
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
+st.sidebar.image(
+    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
+    use_container_width=True
+)
 st.sidebar.markdown(
     """
     ### 🧠 Flexible AI Product Data Assistant
@@ -106,12 +154,11 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         "gpt-3.5-turbo": (0.0005, 0.002),
         "gpt-4.1-mini":  (0.0004, 0.0016),
         "gpt-4.1-nano":  (0.0001, 0.0004),
-        "gpt-4o-mini": (0.00015, 0.0006),
-        "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
+        "gpt-4o-mini":   (0.00015, 0.0006),
+        "gpt-4o":        (0.005,  0.015),
         "gpt-4-turbo":   (0.01,   0.03)
     }
 
-    # Default fallback costs
     cost_in, cost_out = model_costs_per_1k.get(model, (0.001, 0.003))
     total_input_tokens = 0
     total_output_tokens = 0
@@ -122,7 +169,6 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         row_json_str = json.dumps(row_dict, ensure_ascii=False)
         prompt_tokens = approximate_tokens(user_prompt) + approximate_tokens(row_json_str)
         total_input_tokens += (system_tokens + prompt_tokens)
-        # Estimate ~100 tokens output per row
         total_output_tokens += 100
 
     input_ktokens = total_input_tokens / 1000
@@ -134,17 +180,50 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
 #############################
 MODEL_OPTIONS = {
     "gpt-3.5-turbo": "Cheapest, good for basic tasks with acceptable quality.",
-    "gpt-4.1-mini": "Balanced cost and intelligence, great for language tasks.",
-    "gpt-4.1-nano": "Ultra-cheap and fast, best for very lightweight checks.",
-    "gpt-4o-mini":  "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o": "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
-    "gpt-4-turbo":  "Very powerful and expensive — best for complex, high-value use cases."
+    "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
+    "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
+    "gpt-4o-mini":   "Higher quality than 4a1-mini, still affordable.",
+    "gpt-4o":        "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
+    "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases."
 }
 
 # ---- Main Page Layout ----
 st.markdown("<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; font-size:16px;'>Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model.</p>", unsafe_allow_html=True)
-   
+
+# ─── Step C: Product Claims Checker UI ───
+st.markdown("## 1) Paste Your Product Sell Copy Below")
+sell_copy = st.text_area(
+    label="Sell copy / marketing description",
+    placeholder="e.g. “Our cereal supports normal blood cholesterol concentrations when eaten daily.”",
+    height=150
+)
+
+if sell_copy:
+    st.markdown("### 2) Candidate Claims & Matching Status")
+    candidates = extract_candidate_claims(sell_copy)
+    if not candidates:
+        st.info("No obvious claim verbs detected.")
+    else:
+        for i, c in enumerate(candidates, start=1):
+            st.write(f"**{i}. {c}**")
+            match_row = find_exact_match(c)
+            if match_row is not None:
+                status = str(match_row["Status"])
+                conditions = match_row["Conditions of use of the claim / Restrictions of use / Reasons for non-authorisation"]
+                st.write(f"> **Matched Claim:** “{match_row['Claim']}”")
+
+                if status.lower() == "authorised":
+                    st.success(f"✅ Authorised (verify conditions): {conditions}")
+                elif status.lower() in ["revoked", "non-authorised"]:
+                    st.error("🚫 Invalid Claim (revoked or non-authorised)")
+                else:
+                    st.warning(f"⚠️ Status = {status}. Needs manual check.")
+            else:
+                st.write("> **No exact match found → Needs review**")
+            st.markdown("---")
+
+
     # ------------------------------------------------------------------
 # Two-pass image ingredient extractor (add right after client = OpenAI(...))
 # ------------------------------------------------------------------
