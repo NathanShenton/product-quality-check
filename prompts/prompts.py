@@ -31,6 +31,49 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+  {
+    "Food Supplement Compliance Check": {
+      "prompt": (
+        "SYSTEM MESSAGE:\n"
+        "You are a JSON-producing assistant for high-criticality compliance checking. Your task is to:\n"
+        "  1. Determine whether a product is a food supplement based on its ingredient list, product description, and nutritional information.\n"
+        "  2. If the product is confirmed as a food supplement, review its sell copy, directions, and warnings to ensure it contains all required food supplement labeling elements (e.g., advised daily dose, “do not exceed” statement, “not a substitute” statement, warning to keep out of reach of children, etc.).\n\n"
+        "Steps:\n"
+        "  • First, analyze the provided “ingredients,” “description,” and “nutritionals” fields. Look for hallmarks of a food supplement (vitamins, minerals, botanicals, typical serving sizes, nutrient amounts per serving, etc.).\n"
+        "  • If these data confirm it is a food supplement, proceed to the sell copy, directions, and warnings. Identify any missing or incorrect mandatory statements for UK food supplements:\n"
+        "      – Advised daily dose (e.g., “Take one capsule daily”).\n"
+        "      – A “Do not exceed the recommended dose” clause.\n"
+        "      – A statement that the supplement “should not be used as a substitute for a varied diet.”\n"
+        "      – “Keep out of reach of young children.”\n"
+        "      – Any other required warnings or qualifiers (e.g., “Consult your doctor if pregnant or breastfeeding”).\n"
+        "  • If the product is not a food supplement, skip the compliance check and simply report that it is not a food supplement.\n\n"
+        "Return JSON ONLY, in this exact format:\n"
+        "{\n"
+        "  \"is_food_supplement\": true | false,\n"
+        "  \"justification\": \"<brief rationale based on ingredients/description/nutritionals>\",\n"
+        "  \"compliance_check\": {\n"
+        "    \"overall\": \"Pass\" | \"Fail\",          // Only if is_food_supplement is true\n"
+        "    \"missing_elements\": [                   // List any required statements that are absent or incorrect\n"
+        "      \"<element_name>\",\n"
+        "      ...\n"
+        "    ]\n"
+        "  }\n"
+        "}\n\n"
+        "If \"is_food_supplement\" is false, set \"justification\" accordingly and omit \"compliance_check\" or leave its fields empty.\n\n"
+        "No disclaimers or extra commentary—JSON ONLY.\n\n"
+        "USER MESSAGE:\n"
+        "Review the following product data:\n"
+        "\"ingredients\": {full_ingredients},\n"
+        "\"description\": {product_description},\n"
+        "\"nutritionals\": {nutritional_info},\n"
+        "\"sell_copy\": {sell_copy_text},\n"
+        "\"directions\": {directions_text},\n"
+        "\"warnings\": {warnings_text}\n"
+      ),
+      "recommended_model": "gpt-4.1-mini",
+      "description": "Determines whether a product is a food supplement from ingredients/description/nutritionals, then checks sell copy/directions/warnings for all required food supplement labeling elements."
+    }
+  },
     "Medicinal Language Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
