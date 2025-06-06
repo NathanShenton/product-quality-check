@@ -61,7 +61,7 @@ PROMPT_OPTIONS = {
             "Here is all the product data for the SKU:\n"
             "{all_fields}"
         ),
-        "recommended_model": "gpt-4.1-mini",
+        "recommended_model": "gpt-4o-mini",
         "description": "Holistically determines if a product is a food supplement from any provided fields, then verifies required UK labeling elements."
     },
     "Medicinal Language Compliance Checker": {
