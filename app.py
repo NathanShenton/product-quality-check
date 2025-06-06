@@ -9,6 +9,7 @@ from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
 import io                                   # NEW
 from openai import OpenAI
+from rapidfuzz import process, fuzz
 
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
@@ -50,54 +51,211 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-# -------------------------------
+#############################
 # Health Claims Register Loader
-# -------------------------------
-
+#############################
 @st.cache_data
 def load_health_claims():
     return pd.read_csv("data/eu_health_claims.csv")
 
 register_df = load_health_claims()
-
-# Optional: Filter for authorised claims
 approved_claims_df = register_df[register_df["Status"].str.lower() == "authorised"]
 approved_claim_texts = approved_claims_df["Claim"].dropna().unique().tolist()
 
 #############################
-#  Sidebar – Branding Info  #
+# RapidFuzz Claim Matching
+#############################
+def match_to_authorised_claim(input_text, approved_claims, threshold=85):
+    if not input_text or not isinstance(input_text, str):
+        return None, 0
+    match, score = process.extractOne(
+        query=input_text,
+        choices=approved_claims,
+        scorer=fuzz.token_set_ratio
+    )
+    return (match, score) if score >= threshold else (None, score)
+
+#############################
+# GPT-based Claim Extraction
+#############################
+def extract_claim_phrase(full_copy: str, client: OpenAI, model: str) -> str:
+    """
+    Sends the entire product copy to GPT and extracts a short health-claim phrase.
+    Returns an empty string if no claim is found.
+    """
+    system_msg = (
+        "You are a JSON-producing assistant. You will be given a chunk of product marketing copy. "
+        "Return ONLY a JSON object with the key \"claim_phrase\" (value = the shortest phrase "
+        "in the input that explicitly states a health or nutrition claim). "
+        "If you do not see any health-claim wording, return an empty string.\n\n"
+        "Output format (exactly):\n"
+        "{\n"
+        "  \"claim_phrase\": \"<extracted phrase>\"\n"
+        "}\n"
+    )
+    user_msg = (
+        f"\"\"\"\n{full_copy}\n\"\"\"\n\n"
+        "Extract the health-claim phrase (e.g. \"supports gut health\", \"reduces cholesterol\")."
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user",   "content": user_msg}
+            ],
+            temperature=0.0
+        )
+        parsed = json.loads(resp.choices[0].message.content.strip())
+        return parsed.get("claim_phrase", "").strip()
+    except:
+        return ""
+
+#############################
+# Sidebar – Branding Info
 #############################
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
+st.sidebar.image(
+    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
+    use_container_width=True
+)
 st.sidebar.markdown(
     """
     ### 🧠 Flexible AI Product Data Assistant
 
-    This powerful tool uses a range of OpenAI models to extract, check, and structure product data — from label image crops to batch CSV audits.
+    This powerful tool uses OpenAI models to extract, check, and structure product data:
 
-    - 🖼️ Crop product label images to extract INGREDIENTS, DIRECTIONS, WARNINGS, STORAGE and more
-    - 📄 Upload CSVs to run row-by-row GPT checks across custom prompts
+    - 🖼️ Extract ingredients, directions, storage, and warnings from product labels
+    - 📄 Upload CSVs to run row-by-row GPT checks
     - 🔎 Choose a pre-written audit or write your own
     - 💸 See real-time OpenAI cost estimates before running
 
     **Supported Models:**
 
-    - **gpt-3.5-turbo** — Fast & low-cost for spelling, logic, and simple checks  
-    - **gpt-4.1-nano** — Ultra-lightweight for basic, high-speed validation  
-    - **gpt-4.1-mini** — Balanced model for most rule-based or JSON tasks  
-    - **gpt-4o-mini** — Cheaper version of GPT-4o for fast multimodal jobs  
-    - **gpt-4o** — Multimodal expert for accurate image+text extraction  
-    - **gpt-4-turbo** — Premium model for the most complex audit logic
-
-    *Choose the model that fits your need for cost, accuracy, or speed.*
+    - **gpt-3.5-turbo** — Fast & low-cost for simple logic
+    - **gpt-4.1-mini** — Good balance of quality & cost
+    - **gpt-4o** — Best for image + text processing
+    - **gpt-4-turbo** — Powerful for complex logic
     """
 )
 
 #############################
-#  Main Panel: EU Claim Viewer
+# Main Panel: EU Claim Viewer
 #############################
 with st.expander("🗂 View Approved EU Health Claims"):
-    st.dataframe(approved_claims_df[["Nutrient substance, food or food category", "Claim", "Status"]])
+    st.dataframe(
+        approved_claims_df[
+            ["Nutrient substance, food or food category", "Claim", "Status"]
+        ]
+    )
+
+#############################
+# Claim Tester UI
+#############################
+st.subheader("🧪 Test a Health Claim")
+claim_input = st.text_input("Enter a health-related claim to test:")
+if claim_input:
+    match, score = match_to_authorised_claim(claim_input, approved_claim_texts)
+    if match:
+        st.success(f"✅ Closest authorised match: *{match}* (Match score: {score})")
+        st.markdown("💡 This claim is compliant with EU-authorised health claims.")
+    else:
+        st.error(f"❌ No authorised match found. Closest match score: {score}")
+        st.markdown(
+            "🔎 Try rephrasing the claim using more scientific or physiological language."
+        )
+
+#############################
+#  CSV Upload & Claim‐Check Pipeline
+#############################
+uploaded_file = st.file_uploader("📁 Upload your product data CSV", type=["csv"])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file, dtype=str)
+    st.markdown("### 📄 CSV Preview")
+    st.dataframe(df.head())
+
+    # 1) Select which column holds the full web copy (GPT will scan this)
+    st.subheader("🔎 Select the column containing full product copy")
+    claim_column = st.selectbox(
+        "Which column contains the product description or web copy?",
+        options=df.columns.tolist(),
+        help="GPT will scan this entire field in each row to find a health‐claim phrase."
+    )
+
+    # 2) Choose GPT model for extraction
+    st.subheader("⚙️ Extraction Model")
+    model_choice = st.selectbox(
+        "Which GPT model should extract the claim phrase?",
+        options=["gpt-3.5-turbo", "gpt-4.1-mini", "gpt-4o"],
+        format_func=lambda m: f"{m}"
+    )
+
+    # 3) Run the pipeline when the user clicks
+    if st.button("▶️ Run claim‐extraction + register check"):
+        client = OpenAI(api_key=api_key_input)  # Use your existing API‐key variable
+
+        # Prepare lists to collect results, then loop
+        extracted_phrases = []
+        matched_claims   = []
+        match_scores     = []
+        compliance_flags = []
+        explanations     = []
+
+        with st.spinner("Processing each row..."):
+            progress_bar = st.progress(0)
+            total_rows = len(df)
+
+            for idx, row in df.iterrows():
+                full_copy_text = str(row.get(claim_column, ""))
+
+                # ─── 2a: Extract one health‐claim phrase via GPT
+                extracted = extract_claim_phrase(full_copy_text, client, model_choice)
+                extracted_phrases.append(extracted)
+
+                # ─── 2b: Fuzzy‐match against authorised claims
+                if extracted:
+                    match, score = match_to_authorised_claim(extracted, approved_claim_texts)
+                    if match:
+                        matched_claims.append(match)
+                        match_scores.append(score)
+                        compliance_flags.append("Compliant")
+                        explanations.append(f"Matched “{match}” (score {score}).")
+                    else:
+                        matched_claims.append("")
+                        match_scores.append(score)
+                        compliance_flags.append("Unapproved")
+                        explanations.append(
+                            f"No match ≥85%. Closest was \"{match}\" (score {score})."
+                        )
+                else:
+                    matched_claims.append("")
+                    match_scores.append(0)
+                    compliance_flags.append("NoClaimDetected")
+                    explanations.append("GPT found no health‐claim phrase.")
+
+                # Update progress bar
+                progress_bar.progress((idx + 1) / total_rows)
+
+        # 4) Append these new columns to the DataFrame
+        df["extracted_claim_phrase"]   = extracted_phrases
+        df["matched_authorised_claim"] = matched_claims
+        df["match_score"]              = match_scores
+        df["claim_compliance_flag"]    = compliance_flags
+        df["claim_explanation"]        = explanations
+
+        # 5) Display final results and allow CSV download
+        st.success("✅ Claim‐check complete!")
+        st.markdown("### 🔍 Final Data with Claim‐Check Columns")
+        st.dataframe(df)
+
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download results as CSV",
+            data=csv_bytes,
+            file_name="claim_check_results.csv",
+            mime="text/csv"
+        )
 
 #############################
 #   Helper: Approx. Tokens  #
