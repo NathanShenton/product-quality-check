@@ -50,6 +50,20 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+# -------------------------------
+# Health Claims Register Loader
+# -------------------------------
+
+@st.cache_data
+def load_health_claims():
+    return pd.read_csv("data/eu_health_claims.csv")
+
+register_df = load_health_claims()
+
+# Optional: Filter for authorised claims
+approved_claims_df = register_df[register_df["Status"].str.lower() == "authorised"]
+approved_claim_texts = approved_claims_df["Claim"].dropna().unique().tolist()
+
 #############################
 #  Sidebar – Branding Info  #
 #############################
@@ -78,6 +92,12 @@ st.sidebar.markdown(
     *Choose the model that fits your need for cost, accuracy, or speed.*
     """
 )
+
+#############################
+#  Main Panel: EU Claim Viewer
+#############################
+with st.expander("🗂 View Approved EU Health Claims"):
+    st.dataframe(approved_claims_df[["Nutrient substance, food or food category", "Claim", "Status"]])
 
 #############################
 #   Helper: Approx. Tokens  #
