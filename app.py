@@ -10,8 +10,16 @@ from PIL import Image                       # NEW
 import io                                   # NEW
 from openai import OpenAI
 
-# Set page configuration immediately after imports!
+# 1. Ask for API Key right away, before anything else
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
+
+api_key_input = st.text_input("🔑 Enter your OpenAI API Key", type="password")
+if not api_key_input:
+    st.warning("Please enter your OpenAI API key to proceed.")
+    st.stop()
+
+# Initialize the OpenAI client now that we have a key
+client = OpenAI(api_key=api_key_input)
 
 #############################
 #  Custom CSS Styling Block! #
@@ -136,18 +144,7 @@ MODEL_OPTIONS = {
 # ---- Main Page Layout ----
 st.markdown("<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; font-size:16px;'>Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model.</p>", unsafe_allow_html=True)
-
-# Using columns to separate the API key entry and file upload
-col1, col2 = st.columns(2)
-with col1:
-    # 1. API Key Entry
-    api_key_input = st.text_input("🔑 Enter your OpenAI API Key", type="password")
-    if not api_key_input:
-        st.warning("Please enter your OpenAI API key to proceed.")
-        st.stop()
-    # Initialize the new OpenAI client
-    client = OpenAI(api_key=api_key_input)
-    
+   
     # ------------------------------------------------------------------
 # Two-pass image ingredient extractor (add right after client = OpenAI(...))
 # ------------------------------------------------------------------
