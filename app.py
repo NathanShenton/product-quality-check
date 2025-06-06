@@ -22,33 +22,146 @@ st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 st.markdown(
     """
     <style>
+    /* ---------------------------------------------- */
+    /* Core Brand Colours (for reference):
+       • Brand Green   = #005A3F
+       • Lime Green    = #C2EA46
+       • Mint Green    = #E1FAD1
+       • Powder White  = #F2FAF4
+       • Grey          = #4A4443
+    /* ---------------------------------------------- */
+
     /* Global page styles */
     body {
-      background-color: #f4f7f6;
+      background-color: #F2FAF4;   /* Powder White */
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     .main {
       padding: 2rem;
     }
+
+    /* H1: Primary title in Brand Green */
     h1 {
       font-size: 3.2rem;
-      color: #4a90e2;
+      color: #005A3F;   /* Brand Green */
       text-align: center;
       margin-bottom: 1rem;
     }
+
+    /* H2, H3, H4: Dark Grey for subtitles/headings */
     h2, h3, h4 {
-      color: #333333;
+      color: #4A4443;   /* Grey */
     }
-    /* Progress bar style */
+
+    /* Paragraph text, labels, etc. in very dark grey */
+    p, label, .css-1cpxqw2 {
+      color: #4A4443;   /* Grey */
+    }
+
+    /* Progress bar style: Lime Green fill */
     .stProgress > div > div > div {
-        background-color: #4a90e2;
+        background-color: #C2EA46;  /* Lime Green */
     }
-    /* Custom sidebar style */
-    .css-1d391kg .css-1d391kg { 
-        background-color: #ffffff; 
+
+    /* Buttons (e.g. st.button, st.download_button) 
+       use Lime Green background and white text */
+    button[class*="stButton"] {
+        background-color: #C2EA46 !important; /* Lime Green */
+        color: white !important;
+        border-radius: 4px;
+        border: none;
+        padding: 0.4rem 1rem;
+        font-weight: 600;
+    }
+    button[class*="stButton"]:hover {
+        background-color: #B3D841 !important; /* slightly darker lime on hover */
+        color: white !important;
+    }
+
+    /* Text input, text area, and selectbox borders in Brand Green */
+    .stTextInput>div>div>input, 
+    .stTextArea>div>div>textarea,
+    .stSelectbox>div>div>div>input {
+      border: 1px solid #005A3F !important; /* Brand Green border */
+      border-radius: 4px;
+    }
+    .stTextInput>div>div>input:focus, 
+    .stTextArea>div>div>textarea:focus,
+    .stSelectbox>div>div>div>input:focus {
+      outline: 2px solid #C2EA46 !important;  /* Lime Green focus ring */
+    }
+
+    /* Sidebar – white background with mint‐green accents */
+    .css-1d391kg .css-1d391kg {
+        background-color: #FFFFFF; 
         border-radius: 5px; 
-        padding: 1rem; 
+        padding: 1rem;
     }
+    /* Sidebar headings in Brand Green */
+    .css-1d391kg h1, .css-1d391kg h2, .css-1d391kg h3 {
+        color: #005A3F; 
+    }
+    /* Sidebar links or markdown text in dark grey */
+    .css-1d391kg p, .css-1d391kg label {
+        color: #4A4443;
+    }
+
+    /* Dataframe header background: Mint Green, header text in Grey */
+    .stDataFrame thead th {
+      background-color: #E1FAD1 !important; /* Mint Green */
+      color: #4A4443 !important;            /* Grey */
+    }
+    /* Dataframe rows: alternate powder‐white backgrounds */
+    .stDataFrame tbody tr:nth-child(even) {
+      background-color: #FFFFFF !important; /* White (or #F2FAF4) for contrast */
+    }
+    .stDataFrame tbody tr:nth-child(odd) {
+      background-color: #F2FAF4 !important; /* Powder White */
+    }
+
+    /* Code blocks (st.code) in a light mint background */
+    .stCodeBlock pre {
+      background-color: #E1FAD1 !important; /* Mint Green (very pale) */
+      color: #4A4443 !important;            /* Grey text */
+      border-radius: 4px;
+      padding: 1rem;
+    }
+
+    /* Plotly charts: default background to Powder White and gridlines in Mint Green */
+    .js-plotly-plot .plotly .main-svg {
+      background-color: #F2FAF4 !important; /* Powder White */
+    }
+    .js-plotly-plot .gridlayer line {
+      stroke: #E1FAD1 !important;           /* Mint Green gridlines */
+      stroke-width: 1px;
+    }
+
+    /* Streamlit “success” messages in Lime Green background with white text */
+    .stAlert.success {
+      background-color: #C2EA46 !important;   /* Lime Green */
+      color: #FFFFFF !important;
+      border-radius: 4px;
+    }
+
+    /* Streamlit “error” messages in coral tone (#EB6C4D) for contrast */
+    .stAlert.error {
+      background-color: #EB6C4D !important;   /* Coral 1 */
+      color: #FFFFFF !important;
+      border-radius: 4px;
+    }
+
+    /* Streamlit info/warning messages in soft yellow (#FAEBC3) */
+    .stAlert.info {
+      background-color: #FAEBC3 !important;   /* Yellow 2 */
+      color: #4A4443 !important;              /* Grey text */
+      border-radius: 4px;
+    }
+    .stAlert.warning {
+      background-color: #F4C300 !important;   /* Yellow 1 */
+      color: #4A4443 !important;              /* Grey text */
+      border-radius: 4px;
+    }
+
     </style>
     """, unsafe_allow_html=True
 )
@@ -57,7 +170,10 @@ st.markdown(
 #  Sidebar – Branding Info  #
 #############################
 st.sidebar.markdown("# Flexible AI Checker")
-st.sidebar.image("https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png", use_container_width=True)
+st.sidebar.image(
+    "https://cdn.freelogovectors.net/wp-content/uploads/2023/04/holland_and_barrett_logo-freelogovectors.net_.png",
+    use_container_width=True
+)
 st.sidebar.markdown(
     """
     ### 🧠 Flexible AI Product Data Assistant
@@ -79,7 +195,7 @@ st.sidebar.markdown(
     - **gpt-4-turbo** — Premium model for the most complex audit logic
 
     *Choose the model that fits your need for cost, accuracy, or speed.*
-    """
+    """, unsafe_allow_html=True
 )
 
 #############################
@@ -101,7 +217,7 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         "gpt-3.5-turbo": (0.0005, 0.002),
         "gpt-4.1-mini":  (0.0004, 0.0016),
         "gpt-4.1-nano":  (0.0001, 0.0004),
-        "gpt-4o-mini": (0.00015, 0.0006),
+        "gpt-4o-mini":   (0.00015, 0.0006),
         "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
         "gpt-4-turbo":   (0.01,   0.03)
     }
@@ -129,16 +245,24 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
 #############################
 MODEL_OPTIONS = {
     "gpt-3.5-turbo": "Cheapest, good for basic tasks with acceptable quality.",
-    "gpt-4.1-mini": "Balanced cost and intelligence, great for language tasks.",
-    "gpt-4.1-nano": "Ultra-cheap and fast, best for very lightweight checks.",
-    "gpt-4o-mini":  "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o": "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
-    "gpt-4-turbo":  "Very powerful and expensive — best for complex, high-value use cases."
+    "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
+    "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
+    "gpt-4o-mini":   "Higher quality than 4.1-mini, still affordable.",
+    "gpt-4o":        "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
+    "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases."
 }
 
 # ---- Main Page Layout ----
-st.markdown("<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; font-size:16px;'>Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model.</p>", unsafe_allow_html=True)
+st.markdown(
+    "<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>",
+    unsafe_allow_html=True
+)
+st.markdown(
+    "<p style='text-align:center; font-size:16px; color:#4A4443;'>"
+    "Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model."
+    "</p>",
+    unsafe_allow_html=True
+)
 
 # Using columns to separate the API key entry and file upload
 col1, col2 = st.columns(2)
@@ -243,9 +367,6 @@ def fetch_image_as_base64(url: str) -> str:
     except Exception:
         return None
 
-
-
-
 # 4. Choose a Pre-Written Prompt
 st.subheader("💬 Choose a Prompt")
 prompt_choice = st.selectbox(
@@ -314,7 +435,7 @@ if is_image_prompt:
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
                 img,
-                box_color='#ff1744',
+                box_color='#C2EA46',  # Lime Green crop box
                 realtime_update=True,
                 aspect_ratio=None,
                 return_type="image"
@@ -339,7 +460,6 @@ if is_image_prompt:
 else:
     # For all other prompts (including multi-image URL), show CSV uploader
     uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
-
 
 # ---------------------------------------------------------------
 # Image-prompt flow – two-pass high-accuracy extraction (single-image)
@@ -420,12 +540,19 @@ if uploaded_file and user_prompt.strip():
 
     cols_to_use = selected_columns
 
-    # Display estimated cost
-    cost_est = estimate_cost(model_choice, df, user_prompt, cols_to_use)
+    # Display estimated cost (dark background card with white text)
     st.markdown(
-        f"<div style='padding:10px; background-color:#2a2a2a; color:#ffffff; border-radius:5px;'>"
-        f"<strong>Estimated Cost:</strong> ${cost_est:0.4f} (rough estimate based on token usage)"
-        "</div>",
+        f"""
+        <div style='
+            padding:10px; 
+            background-color:#4A4443;  /* Grey */
+            color:#FFFFFF; 
+            border-radius:5px;
+            margin-bottom:1rem;
+        '>
+            <strong>Estimated Cost:</strong> ${estimate_cost(model_choice, df, user_prompt, cols_to_use):0.4f} (rough estimate based on token usage)
+        </div>
+        """,
         unsafe_allow_html=True
     )
 
@@ -539,7 +666,7 @@ if uploaded_file and user_prompt.strip():
 
                 else:
                     try:
-                        # 1 – split the stored prompt into true roles
+                        # 1 – split the stored prompt into true roles
                         if "USER MESSAGE:" in user_prompt:
                             system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
                         else:
@@ -575,19 +702,19 @@ if uploaded_file and user_prompt.strip():
                         }
                         results.append(error_result)
 
-                # 6 – update progress UI
+                # 6 – update progress UI
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
                 progress_text.markdown(
-                    f"<h4 style='text-align:center;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                    f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                     unsafe_allow_html=True
                 )
 
                 rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
                 rolling_log = rolling_log[-20:]
                 log_placeholder.markdown(
-                    "<h4>📝 Recent Outputs (Last 20)</h4>"
-                    "<pre style='background:#f0f0f0; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
+                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>"
+                    "<pre style='background:#F2FAF4; color:#4A4443; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
                     + "\n".join(rolling_log) +
                     "</pre>",
                     unsafe_allow_html=True
@@ -596,24 +723,31 @@ if uploaded_file and user_prompt.strip():
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
-                    title={'text': "Progress"},
+                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
                     gauge={
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "#4a90e2"},
+                        'axis': {'range': [0, 100], 'tickcolor': '#4A4443'},
+                        'bar': {'color': "#C2EA46"},          /* Lime Green */
+                        'bgcolor': "#E1FAD1",                /* Mint Green background */
+                        'borderwidth': 0,
                         'steps': [
-                            {'range': [0, 50], 'color': "#e0e0e0"},
-                            {'range': [50, 100], 'color': "#c8c8c8"}
+                            {'range': [0, 50], 'color': "#E1FAD1"},
+                            {'range': [50, 100], 'color': "#F2FAF4"}
                         ]
                     }
                 ))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
+
             # ---------- end for loop ----------
 
             # Combine original CSV with GPT results
             results_df = pd.DataFrame(results)
             final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
             st.success("✅ GPT processing complete!")
-            st.markdown("### 🔍 Final Result")
+
+            st.markdown(
+                "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
+                unsafe_allow_html=True
+            )
             st.dataframe(final_df)
 
             # Download buttons
