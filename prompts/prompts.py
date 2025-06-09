@@ -76,14 +76,32 @@ PROMPT_OPTIONS = {
             "• \"None\" ← if compliant\n\n"
     
             "Only flag as 'Yes' if a match is *clear and specific* based on the data provided. "
-            "If unsure or too vague, return 'No' and 'None'. Do not guess. "
-            "Return nothing but the JSON object.\n\n"
+            "If unsure or too vague, return 'No' and 'None'. Do not guess.\n\n"
+    
+            "IMPORTANT RULES FOR 'Medicinal Product':\n"
+            "Flag as a 'Medicinal Product' only if the product:\n"
+            "- Claims to treat, cure, alleviate, or prevent a disease, symptom, or medical condition (e.g. PCOS, arthritis, diabetes)\n"
+            "- Uses medicinal framing (e.g. ‘relieves symptoms’, ‘boosts immunity against illness’, ‘reduces inflammation’)\n"
+            "- Includes regulatory framing such as ‘homeopathic remedy’, ‘herbal medicine’, THR number, or PL number\n\n"
+    
+            "Do NOT flag as 'Medicinal Product' if:\n"
+            "- The product uses legally permitted EFSA-style claims.\n"
+            "- These include phrases like:\n"
+            "  • 'Contributes to the maintenance of normal bones/teeth/muscle function'\n"
+            "  • 'Contributes to normal energy-yielding metabolism'\n"
+            "  • 'Supports normal psychological function'\n"
+            "  • 'Reduces tiredness and fatigue'\n"
+            "  • 'Contributes to the normal function of the immune system'\n"
+            "  • 'Helps maintain electrolyte balance'\n"
+            "  • 'Contributes to normal nervous system function'\n"
+            "- The product includes generic warnings about pregnancy, medication, or consulting a healthcare professional\n"
+            "- The ingredients are common in food supplements (e.g. magnesium, sea moss, psyllium, vitamin B12) without disease claims\n\n"
     
             "PRODUCT DATA:\n"
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Flags prohibited products flexibly based on any provided product fields, checking against H&B's exclusion list."
+        "description": "Flags prohibited products flexibly based on any provided product fields, checking against H&B's exclusion list. Includes light EFSA claim filtering to avoid false positives from compliant supplement copy."
     },
     "Food Supplement Compliance Check": {
         "prompt": (
