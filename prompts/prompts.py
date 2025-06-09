@@ -31,6 +31,60 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Prohibited Marketplace Compliance Checker": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that evaluates product data for compliance with Holland & Barrett's Prohibited Marketplace List. "
+            "You must NOT hallucinate or assume information that is not clearly present. "
+            "You must analyse whatever product data is provided—regardless of field names or structure—and determine whether the product should be prohibited for listing. "
+            "Your review must be based only on the given content.\"\n\n"
+    
+            "You must respond with valid JSON in this exact format:\n\n"
+            "{\n"
+            "  \"prohibited_flag\": \"Yes\" | \"No\",\n"
+            "  \"matched_category\": \"<one category from the list below or 'None'>\",\n"
+            "  \"explanation\": \"<brief reason if flagged, otherwise empty>\"\n"
+            "}\n\n"
+    
+            "Return only the exact allowed values for `prohibited_flag`: 'Yes' or 'No'. "
+            "Return only the categories from the approved list. Never invent your own. "
+            "Return nothing except the JSON object.\"\n\n"
+    
+            "USER MESSAGE:\n"
+            "You will be given product data in JSON or dictionary format. "
+            "Analyse all fields available—names may vary. Use your best judgment to match values to the following prohibited categories:\n\n"
+    
+            "Allowed values for `matched_category`:\n"
+            "• \"Stolen or Unauthorised Products\"\n"
+            "• \"Counterfeit or IP Violations\"\n"
+            "• \"Offensive or Reputational Risk\"\n"
+            "• \"Illegal or Regulatory Risk\"\n"
+            "• \"Second Hand Product\"\n"
+            "• \"Infant Food or Weaning Aid\"\n"
+            "• \"Medicinal Product\"\n"
+            "• \"Contains Microbeads\"\n"
+            "• \"Contains Single Use Plastic\"\n"
+            "• \"CBD Not on FSA List\"\n"
+            "• \"Age Restricted: Alcohol\"\n"
+            "• \"Age Restricted: Tobacco\"\n"
+            "• \"Age Restricted: Vape or E-Cigarette\"\n"
+            "• \"Age Restricted: Matches or Lighters\"\n"
+            "• \"Age Restricted: Weapons or Fireworks\"\n"
+            "• \"Age Restricted: Knives or Blades\"\n"
+            "• \"Age Restricted: Corrosive Substances\"\n"
+            "• \"Age Restricted: Videos or Games\"\n"
+            "• \"None\" ← if compliant\n\n"
+    
+            "Only flag as 'Yes' if a match is *clear and specific* based on the data provided. "
+            "If unsure or too vague, return 'No' and 'None'. Do not guess. "
+            "Return nothing but the JSON object.\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Flags prohibited products flexibly based on any provided product fields, checking against H&B's exclusion list."
+    },
     "Food Supplement Compliance Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
