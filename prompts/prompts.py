@@ -143,6 +143,11 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Takes all provided fields for a SKU and determines if it is a food supplement; if so, checks for required UK supplement labeling elements without relying on specific field names."
 },
+    "Novel Food Checker (EU)": {
+        "prompt": "",  # We'll generate this dynamically per row
+    "recommended_model": "gpt-4o-mini",
+    "description": "Flags presence of authorised EU novel foods by comparing ingredient statements to the consolidated EU 2017/2470 list."
+},
     "Medicinal Language Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
