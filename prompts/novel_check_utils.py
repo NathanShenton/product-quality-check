@@ -1,38 +1,43 @@
-# novel_check_utils.py
 import pandas as pd
 import unicodedata
 import re
 from rapidfuzz import fuzz
 
-# Load the list once
-novel_df = pd.read_csv("data/novel_list.csv")
-novel_items = novel_df["Authorised Novel Food"].dropna().astype(str).tolist()
+# Load and cache the novel food list from CSV (to avoid reloading every row)
+def load_novel_list(path="data/novel_list.csv"):
+    df = pd.read_csv(path)
+    return [str(x).strip() for x in df["Authorised Novel Food"].dropna().unique()]
 
-# Normalization function for fuzzy comparison
+# Normalize text for matching
 def normalize(text):
-    text = unicodedata.normalize("NFKD", text)
-    text = text.replace("‘", "'").replace("’", "'")
+    text = unicodedata.normalize("NFKD", str(text)).lower()
     text = re.sub(r"\s+", " ", text)
-    return text.strip().lower()
+    return text.strip()
 
-# Preprocess the full novel list
-normalized_novels = [(item, normalize(item)) for item in novel_items]
-
-def find_novel_matches(ingredient_string, threshold=90):
-    """
-    Given an ingredient statement, return a list of matching novel food items.
-    Uses fuzzy token set ratio to catch subtle or partial matches.
-    """
+# Combined match logic: substring first, then fuzzy fallback
+def find_novel_matches(ingredient_text, threshold=87, return_scores=False):
     matches = []
-    norm_ingredients = normalize(ingredient_string)
+    norm_ing = normalize(ingredient_text)
+    novel_list = load_novel_list()
 
-    for label, norm in normalized_novels:
-        score = fuzz.token_set_ratio(norm_ingredients, norm)
+    for term in novel_list:
+        norm_term = normalize(term)
+
+        # First, check if the normalized term appears as a substring
+        if norm_term in norm_ing:
+            matches.append((term, 100))
+            continue
+
+        # Fuzzy fallback
+        score = fuzz.token_set_ratio(norm_term, norm_ing)
         if score >= threshold:
-            matches.append((label, score))
+            matches.append((term, score))
 
-    matches.sort(key=lambda x: -x[1])  # Sort by highest score
-    return [m[0] for m in matches]
+    if return_scores:
+        return sorted(matches, key=lambda x: -x[1])
+    else:
+        return sorted([m[0] for m in matches])
+
 
 # Optional: helper to inject these into a prompt
 
