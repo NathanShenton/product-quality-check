@@ -9,6 +9,7 @@ from streamlit_cropper import st_cropper    # NEW
 from PIL import Image                       # NEW
 import io                                   # NEW
 from openai import OpenAI
+from rapidfuzz import fuzz
 
 # Import prompts from your new module:
 from prompts.prompts import PROMPT_OPTIONS
