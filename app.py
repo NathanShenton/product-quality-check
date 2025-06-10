@@ -516,7 +516,7 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
             st.error(f"Image processing failed: {e}")
 
 # ---------- Main Execution Logic ----------
-if uploaded_file and user_prompt.strip():
+if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checker (EU)"):
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
