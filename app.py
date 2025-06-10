@@ -666,15 +666,40 @@ if uploaded_file and user_prompt.strip():
 
                 else:
                     try:
-                        # 1 – split the stored prompt into true roles
-                        if "USER MESSAGE:" in user_prompt:
-                            system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
-                        else:
-                            system_txt, user_txt = user_prompt, ""
+                        if prompt_choice == "Novel Food Checker (EU)":
+                            from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
 
-                        system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
-                        user_txt = user_txt.strip().format(**row_data)
-                        user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                            ing_text = row_data.get("full_ingredients", "")
+                            if not ing_text:
+                                results.append({
+                                    "novel_food_flag": "No",
+                                    "confirmed_matches": [],
+                                    "explanation": "No 'ingredients' field found in row."
+                                })
+                                continue
+
+                            candidate_matches = find_novel_matches(ing_text)
+
+                            if candidate_matches:
+                                system_txt = build_novel_food_prompt(candidate_matches, ing_text)
+                                user_txt = ""
+                            else:
+                                results.append({
+                                    "novel_food_flag": "No",
+                                    "confirmed_matches": [],
+                                    "explanation": "No potential matches found via local fuzzy screen."
+                                })
+                                continue
+                        else:
+                            # 1 – split the stored prompt into true roles
+                            if "USER MESSAGE:" in user_prompt:
+                                system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
+                            else:
+                                system_txt, user_txt = user_prompt, ""
+
+                            system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
+                            user_txt = user_txt.strip().format(**row_data)
+                            user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
                         response = client.chat.completions.create(
                             model=model_choice,
@@ -701,6 +726,7 @@ if uploaded_file and user_prompt.strip():
                             "raw_output": content if content else "No content returned"
                         }
                         results.append(error_result)
+
 
                 # 6 – update progress UI
                 progress = (idx + 1) / n_rows
