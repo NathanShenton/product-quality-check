@@ -239,6 +239,63 @@ PROMPT_OPTIONS = {
             "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
     )
 },
+    "Shelf Label Validation": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant for high-criticality shelf-label compliance checking. "
+            "For every SKU you receive, examine these fields:\n"
+            "sku, product_description_en, sku_name, lexmark_pack_size, sel_description, "
+            "lexmark_uom, price_mult, brand_name\n\n"
+    
+            "Perform ALL of the following validation rules and list every failure:\n\n"
+    
+            "1. lexmark_pack_size\n"
+            "   • Must be proper case and appear EXACTLY in this allowed set:\n"
+            "     {Bags,Candles,Caplets,Capsules,Chewables,Condoms,Cubes,Footpads,g,Gummies,Infusers,"
+            "Inhalators,Item,Items,Jellies,Liners,Lozenges,Melts,ml,Nuggets,Packs,Pad,Pads,Pastilles,"
+            "Patches,Pieces,Pillules,Plasters,Sachets,Softgels,Sticks,Strips,Suppositories,Tablets,"
+            "Tampons,Tea Bags,Wipes}\n"
+            "   • “Items” is only valid when the contents are genuinely assorted / non-typical.\n"
+            "   • Any hint of kg or litres is an immediate fail.\n\n"
+    
+            "2. sel_description\n"
+            "   • Renders on two rows of 20 characters each (40 total).\n"
+            "   • Split occurs at the nearest space ≤20 chars; if row 2 would overflow it is auto-truncated "
+            "with “…”.  Any truncation is a failure.\n"
+            "   • Must NOT contain the brand name or the pack size (e.g. “60 Tablets”), but may include "
+            "strength values such as “1000 mg” or “15 SPF”.\n\n"
+    
+            "3. lexmark_uom (price-per unit)\n"
+            "   • Must be singular proper-case family unit matching the pack size "
+            "(“Per Tablet”, “Per Capsule”, etc.).\n"
+            "   • For pack sizes in g or ml, default to “Per 100 g” or “Per 100 ml” unless the product is a "
+            "cosmetic under the UK Price-Marking Order 2004 (apply this override ONLY when absolutely "
+            "certain from the description context).\n\n"
+    
+            "4. price_mult\n"
+            "   • Must equal reference_qty ÷ pack_size_qty, where reference_qty = 100 for "
+            "“Per 100 g/ml” and 1 for singular units.\n"
+            "   • Accept a rounding tolerance of ±0.0001 (four decimal places).\n\n"
+    
+            "Return JSON ONLY in the following format—no extra keys, comments or text:\n"
+            "{\n"
+            "  \"overall\": \"Pass\" | \"Fail\",\n"
+            "  \"failures\": [                      // empty if overall == \"Pass\"\n"
+            "    {\n"
+            "      \"field\": \"<field_name>\",     // lexmark_pack_size | sel_description | lexmark_uom | price_mult\n"
+            "      \"reason\": \"<concise reason>\"\n"
+            "    }\n"
+            "  ],\n"
+            "  \"notes\": \"<optional brief note>\" // omit or leave blank if not needed\n"
+            "}\n\n"
+            "Do NOT output anything except the JSON.\n\n"
+            "USER MESSAGE:\n"
+            "Here is all available data for one SKU (fields may vary):\n"
+            "{{all_product_fields}}\n"
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Validates shelf-label data (pack size, SEL line length, price-per UOM, price multiplier) against UK Price-Marking Order 2004 and internal rules."
+    },
     "Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
