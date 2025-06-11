@@ -259,14 +259,15 @@ PROMPT_OPTIONS = {
             "   • Any hint of kg or litres is an immediate fail.\n\n"
     
             "2. sel_description\n"
+            "   • Must be Proper Case.\n"
             "   • Renders on two rows of 20 characters each (40 total).\n"
             "   • Split occurs at the nearest space ≤20 chars; if row 2 would overflow it is auto-truncated "
-            "with “…”.  Any truncation is a failure.\n"
+            "with “…”. Any truncation is a failure.\n"
             "   • Must NOT contain the brand name or the pack size (e.g. “60 Tablets”), but may include "
             "strength values such as “1000 mg” or “15 SPF”.\n\n"
     
             "3. lexmark_uom (price-per unit)\n"
-            "   • Must be singular proper-case family unit matching the pack size "
+            "   • Must be the singular proper-case family unit matching the pack size "
             "(“Per Tablet”, “Per Capsule”, etc.).\n"
             "   • For pack sizes in g or ml, default to “Per 100 g” or “Per 100 ml” unless the product is a "
             "cosmetic under the UK Price-Marking Order 2004 (apply this override ONLY when absolutely "
@@ -277,12 +278,16 @@ PROMPT_OPTIONS = {
             "“Per 100 g/ml” and 1 for singular units.\n"
             "   • Accept a rounding tolerance of ±0.0001 (four decimal places).\n\n"
     
+            "5. brand_name\n"
+            "   • Must be populated (non-blank).\n"
+            "   • The brand name must NOT appear anywhere in sel_description (case-insensitive).\n\n"
+    
             "Return JSON ONLY in the following format—no extra keys, comments or text:\n"
             "{\n"
             "  \"overall\": \"Pass\" | \"Fail\",\n"
             "  \"failures\": [                      // empty if overall == \"Pass\"\n"
             "    {\n"
-            "      \"field\": \"<field_name>\",     // lexmark_pack_size | sel_description | lexmark_uom | price_mult\n"
+            "      \"field\": \"<field_name>\",     // lexmark_pack_size | sel_description | lexmark_uom | price_mult | brand_name\n"
             "      \"reason\": \"<concise reason>\"\n"
             "    }\n"
             "  ],\n"
@@ -294,7 +299,10 @@ PROMPT_OPTIONS = {
             "{{all_product_fields}}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Validates shelf-label data (pack size, SEL line length, price-per UOM, price multiplier) against UK Price-Marking Order 2004 and internal rules."
+        "description": (
+            "Validates shelf-label data (pack size, SEL proper case & length, brand presence, "
+            "price-per UOM, price multiplier) against UK Price-Marking Order 2004 and internal rules."
+        )
     },
     "Image: Directions for Use": {
         "prompt": (
