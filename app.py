@@ -813,6 +813,9 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
                 "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
                 unsafe_allow_html=True
             )
+            # Stringify any complex columns so Streamlit can render them
+            if "fuzzy_debug_matches" in final_df.columns:
+                final_df["fuzzy_debug_matches"] = final_df["fuzzy_debug_matches"].apply(lambda x: json.dumps(x, ensure_ascii=False))
             st.dataframe(final_df)
 
             # Download buttons
