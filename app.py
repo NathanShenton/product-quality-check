@@ -14,8 +14,20 @@ from rapidfuzz import fuzz
 # Import prompts from your new module:
 from prompts.prompts import PROMPT_OPTIONS
 
+from prompts.competitor_match import (
+    load_competitor_db,  # lazy-loads & caches the CSV
+    parse_sku,
+    top_candidates,
+    build_match_prompt,
+)
+
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
+
+# -------------------------------------------------
+#  ⏳  One-time load of competitor database (cached)
+# -------------------------------------------------
+COMP_DB = load_competitor_db()     # list[ParsedSKU]
 
 #############################
 #  Custom CSS Styling Block! #
