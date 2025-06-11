@@ -538,7 +538,12 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
             st.error(f"Image processing failed: {e}")
 
 # ---------- Main Execution Logic ----------
-if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checker (EU)"):
+if uploaded_file and (
+        user_prompt.strip()                           # custom prompt supplied
+        or prompt_choice in {                         # built-in prompts that need no text
+            "Novel Food Checker (EU)",
+            "Competitor SKU Match"
+        }):
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
@@ -548,7 +553,7 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
     selected_columns = st.multiselect(
         "Use in Processing",
         options=df.columns.tolist(),
-        default=df.columns.tolist()[:3],      # pre-select the first 3 by default
+        default=df.columns.tolist()[:3],
         help="Pick between 1 and 10 columns."
     )
 
@@ -560,7 +565,16 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
         st.error("⚠️ You can select at most 10 columns. Please deselect some.")
         st.stop()
 
-    cols_to_use = selected_columns
+    cols_to_use = selected_columns          # ← existing line
+    # ──────────────────────────────────────────────────────────────
+    #  NEW: ask **only** for Competitor-match prompt
+    # ──────────────────────────────────────────────────────────────
+    if prompt_choice == "Competitor SKU Match":
+        sku_col = st.selectbox(
+            "Which column contains *your* product name / volume?",
+            options=cols_to_use,            # user may pick only among those already passed to GPT
+            help="e.g. 'Product_Name' or 'SKU Title'"
+        )
 
     # Display estimated cost (dark background card with white text)
     st.markdown(
@@ -688,6 +702,52 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
 
                 else:
                     try:
+                        # ------------------------------------------------------------------
+                        # 🚀  Competitor SKU Match
+                        # ------------------------------------------------------------------
+                        if prompt_choice == "Competitor SKU Match":
+                            try:
+                                my_sku      = parse_sku(row[sku_col])
+                                cands_raw   = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
+                                cand_list   = [c for c, _ in cands_raw]                 # strip scores
+                        
+                                # guard clause: nothing plausible
+                                if not cand_list:
+                                    results.append({
+                                        "match_found": "No",
+                                        "best_match_uid": "",
+                                        "best_match_name": "",
+                                        "confidence_pct": 0,
+                                        "reason": "No candidate met minimum fuzzy+size rules"
+                                    })
+                                    continue
+                        
+                                system_prompt = build_match_prompt(my_sku, cand_list)
+                        
+                                resp = client.chat.completions.create(
+                                    model=model_choice,
+                                    messages=[{"role": "system", "content": system_prompt}],
+                                    temperature=0.0,
+                                    top_p=0
+                                )
+                                gpt_json = json.loads(resp.choices[0].message.content)
+                        
+                                # enrich with UID so you can JOIN later or show hyperlink
+                                best = next((c for c in cand_list
+                                             if c.raw.startswith(gpt_json.get("best_match_raw", ""))), None)
+                        
+                                results.append({
+                                    **gpt_json,
+                                    "best_match_uid": getattr(best, "uid", ""),
+                                    "best_match_name": getattr(best, "raw", ""),
+                                    "candidate_debug": [(c.raw, s) for c, s in cands_raw]
+                                })
+                        
+                            except Exception as e:
+                                failed_rows.append(idx)
+                                results.append({"error": f"Row {idx}: {e}"})
+                            finally:
+                                continue  # skip the rest of the loop body
                         if prompt_choice == "Novel Food Checker (EU)":
                             from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
 
@@ -828,6 +888,10 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
             # Stringify any complex columns so Streamlit can render them
             if "fuzzy_debug_matches" in final_df.columns:
                 final_df["fuzzy_debug_matches"] = final_df["fuzzy_debug_matches"].apply(lambda x: json.dumps(x, ensure_ascii=False))
+            if "candidate_debug" in final_df.columns:
+                final_df["candidate_debug"] = final_df["candidate_debug"].apply(
+                    lambda x: json.dumps(x, ensure_ascii=False)
+                )
             st.dataframe(final_df)
 
             # Download buttons
