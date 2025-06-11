@@ -376,7 +376,14 @@ prompt_choice = st.selectbox(
     index=0
 )
 
-# Track last selected prompt and reset crop if changed
+# ─ Extract chosen prompt details ─
+selected = PROMPT_OPTIONS[prompt_choice]
+selected_prompt_text = selected["prompt"]
+recommended_model    = selected["recommended_model"]
+prompt_description   = selected["description"]
+st.markdown(f"**Prompt Info:** {prompt_description}")
+
+# ─ Session‐state to reset crops when the prompt changes ─
 if "last_prompt" not in st.session_state:
     st.session_state["last_prompt"] = prompt_choice
 if "cropped_bytes" not in st.session_state:
@@ -385,20 +392,12 @@ if st.session_state["last_prompt"] != prompt_choice:
     st.session_state["last_prompt"] = prompt_choice
     st.session_state["cropped_bytes"] = None
 
-# Extract chosen prompt details
-selected_prompt_data = PROMPT_OPTIONS[prompt_choice]
-selected_prompt_text = selected_prompt_data["prompt"]
-recommended_model = selected_prompt_data["recommended_model"]
-prompt_description = selected_prompt_data["description"]
-st.markdown(f"**Prompt Info:** {prompt_description}")
-
-# ▶️ Threshold slider for the Novel Food Checker
+# ─ Ensure fuzzy_threshold always exists ─
+fuzzy_threshold = 87
 if prompt_choice == "Novel Food Checker (EU)":
     fuzzy_threshold = st.slider(
         "Novel-food fuzzy threshold",
-        min_value=70,
-        max_value=100,
-        value=87,
+        min_value=70, max_value=100, value=87,
         help="Lower = catch more variants (but watch for false positives)."
     )
 
