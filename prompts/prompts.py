@@ -31,6 +31,11 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Competitor SKU Match": {
+        "prompt": "(auto-generated, not used directly)",
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Find the best competitor product match for each SKU"
+    },
     "Prohibited Marketplace Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
