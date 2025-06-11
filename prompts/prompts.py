@@ -250,32 +250,35 @@ PROMPT_OPTIONS = {
             "Perform ALL of the following validation rules and list every failure:\n\n"
     
             "1. lexmark_pack_size\n"
-            "   • Must be proper case and appear EXACTLY in this allowed set:\n"
-            "     {Bags,Candles,Caplets,Capsules,Chewables,Condoms,Cubes,Footpads,g,Gummies,Infusers,"
+            "   • Must be in the format “<quantity> <Unit>”, e.g. “90 Capsules”.\n"
+            "     – <quantity> = positive whole or decimal number.\n"
+            "     – <Unit> must be EXACTLY one of:\n"
+            "       {Bags,Candles,Caplets,Capsules,Chewables,Condoms,Cubes,Footpads,g,Gummies,Infusers,"
             "Inhalators,Item,Items,Jellies,Liners,Lozenges,Melts,ml,Nuggets,Packs,Pad,Pads,Pastilles,"
             "Patches,Pieces,Pillules,Plasters,Sachets,Softgels,Sticks,Strips,Suppositories,Tablets,"
-            "Tampons,Tea Bags,Wipes}\n"
+            "Tampons,Tea Bags,Wipes} (proper-case except “g” and “ml”).\n"
             "   • “Items” is only valid when the contents are genuinely assorted / non-typical.\n"
-            "   • Any hint of kg or litres is an immediate fail.\n\n"
+            "   • Any hint of “kg”, “kilogram”, “litre”, “l”, or similar is an immediate fail.\n\n"
     
             "2. sel_description\n"
             "   • Must be Proper Case.\n"
             "   • Renders on two rows of 20 characters each (40 total).\n"
             "   • Split occurs at the nearest space ≤20 chars; if row 2 would overflow it is auto-truncated "
-            "with “…”. Any truncation is a failure.\n"
-            "   • Must NOT contain the brand name or the pack size (e.g. “60 Tablets”), but may include "
-            "strength values such as “1000 mg” or “15 SPF”.\n\n"
+            "with “…”.  Any truncation is a failure.\n"
+            "   • Must NOT contain the brand name (case-insensitive) or the pack size (e.g. “60 Tablets”), "
+            "but may include strength values such as “1000 mg” or “15 SPF”.\n\n"
     
             "3. lexmark_uom (price-per unit)\n"
-            "   • Must be the singular proper-case family unit matching the pack size "
+            "   • Must be the singular, proper-case family unit matching the pack size "
             "(“Per Tablet”, “Per Capsule”, etc.).\n"
             "   • For pack sizes in g or ml, default to “Per 100 g” or “Per 100 ml” unless the product is a "
             "cosmetic under the UK Price-Marking Order 2004 (apply this override ONLY when absolutely "
             "certain from the description context).\n\n"
     
             "4. price_mult\n"
-            "   • Must equal reference_qty ÷ pack_size_qty, where reference_qty = 100 for "
-            "“Per 100 g/ml” and 1 for singular units.\n"
+            "   • Must equal reference_qty ÷ pack_size_qty, where:\n"
+            "       – pack_size_qty = numeric quantity parsed from lexmark_pack_size.\n"
+            "       – reference_qty = 100 for “Per 100 g/ml”, otherwise 1.\n"
             "   • Accept a rounding tolerance of ±0.0001 (four decimal places).\n\n"
     
             "5. brand_name\n"
@@ -300,7 +303,7 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": (
-            "Validates shelf-label data (pack size, SEL proper case & length, brand presence, "
+            "Validates shelf-label data (pack size with quantity, SEL proper case & length, brand presence, "
             "price-per UOM, price multiplier) against UK Price-Marking Order 2004 and internal rules."
         )
     },
