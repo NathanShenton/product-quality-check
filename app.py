@@ -392,6 +392,16 @@ recommended_model = selected_prompt_data["recommended_model"]
 prompt_description = selected_prompt_data["description"]
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
+# ▶️ Threshold slider for the Novel Food Checker
+if prompt_choice == "Novel Food Checker (EU)":
+    fuzzy_threshold = st.slider(
+        "Novel-food fuzzy threshold",
+        min_value=70,
+        max_value=100,
+        value=87,
+        help="Lower = catch more variants (but watch for false positives)."
+    )
+
 # --- Determine if image-based (single-image cropping prompts only) ---
 single_image_prompts = {
     "Image: Ingredient Scrape (HTML)",
@@ -675,24 +685,35 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
                                 results.append({
                                     "novel_food_flag": "No",
                                     "confirmed_matches": [],
-                                    "explanation": "No 'ingredients' field found in row."
+                                    "explanation": "No 'full_ingredients' field provided.",
+                                    "fuzzy_debug_matches": []
                                 })
                                 continue
 
-                            candidate_matches = find_novel_matches(ing_text)
+                            # run substring + fuzzy with dynamic threshold, capture scores
+                            matches_with_scores = find_novel_matches(
+                                ing_text,
+                                threshold=fuzzy_threshold,
+                                return_scores=True
+                            )
+                            # unpack into candidates + debug list
+                            candidate_matches = [term for term, _ in matches_with_scores]
+                            debug_scores      = matches_with_scores
 
                             if candidate_matches:
                                 system_txt = build_novel_food_prompt(candidate_matches, ing_text)
-                                user_txt = ""
+                                user_txt   = ""
                             else:
                                 results.append({
                                     "novel_food_flag": "No",
                                     "confirmed_matches": [],
-                                    "explanation": "No potential matches found via local fuzzy screen."
+                                    "explanation": "No potential matches found via fuzzy/substring match.",
+                                    "fuzzy_debug_matches": debug_scores
                                 })
                                 continue
+
                         else:
-                            # 1 – split the stored prompt into true roles
+                            # your existing USER MESSAGE split logic
                             if "USER MESSAGE:" in user_prompt:
                                 system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
                             else:
@@ -702,6 +723,7 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
                             user_txt = user_txt.strip().format(**row_data)
                             user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
+                        # GPT call remains unchanged
                         response = client.chat.completions.create(
                             model=model_choice,
                             messages=[
@@ -718,6 +740,10 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
                             content = parts[1].lstrip("json").strip().split("```")[0].strip()
 
                         parsed = json.loads(content)
+                        # attach debug scores to your parsed result if you like
+                        if prompt_choice == "Novel Food Checker (EU)":
+                            parsed["fuzzy_debug_matches"] = debug_scores
+
                         results.append(parsed)
 
                     except Exception as e:
@@ -727,6 +753,7 @@ if uploaded_file and (user_prompt.strip() or prompt_choice == "Novel Food Checke
                             "raw_output": content if content else "No content returned"
                         }
                         results.append(error_result)
+
 
 
                 # 6 – update progress UI
