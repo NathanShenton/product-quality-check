@@ -605,6 +605,7 @@ if uploaded_file and (
             failed_rows = []
             rolling_log = []
             log_placeholder = st.empty()
+            status_placeholder = st.empty()
 
             # ---------- Processing loop ----------
             for idx, row in df.iterrows():
@@ -710,6 +711,9 @@ if uploaded_file and (
                                 my_sku      = parse_sku(row[sku_col])
                                 cands_raw   = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
                                 cand_list   = [c for c, _ in cands_raw]                 # strip scores
+                                status_placeholder.info(f"Row {idx+1}/{n_rows}: running fuzzy match…")
+                                cands_raw   = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
+                                status_placeholder.success(f"Row {idx+1}/{n_rows}: found {len(cands_raw)} candidate(s)")
                         
                                 # guard clause: nothing plausible
                                 if not cand_list:
@@ -723,6 +727,15 @@ if uploaded_file and (
                                     continue
                         
                                 system_prompt = build_match_prompt(my_sku, cand_list)
+                                status_placeholder.info(f"Row {idx+1}/{n_rows}: calling GPT to pick best match…")
+                                resp = client.chat.completions.create(
+                                    model=model_choice,
+                                    messages=[{"role": "system", "content": system_prompt}],
+                                    temperature=0.0,
+                                    top_p=0
+                                )
+                                gpt_json = json.loads(resp.choices[0].message.content)
+                                status_placeholder.success(f"Row {idx+1}/{n_rows}: GPT done (match_found={gpt_json.get('match_found')})")
                         
                                 resp = client.chat.completions.create(
                                     model=model_choice,
