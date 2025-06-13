@@ -747,13 +747,13 @@ if uploaded_file and (
                         
                                 # enrich with UID so you can JOIN later or show hyperlink
                                 best = next((c for c in cand_list
-                                             if c.raw.startswith(gpt_json.get("best_match_raw", ""))), None)
+                                             if c.uid == gpt_json.get("best_match_uid")), None)
                         
                                 results.append({
                                     **gpt_json,
                                     "best_match_uid": getattr(best, "uid", ""),
-                                    "best_match_name": getattr(best, "raw", ""),
-                                    "candidate_debug": [(c.raw, s) for c, s in cands_raw]
+                                    "best_match_name": getattr(best, "raw_name", ""),
+                                    "candidate_debug": [(c.raw_name, s) for c, s in cands_raw]
                                 })
                         
                             except Exception as e:
