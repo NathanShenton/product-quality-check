@@ -5,9 +5,9 @@ import os
 import requests
 import base64
 import plotly.graph_objects as go
-from streamlit_cropper import st_cropper    # NEW
-from PIL import Image                       # NEW
-import io                                   # NEW
+from streamlit_cropper import st_cropper    
+from PIL import Image                       
+import io                                   
 from openai import OpenAI
 from rapidfuzz import fuzz
 
