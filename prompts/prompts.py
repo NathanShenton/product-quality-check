@@ -152,10 +152,10 @@ PROMPT_OPTIONS = {
             "USER MESSAGE:\n"
             "Here is all available data for one SKU (field names may vary):\n"
             "{{all_product_fields}}\n"
-        ),\n"
-        "recommended_model": "gpt-4.1-mini",\n"
-        "description": "Classifies a SKU as a food supplement or not, then checks for every mandatory UK food-supplement label statement with zero reliance on specific field names."\n"
-},
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Classifies a SKU as a food supplement or not, then checks for every mandatory UK food-supplement label statement with zero reliance on specific field names."
+    },
     "Novel Food Checker (EU)": {
         "prompt": "",  # We'll generate this dynamically per row
     "recommended_model": "gpt-4o-mini",
