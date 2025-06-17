@@ -808,12 +808,12 @@ PROMPT_OPTIONS = {
             "   - Confirm the result of the self-audit. Examples:\n"
             "     • \"Confirmed unbolded 'wheat': found outside tags in: 'wheat flour, salt'\"\n"
             "     • \"Excluded 'almond': fully bolded in: '<strong>Almond</strong> and <strong>Hazelnut</strong>'\"\n"
-            "     • \"Excluded 'hazelnuts': wrapped in <strong> tag inside: '[sugar, <strong>hazelnuts</strong>]'\n"
+            "     • \"Excluded 'hazelnuts': wrapped in <strong> tag inside: '[sugar, <strong>hazelnuts</strong>]'\n\n"
             "8) Final validation check (mandatory before returning results):\n"
-            "  - Every allergen in "unbolded_allergens" MUST match one of the 14 allergen categories or their approved synonyms (as defined in Rule 3).\n"
-            "  - If a term does not map to a known allergen group, it must NOT appear in the result.\n"
-            "  - Each allergen listed must also have a corresponding entry in "debug_matches".\n"
-            "  - If any allergen is missing a debug trace, exclude it from the output.\n"
+            "   - Every allergen in \"unbolded_allergens\" MUST match one of the 14 allergen categories or their approved synonyms (as defined in Rule 3).\n"
+            "   - If a term does not map to a known allergen group, it must NOT appear in the result.\n"
+            "   - Each allergen listed must also have a corresponding entry in \"debug_matches\".\n"
+            "   - If any allergen is missing a debug trace, exclude it from the output.\n"
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Checks HTML-coded ingredients for unbolded allergens using strict two-step logic with verified debug outputs."
