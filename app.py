@@ -864,19 +864,23 @@ if uploaded_file and (
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
+                    number={
+                        'font': {'color': '#4A4443'}  # Grey for central number
+                    },
                     title={
                         'text': "Progress",
-                        'font': {'color': '#4A4443'}    # Grey title text
+                        'font': {'color': '#4A4443'}  # Grey title text
                     },
                     gauge={
                         'axis': {
                             'range': [0, 100],
-                            'tickcolor': '#4A4443'        # Grey ticks/labels
+                            'tickcolor': '#4A4443',         # Grey tick marks
+                            'tickfont': {'color': '#4A4443'}  # Grey tick labels
                         },
                         'bar': {
-                            'color': "#C2EA46"            # Lime Green fill
+                            'color': "#C2EA46"               # Lime Green fill
                         },
-                        'bgcolor': "#E1FAD1",            # Mint Green background
+                        'bgcolor': "#E1FAD1",               # Mint Green background
                         'borderwidth': 0,
                         'steps': [
                             {'range': [0, 50], 'color': "#E1FAD1"},   # Mint Green
