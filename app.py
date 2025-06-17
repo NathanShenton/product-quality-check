@@ -865,28 +865,31 @@ if uploaded_file and (
                     mode="gauge+number",
                     value=progress * 100,
                     number={
-                        'font': {'color': '#4A4443'}  # Grey for central number
+                        'font': {'color': '#4A4443'}
                     },
                     title={
                         'text': "Progress",
-                        'font': {'color': '#4A4443'}  # Grey title text
+                        'font': {'color': '#4A4443'}
                     },
                     gauge={
                         'axis': {
                             'range': [0, 100],
-                            'tickcolor': '#4A4443',         # Grey tick marks
-                            'tickfont': {'color': '#4A4443'}  # Grey tick labels
+                            'tickcolor': '#4A4443',
+                            'tickfont': {'color': '#4A4443'},
+                            'tickwidth': 2,
+                            'ticklen': 8
                         },
                         'bar': {
-                            'color': "#C2EA46"               # Lime Green fill
+                            'color': "#C2EA46"
                         },
-                        'bgcolor': "#E1FAD1",               # Mint Green background
-                        'borderwidth': 0,
+                        'bgcolor': "#E1FAD1",
+                        'borderwidth': 1,
                         'steps': [
-                            {'range': [0, 50], 'color': "#E1FAD1"},   # Mint Green
-                            {'range': [50, 100], 'color': "#F2FAF4"}  # Powder White
+                            {'range': [0, 50], 'color': "#E1FAD1"},
+                            {'range': [50, 100], 'color': "#F2FAF4"}
                         ]
-                    }
+                    },
+                    domain={'x': [0, 1], 'y': [0, 1]}
                 ))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
