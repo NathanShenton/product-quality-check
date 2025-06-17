@@ -140,12 +140,12 @@ st.markdown(
       padding: 1rem;
     }
 
-    /* Plotly charts: default background to Powder White and gridlines in Mint Green */
+    /* Plotly charts: gridlines to Powder White and background in Mint Green */
     .js-plotly-plot .plotly .main-svg {
-      background-color: #F2FAF4 !important; /* Powder White */
+      background-color: #E1FAD1 !important; 
     }
     .js-plotly-plot .gridlayer line {
-      stroke: #E1FAD1 !important;           /* Mint Green gridlines */
+      stroke: #F2FAF4 !important;           
       stroke-width: 1px;
     }
 
@@ -581,8 +581,8 @@ if uploaded_file and (
         f"""
         <div style='
             padding:10px; 
-            background-color:#4A4443;  /* Grey */
-            color:#FFFFFF; 
+            background-color:#FFFFFF;  /* Grey */
+            color:#4A4443; 
             border-radius:5px;
             margin-bottom:1rem;
         '>
