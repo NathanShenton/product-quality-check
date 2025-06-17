@@ -122,7 +122,7 @@ PROMPT_OPTIONS = {
             "PRODUCT DATA:\n"
             "{{product_data}}\n"
         ),
-        "recommended_model": "gpt-4o-mini"
+        "recommended_model": "gpt-4o-mini",
         "description": "Prohibited-item checker with expanded medicinal-condition logic and debugging output."
     },
     "Food Supplement Compliance Check": {
