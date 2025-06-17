@@ -778,16 +778,21 @@ PROMPT_OPTIONS = {
             "5) In the JSON you return, list each allergen only once, in lowercase, separated by commas. If none are found unbolded, return an empty string.\n\n"
             "6) The output must be valid JSON with exactly this shape:\n\n"
             "{\n"
-            "  \"unbolded_allergens\": \"milk, fish, celery\"\n"
+            "  \"unbolded_allergens\": \"milk, fish, celery\",\n"
+            "  \"debug_matches\": [\n"
+            "    \"Matched 'milk' in: 'skimmed milk powder' (appears unbolded)\",\n"
+            "    \"Matched 'wheat' in: 'wheat flour' (appears unbolded)\"\n"
+            "  ]\n"
             "}\n\n"
             "or, if none are found:\n\n"
             "{\n"
-            "  \"unbolded_allergens\": \"\"\n"
+            "  \"unbolded_allergens\": \"\",\n"
+            "  \"debug_matches\": []\n"
             "}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Checks HTML-coded ingredient data for any unbolded allergens with detailed rules."
-    },
+        "description": "Checks HTML-coded ingredient data for any unbolded allergens, with debugging insight into matched phrases."
+},
     "Custom": {
         "prompt": "",
         "recommended_model": "gpt-4.1-mini",
