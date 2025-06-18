@@ -317,39 +317,39 @@ PROMPT_OPTIONS = {
             "Perform ALL of the following validation rules and list every failure:\n\n"
 
             "1. lexmark_pack_size\n"
-            "   • Must be proper-case.\n"
+            "   • Must be proper-case for word-based descriptors (Capsules, Tablets, Tea Bags, etc.).  \n"
+            "   • For g or ml units, numeric values with case-insensitive UOM are accepted (e.g. \"25g\", \"25G\", \"150ml\", \"150ML\").  \n"
             "   • Must be either:\n"
-            "       – Exactly one of the descriptors in this allowed set:\n"
+            "       – Exactly one descriptor from this allowed set:\n"
             "         {Bags, Candles, Caplets, Capsules, Chewables, Condoms, Cubes, Footpads, g, Gummies, Infusers,\n"
             "          Inhalators, Item, Items, Jellies, Liners, Lozenges, Melts, ml, Nuggets, Packs, Pad, Pads,\n"
             "          Pastilles, Patches, Pieces, Pillules, Plasters, Sachets, Softgels, Sticks, Strips,\n"
             "          Suppositories, Tablets, Tampons, Tea Bags, Wipes}\n"
-            "       – Or a numeric value immediately followed (no space) by one of the allowed UOM entries above\n"
-            "         (e.g. \"25g\", \"150ml\").\n"
-            "   • “Items” is only valid when the contents are genuinely assorted / non-typical.\n"
-            "   • Fail immediately if the unit is any form of kilogram or litre (kg, kilogram(s), l, litre(s), ltr).\n\n"
+            "       – Or a numeric value immediately followed (no space) by one of the allowed UOM entries above.\n"
+            "   • “Items” is valid only when the contents are genuinely assorted / non-typical.\n"
+            "   • Immediate failure if the unit is any form of kilogram or litre (kg, kilogram(s), l, litre(s), ltr).\n\n"
 
             "2. sel_description\n"
             "   • Must be Proper Case.\n"
             "   • Renders on two rows of 20 characters each (40 total).\n"
-            "   • Split occurs at the nearest space ≤20 chars; if row 2 would overflow it is auto-truncated with “…”—any truncation is a failure.\n"
+            "   • Split at nearest space ≤20 chars; if row 2 overflows it is auto-truncated with “…”—any truncation is a failure.\n"
             "   • Must NOT contain the brand name or the pack size (e.g. \"60 Tablets\"), but may include strength values such as \"1000 mg\" or \"15 SPF\".\n\n"
 
             "3. lexmark_uom (price-per unit)\n"
             "   • Must be the singular Proper-Case family unit matching the pack size (\"Per Tablet\", \"Per Capsule\", etc.).\n"
-            "   • For pack sizes in g or ml, default to \"Per 100 g\" or \"Per 100 ml\" unless the product is a cosmetic under the UK Price-Marking Order 2004 (apply this override ONLY when absolutely certain from the description context).\n\n"
+            "   • For pack sizes in g or ml, default to \"Per 100 g\" or \"Per 100 ml\" unless the product is a cosmetic under the UK Price-Marking Order 2004 (override only when certain from context).\n\n"
 
             "4. price_mult\n"
             "   • Must equal reference_qty ÷ pack_size_qty, where reference_qty = 100 for “Per 100 g/ml” and 1 for singular units.\n"
-            "   • Accept a rounding tolerance of ±0.0001 (four decimal places).\n\n"
+            "   • Accept a rounding tolerance of ±0.0001.\n\n"
 
             "5. brand_name\n"
             "   • Must be populated (non-blank).\n"
-            "   • The brand name must NOT appear anywhere in sel_description (case-insensitive).\n\n"
+            "   • Brand name must NOT appear anywhere in sel_description (case-insensitive).\n\n"
 
             "6. Self-Validation\n"
             "   After applying rules 1–5, review each listed failure against the original data to confirm its validity. "
-            "Remove any false positives so that only confirmed failures remain.\n\n"
+            "Remove any false positives so only confirmed failures remain.\n\n"
 
             "Return JSON ONLY in the following format—no extra keys, comments or text:\n"
             "{\n"
@@ -371,7 +371,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": (
             "Validates shelf-label data (pack size, SEL proper case & length, brand presence, "
-            "price-per UOM, price multiplier) with a self-validation pass to confirm failures."
+            "price-per UOM, price multiplier) with special-case handling for g/ml case and a self-validation pass."
         )
     },
     "Image: Directions for Use": {
