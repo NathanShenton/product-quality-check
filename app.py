@@ -11,9 +11,13 @@ import io
 from openai import OpenAI
 from rapidfuzz import fuzz
 
-# ← Add these two lines:
-from prompts import PROMPT_OPTIONS
-from competitor import parse_sku, top_candidates, build_match_prompt
+from prompts.prompts import PROMPT_OPTIONS
+from prompts.competitor_match import (
+    parse_sku,
+    top_candidates,
+    build_match_prompt,
+    load_competitor_db,   # if you need it
+)
 
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
