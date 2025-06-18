@@ -375,6 +375,7 @@ prompt_choice = st.selectbox(
 )
 
 # 5. If they picked Competitor SKU Match, ask for a competitor CSV
+# — Initialize COMP_DB only when needed —
 COMP_DB = None
 if prompt_choice == "Competitor SKU Match":
     comp_file = st.file_uploader(
@@ -385,7 +386,7 @@ if prompt_choice == "Competitor SKU Match":
     if comp_file:
         comp_df = pd.read_csv(comp_file, dtype=str).fillna("")
         COMP_DB = [
-            parse_sku(row["Retailer Product Name"], uid=row.get("UID",""))
+            parse_sku(row["Retailer Product Name"], uid=row.get("UID", ""))
             for _, row in comp_df.iterrows()
         ]
     else:
@@ -451,7 +452,10 @@ user_prompt = st.text_area(
 # -------------------------------
 if is_image_prompt:
     st.markdown("### 🖼️ Upload Product Image & crop just the relevant panel")
-    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
+    uploaded_image = st.file_uploader(
+        "Choose JPG or PNG",
+        type=["jpg", "jpeg", "png"]
+    )
 
     if uploaded_image:
         img = Image.open(uploaded_image).convert("RGB")
@@ -460,16 +464,16 @@ if is_image_prompt:
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
                 img,
-                box_color='#C2EA46',  # Lime Green crop box
+                box_color="#C2EA46",  # Lime Green crop box
                 realtime_update=True,
                 aspect_ratio=None,
                 return_type="image"
             )
 
             # Ensure competitor DB exists before running match
-                if prompt_choice == "Competitor SKU Match" and not COMP_DB:
-                    st.error("Cannot run SKU match—no competitor CSV uploaded.")
-                    st.stop()
+            if prompt_choice == "Competitor SKU Match" and COMP_DB is None:
+                st.error("Cannot run SKU match—no competitor CSV uploaded.")
+                st.stop()
 
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
@@ -478,7 +482,11 @@ if is_image_prompt:
             st.session_state["cropped_preview"] = cropped_img
 
             st.success("✅ Crop captured! Preview below:")
-            st.image(cropped_img, use_container_width=True, caption="Cropped Area Sent to GPT")
+            st.image(
+                cropped_img,
+                use_container_width=True,
+                caption="Cropped Area Sent to GPT"
+            )
 
             st.download_button(
                 label="⬇️ Download Cropped Image Sent to GPT",
@@ -487,9 +495,15 @@ if is_image_prompt:
                 mime="image/png"
             )
 
-else:
-    # For all other prompts (including multi-image URL), show CSV uploader
-    uploaded_file = st.file_uploader("📁 Upload your CSV", type=["csv"])
+# ────────────────────────────────────────────────
+# Non-image prompts always get the product-CSV uploader
+# ────────────────────────────────────────────────
+if not is_image_prompt:
+    uploaded_file = st.file_uploader(
+        "📁 Upload your product CSV",
+        type=["csv"],
+        key="data_csv"
+    )
 
 # ---------------------------------------------------------------
 # Image-prompt flow – two-pass high-accuracy extraction (single-image)
@@ -499,47 +513,51 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
     with st.spinner("Running high-accuracy two-pass extraction"):
         # Enforce the correct model
         if model_choice != "gpt-4o":
-            st.error("🛑  Image prompts require the **gpt-4o** model. Please choose it above and try again.")
+            st.error(
+                "🛑  Image prompts require the **gpt-4o** model. "
+                "Please choose it above and try again."
+            )
             st.stop()
 
         try:
-            # Use the general crop+prompt pipeline for non-ingredient prompts
             if "Ingredient Scrape" in prompt_choice:
                 html_out = two_pass_extract(st.session_state["cropped_bytes"])
             else:
-                data_url = f"data:image/jpeg;base64,{base64.b64encode(st.session_state['cropped_bytes']).decode()}"
-
-                # System prompt from user config
+                data_url = (
+                    "data:image/jpeg;base64,"
+                    + base64.b64encode(
+                        st.session_state["cropped_bytes"]
+                    ).decode()
+                )
                 system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
-
-                # Call OpenAI with cropped image and prompt
                 response = client.chat.completions.create(
                     model=model_choice,
                     messages=[
                         {"role": "system", "content": system_msg},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": "Cropped label image below."},
-                            {"type": "image_url", "image_url": {"url": data_url}}
-                        ]}
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Cropped label image below."},
+                                {"type": "image_url", "image_url": {"url": data_url}}
+                            ]
+                        }
                     ],
                     temperature=0.0,
                     top_p=0
                 )
                 html_out = response.choices[0].message.content.strip()
 
-            # Show result
             if html_out == "IMAGE_UNREADABLE":
-                st.error("🛑  The image was unreadable or missing the required section.")
+                st.error(
+                    "🛑  The image was unreadable or missing the required section."
+                )
             else:
                 st.success("✅ GPT image processing complete!")
-
-                # Auto-detect output format
                 output_type = "html"
                 if "Directions" in prompt_choice or "Storage" in prompt_choice:
                     output_type = "text"
                 elif "Warnings and Advisory" in prompt_choice:
                     output_type = "json"
-
                 st.code(html_out, language=output_type)
 
         except Exception as e:
