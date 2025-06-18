@@ -24,10 +24,26 @@ from prompts.competitor_match import (
 # Set page configuration immediately after imports!
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
-# -------------------------------------------------
-#  ⏳  One-time load of competitor database (cached)
-# -------------------------------------------------
-COMP_DB = load_competitor_db()     # list[ParsedSKU]
+# ——— Dynamic competitor selector ———
+competitor_dir = os.path.join("data", "competitors")
+competitor_files = [
+    f for f in os.listdir(competitor_dir)
+    if f.lower().endswith(".csv")
+]
+selected_comp_file = st.sidebar.selectbox(
+    "Select Competitor Source",
+    options=competitor_files,
+    help="Pick which competitor CSV to drive the SKU-match."
+)
+
+@st.cache_data(show_spinner=False)
+def get_comp_db(filename: str):
+    path = os.path.join(competitor_dir, filename)
+    return load_competitor_db(path)
+
+COMP_DB = get_comp_db(selected_comp_file)
+# ——————————————————————————————
+
 
 #############################
 #  Custom CSS Styling Block! #
