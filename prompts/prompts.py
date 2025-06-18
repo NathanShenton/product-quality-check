@@ -762,6 +762,36 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Flags products that contain methylfolate or methylcobalamin, returning Yes/No/Unsure plus the matched string."
     },
+    "food_supplement_classifier": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant that classifies whether a product SKU is a food supplement.  \n"
+            "Review **all** provided product data holistically and contextually; do not restrict to specific fields.\n\n"
+
+            "Rules:\n"
+            "• Classify as a food supplement only if the text explicitly uses the phrase \"food supplement\" or \"dietary supplement\" "
+            "AND includes a measured daily dose, mentions NRV/%RI, or says \"do not exceed the recommended intake\".\n"
+            "• Products not meeting both criteria are not food supplements.\n\n"
+
+            "Process:\n"
+            "1. Analyze the data and make an initial decision.\n"
+            "2. Perform a self-validation: re-examine the original data to confirm or revise the decision.\n"
+            "3. Provide a succinct debug explanation of why you determined it is (or is not) a food supplement.\n\n"
+
+            "Return JSON ONLY in this format:\n"
+            "{\n"
+            "  \"is_food_supplement\": \"Yes\" | \"No\",\n"
+            "  \"confirmed\": \"Yes\" | \"No\",\n"
+            "  \"debug\": \"<succinct explanation>\"\n"
+            "}\n\n"
+
+            "Do NOT output anything except the JSON.\n\n"
+            "USER MESSAGE:\n"
+            "{{PRODUCT_DATA}}\n"
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Holistically classifies a product as a food supplement, confirms its decision via self-validation, and returns a concise debug reason."
+    },
     "Legal Category Classifier": {
         "prompt": (
             """SYSTEM MESSAGE:\\n
