@@ -11,6 +11,8 @@ import io
 from openai import OpenAI
 from rapidfuzz import fuzz
 from prompts import PROMPT_OPTIONS
+from competitor import parse_sku, top_candidates, build_match_prompt
+from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
 
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
