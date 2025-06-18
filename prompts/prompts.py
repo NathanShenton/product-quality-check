@@ -305,7 +305,7 @@ PROMPT_OPTIONS = {
             "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
     )
 },
-    shelf_label_validation = {
+    "shelf_label_validation" = {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant for high-criticality shelf-label compliance checking. "
