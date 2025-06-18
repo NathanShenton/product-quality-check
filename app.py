@@ -5,14 +5,15 @@ import os
 import requests
 import base64
 import plotly.graph_objects as go
-from streamlit_cropper import st_cropper    
-from PIL import Image                       
-import io                                   
+from streamlit_cropper import st_cropper
+from PIL import Image
+import io
 from openai import OpenAI
 from rapidfuzz import fuzz
+
+# ← Add these two lines:
 from prompts import PROMPT_OPTIONS
 from competitor import parse_sku, top_candidates, build_match_prompt
-from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
 
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
