@@ -896,13 +896,22 @@ if uploaded_file and (
                 # clear out the previous widget
                 log_placeholder.empty()
                 # render a header
-                log_placeholder.markdown("<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>", unsafe_allow_html=True)
+                log_placeholder.markdown(
+                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
+                    unsafe_allow_html=True
+                )
 
-                # now for each entry show a collapsible JSON
+                # first, always show the last few outright
+                num_always_show = 3
+                always_show = st.session_state.rolling_log_dicts[-num_always_show:]
+                for entry in always_show:
+                    log_placeholder.json(entry)
+
+                # then render each in an expander, expanded by default
                 for i, entry in enumerate(st.session_state.rolling_log_dicts):
                     # compute the original row number
                     row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
-                    with log_placeholder.expander(f"Row {row_num} output"):
+                    with log_placeholder.expander(f"Row {row_num} output", expanded=True):
                         st.json(entry)
 
                 # … inside your row‐processing loop, after updating progress_text and rolling_log …
