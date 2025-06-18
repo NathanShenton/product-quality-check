@@ -310,8 +310,9 @@ PROMPT_OPTIONS = {
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant for high-criticality shelf-label compliance checking. "
             "For every SKU you receive, examine these fields:\n"
-            "sku, product_description_en, sku_name, lexmark_pack_size, sel_description, "
-            "lexmark_uom, price_mult, brand_name\n\n"
+            "sku, product_description_en, lexmark_pack_size, sel_description, "
+            "lexmark_uom, price_mult, brand_name\n"
+            "Use sku_name only to help identify the product type (e.g. cosmetic) and do not use it in any validation checks.\n\n"
 
             "Perform ALL of the following validation rules and list every failure:\n\n"
 
@@ -346,6 +347,10 @@ PROMPT_OPTIONS = {
             "   • Must be populated (non-blank).\n"
             "   • The brand name must NOT appear anywhere in sel_description (case-insensitive).\n\n"
 
+            "6. Self-Validation\n"
+            "   After applying rules 1–5, review each listed failure against the original data to confirm its validity. "
+            "Remove any false positives so that only confirmed failures remain.\n\n"
+
             "Return JSON ONLY in the following format—no extra keys, comments or text:\n"
             "{\n"
             "  \"overall\": \"Pass\" | \"Fail\",\n"
@@ -365,7 +370,8 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": (
-            "Validates shelf-label data (pack size, SEL proper case & length, brand presence"
+            "Validates shelf-label data (pack size, SEL proper case & length, brand presence, "
+            "price-per UOM, price multiplier) with a self-validation pass to confirm failures."
         )
     },
     "Image: Directions for Use": {
