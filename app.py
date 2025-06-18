@@ -136,7 +136,7 @@ st.markdown(
 
     /* Plotly charts: gridlines to Powder White and background in Mint Green */
     .js-plotly-plot .plotly .main-svg {
-      background-color: #E1FAD1 !important; 
+      background-color: transparent !important; 
     }
     .js-plotly-plot .gridlayer line {
       stroke: #F2FAF4 !important;           
@@ -887,15 +887,23 @@ if uploaded_file and (
                     unsafe_allow_html=True
                 )
 
-                rolling_log.append(f"Row {idx + 1}: {json.dumps(results[-1])[:500]}")
-                rolling_log = rolling_log[-20:]
-                log_placeholder.markdown(
-                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>"
-                    "<pre style='background:#F2FAF4; color:#4A4443; padding:10px; border-radius:5px; max-height:400px; overflow:auto;'>"
-                    + "\n".join(rolling_log) +
-                    "</pre>",
-                    unsafe_allow_html=True
-                )
+                # collect up to the last 20 raw result dicts
+                if "rolling_log_dicts" not in st.session_state:
+                    st.session_state.rolling_log_dicts = []
+                st.session_state.rolling_log_dicts.append(results[-1])
+                st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
+
+                # clear out the previous widget
+                log_placeholder.empty()
+                # render a header
+                log_placeholder.markdown("<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>", unsafe_allow_html=True)
+
+                # now for each entry show a collapsible JSON
+                for i, entry in enumerate(st.session_state.rolling_log_dicts):
+                    # compute the original row number
+                    row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
+                    with log_placeholder.expander(f"Row {row_num} output"):
+                        st.json(entry)
 
                 # … inside your row‐processing loop, after updating progress_text and rolling_log …
 
