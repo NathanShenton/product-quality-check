@@ -25,7 +25,7 @@ from prompts.competitor_match import (
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
 # ——— Dynamic competitor selector ———
-competitor_dir = os.path.join("data", "competitors")
+competitor_dir = os.path.join("data", "competitor")
 competitor_files = [
     f for f in os.listdir(competitor_dir)
     if f.lower().endswith(".csv")
