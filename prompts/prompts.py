@@ -66,17 +66,13 @@ PROMPT_OPTIONS = {
             "}\n"
             "\n"
             "USER MESSAGE:\n"
-            "{\n"
-            "  \"sku\": \"{sku}\",\n"
-            "  \"sku_name\": \"{sku_name}\",\n"
-            "  \"nutritionals_info\": {nutritionals_info},\n"
-            "  \"full_ingredients\": \"{full_ingredients}\",\n"
-            "  \"quantity_string\": \"{quantity_string}\",\n"
-            "  \"category_fpna_l1_name\": \"{category_fpna_l1_name}\"\n"
-            "}"
-      ),
+            "{{PRODUCT_DATA}}"
+        ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Robustly normalises nutritionals, defaults to per-100, handles varied key names, computes worse-case and FNV-adjusted NPM, applies HFSS criteria, and self-verifies all steps."
+        "description": (
+            "Robustly normalises nutritionals, defaults to per-100, handles varied key names, "
+            "computes worse-case and FNV-adjusted NPM, applies HFSS criteria, and self-verifies all steps."
+        )
     },
     "Competitor SKU Match": {
         "prompt": "(auto-generated, not used directly)",
