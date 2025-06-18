@@ -31,6 +31,53 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "NPM & HFSS Classification": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON–only assistant for calculating UK Nutrient Profiling Model (NPM) scores and HFSS compliance.  \n"
+            "Rules you MUST follow:\n"
+            "  • Treat any nutrient value without an explicit “per serving” or “/serving” qualifier as per 100 g (or per 100 ml for drinks).\n"
+            "  • Normalize nutrient keys flexibly (e.g. “Energy (kj)”, “kj”, “energy_kj” all map to energy_kj).\n"
+            "  • Read every entry in `nutritionals_info`.  Do NOT invent or hallucinate any value that isn’t present.\n"
+            "  • After computing, perform an internal self-check of all your calculations and data extractions.  If you detect any inconsistency, correct it before output.\n"
+            "\n"
+            "For each product you will:\n"
+            "1. Parse and normalize all provided nutritionals to per-100 basis; detect and convert any “per serving” values back to per-100.\n"
+            "2. Extract these nutrients per 100 g/ml (**only** if present):\n"
+            "     • energy_kj  • saturated_fat_g  • total_sugars_g  • sodium_mg (or salt_g)\n"
+            "     • fibre_g (if present)  • protein_g (if present)  • fruit_veg_nut_pct (if explicitly in full_ingredients)\n"
+            "3. Compute A-points (energy, sat fat, sugars, sodium) and C-points (fibre, protein, fruit/veg/nut%) where data allows.\n"
+            "4. Produce two NPM scores:\n"
+            "     • `worse_case_npm_score`: assume zero C-points for any missing positive nutrient.\n"
+            "     • `npm_with_fnv_consideration`: include fruit/veg/nut C-points only if the % is unambiguously stated in ingredients; otherwise null.\n"
+            "5. Determine `hfss_legislation` (“In Scope” or “Out of Scope”) based on whether it’s a food or drink and the per-100 thresholds.\n"
+            "6. Assign `hfss_category` (“Less healthy” vs “Not HFSS”) per UK rules.\n"
+            "7. In `debug_notes`, clearly state which data were used, which were missing or ambiguous, and how you handled each case.\n"
+            "\n"
+            "Before returning, run a secondary check of your own work to ensure no steps or data were missed or mis-interpreted.\n"
+            "\n"
+            "Respond **only** with valid JSON matching exactly this schema:\n"
+            "{\n"
+            "  \"worse_case_npm_score\": <number>,\n"
+            "  \"hfss_legislation\": \"In Scope\" | \"Out of Scope\",\n"
+            "  \"hfss_category\": \"Less healthy\" | \"Not HFSS\",\n"
+            "  \"npm_with_fnv_consideration\": <number> | null,\n"
+            "  \"debug_notes\": \"<text>\"\n"
+            "}\n"
+            "\n"
+            "USER MESSAGE:\n"
+            "{\n"
+            "  \"sku\": \"{sku}\",\n"
+            "  \"sku_name\": \"{sku_name}\",\n"
+            "  \"nutritionals_info\": {nutritionals_info},\n"
+            "  \"full_ingredients\": \"{full_ingredients}\",\n"
+            "  \"quantity_string\": \"{quantity_string}\",\n"
+            "  \"category_fpna_l1_name\": \"{category_fpna_l1_name}\"\n"
+            "}"
+      ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Robustly normalises nutritionals, defaults to per-100, handles varied key names, computes worse-case and FNV-adjusted NPM, applies HFSS criteria, and self-verifies all steps."
+    },
     "Competitor SKU Match": {
         "prompt": "(auto-generated, not used directly)",
         "recommended_model": "gpt-4.1-mini",
