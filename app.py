@@ -25,38 +25,40 @@ from prompts.competitor_match import (
 # ─── Streamlit page config ───
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
-# ─── COMPETITOR DB SELECTOR (runs on every rerun) ───
+# ─── COMPETITOR DB SELECTOR ───
 import os
 
-# 1) Point at your folder
+# 1️⃣ Point at your competitor folder
 competitor_dir = os.path.join("data", "competitor")
 
-# 2) Fail fast if it’s missing
+# 2️⃣ Fail fast if folder is missing
 if not os.path.isdir(competitor_dir):
-    st.sidebar.error(f"❌ Cannot find folder: {competitor_dir}")
+    st.sidebar.error(f"❌ Missing competitor folder: {competitor_dir}")
     st.stop()
 
-# 3) List only CSVs
+# 3️⃣ Gather all CSV filenames
 competitor_files = sorted([
     fname for fname in os.listdir(competitor_dir)
     if fname.lower().endswith(".csv")
 ])
 
-# 4) Let the user pick one
+# 4️⃣ Sidebar dropdown to pick one
 selected_comp_file = st.sidebar.selectbox(
     "Select Competitor Data File",
     options=competitor_files,
     help="Choose which competitor CSV to use for SKU matching"
 )
+# 5️⃣ Show your choice on every rerun
 st.sidebar.write("🔍 Using competitor file:", selected_comp_file)
 
-# 5) Load it (no stale cache while debugging!)
-# @st.cache_data(show_spinner=False)   # ← uncomment once confirmed working
+# 6️⃣ Loader function (no cache while debugging)
 def get_comp_db(filename: str):
-    return load_competitor_db(os.path.join(competitor_dir, filename))
+    path = os.path.join(competitor_dir, filename)
+    return load_competitor_db(path)
 
+# 7️⃣ Actually load the DB into COMP_DB
 COMP_DB = get_comp_db(selected_comp_file)
-# ────────────────────────────────────────────
+# ──────────────────────────────────
 
 
 #############################
