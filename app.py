@@ -10,6 +10,7 @@ from PIL import Image
 import io                                   
 from openai import OpenAI
 from rapidfuzz import fuzz
+from prompts import PROMPT_OPTIONS
 
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
