@@ -11,56 +11,9 @@ import io
 from openai import OpenAI
 from rapidfuzz import fuzz
 
-# Import prompts from your new module:
-from prompts.prompts import PROMPT_OPTIONS
-
-from prompts.competitor_match import (
-    load_competitor_db,  # lazy-loads & caches the CSV
-    parse_sku,
-    top_candidates,
-    build_match_prompt,
-)
-
-# Set page configuration immediately after imports!
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
-# ─── COMPETITOR CSV SELECTOR & MANUAL LOADER ────
-from pathlib import Path
-
-# 1️⃣ Locate the app directory and competitor folder
-APP_DIR        = Path(__file__).parent
-COMPETITOR_DIR = APP_DIR / "data" / "competitor"
-
-# 2️⃣ Fail fast if the folder is missing
-if not COMPETITOR_DIR.is_dir():
-    st.sidebar.error(f"❌ Competitor folder not found: {COMPETITOR_DIR}")
-    st.stop()
-
-# 3️⃣ List all .csv files inside
-competitor_files = sorted(p.name for p in COMPETITOR_DIR.glob("*.csv"))
-
-# 4️⃣ Sidebar dropdown for user to pick one CSV
-selected_comp_file = st.sidebar.selectbox(
-    "Select Competitor Data File",
-    options=competitor_files,
-    help="Which competitor CSV should the SKU-match use?"
-)
-st.sidebar.write("🔍 Using competitor file:", selected_comp_file)
-
-# 5️⃣ Manual CSV loader (bypasses any global cache)
-def load_comp_db_manual(csv_path: Path):
-    df = pd.read_csv(csv_path, dtype=str).fillna("")
-    parsed = []
-    for _, row in df.iterrows():
-        raw_name = row["Retailer Product Name"]
-        uid      = row.get("UID", None)
-        parsed.append(parse_sku(raw_name, uid=uid))
-    return parsed
-
-# 6️⃣ Build COMP_DB from the selected file
-COMP_DB = load_comp_db_manual(COMPETITOR_DIR / selected_comp_file)
-# ─────────────────────────────────────────────────
 
 #############################
 #  Custom CSS Styling Block! #
@@ -421,6 +374,23 @@ prompt_choice = st.selectbox(
     index=0
 )
 
+# 5. If they picked Competitor SKU Match, ask for a competitor CSV
+COMP_DB = None
+if prompt_choice == "Competitor SKU Match":
+    comp_file = st.file_uploader(
+        "🔍 Upload competitor CSV",
+        type=["csv"],
+        key="comp_csv"
+    )
+    if comp_file:
+        comp_df = pd.read_csv(comp_file, dtype=str).fillna("")
+        COMP_DB = [
+            parse_sku(row["Retailer Product Name"], uid=row.get("UID",""))
+            for _, row in comp_df.iterrows()
+        ]
+    else:
+        st.warning("Please upload a competitor CSV to enable SKU matching.")
+
 # ─ Extract chosen prompt details ─
 selected = PROMPT_OPTIONS[prompt_choice]
 selected_prompt_text = selected["prompt"]
@@ -495,6 +465,11 @@ if is_image_prompt:
                 aspect_ratio=None,
                 return_type="image"
             )
+
+            # Ensure competitor DB exists before running match
+                if prompt_choice == "Competitor SKU Match" and not COMP_DB:
+                    st.error("Cannot run SKU match—no competitor CSV uploaded.")
+                    st.stop()
 
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
@@ -630,6 +605,11 @@ if uploaded_file and (
 
     # Button to run GPT
     if st.button("🚀 Run GPT on CSV"):
+        # Immediately stop if they chose SKU match but never loaded a competitor DB
+        if prompt_choice == "Competitor SKU Match" and not COMP_DB:
+            st.error("Cannot run SKU match—no competitor CSV uploaded.")
+            st.stop()
+    
         with st.spinner("Processing with GPT..."):
             progress_bar = st.progress(0)
             progress_text = st.empty()
