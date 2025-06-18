@@ -22,44 +22,45 @@ from prompts.competitor_match import (
 )
 
 # Set page configuration immediately after imports!
-# ─── Streamlit page config ───
+# ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
-# ─── COMPETITOR DB SELECTOR ───
-import os
+# ─── COMPETITOR CSV SELECTOR & MANUAL LOADER ────
+from pathlib import Path
 
-# 1️⃣ Point at your competitor folder
-competitor_dir = os.path.join("data", "competitor")
+# 1️⃣ Locate the app directory and competitor folder
+APP_DIR        = Path(__file__).parent
+COMPETITOR_DIR = APP_DIR / "data" / "competitor"
 
-# 2️⃣ Fail fast if folder is missing
-if not os.path.isdir(competitor_dir):
-    st.sidebar.error(f"❌ Missing competitor folder: {competitor_dir}")
+# 2️⃣ Fail fast if the folder is missing
+if not COMPETITOR_DIR.is_dir():
+    st.sidebar.error(f"❌ Competitor folder not found: {COMPETITOR_DIR}")
     st.stop()
 
-# 3️⃣ Gather all CSV filenames
-competitor_files = sorted([
-    fname for fname in os.listdir(competitor_dir)
-    if fname.lower().endswith(".csv")
-])
+# 3️⃣ List all .csv files inside
+competitor_files = sorted(p.name for p in COMPETITOR_DIR.glob("*.csv"))
 
-# 4️⃣ Sidebar dropdown to pick one
+# 4️⃣ Sidebar dropdown for user to pick one CSV
 selected_comp_file = st.sidebar.selectbox(
     "Select Competitor Data File",
     options=competitor_files,
-    help="Choose which competitor CSV to use for SKU matching"
+    help="Which competitor CSV should the SKU-match use?"
 )
-# 5️⃣ Show your choice on every rerun
 st.sidebar.write("🔍 Using competitor file:", selected_comp_file)
 
-# 6️⃣ Loader function (no cache while debugging)
-def get_comp_db(filename: str):
-    path = os.path.join(competitor_dir, filename)
-    return load_competitor_db(path)
+# 5️⃣ Manual CSV loader (bypasses any global cache)
+def load_comp_db_manual(csv_path: Path):
+    df = pd.read_csv(csv_path, dtype=str).fillna("")
+    parsed = []
+    for _, row in df.iterrows():
+        raw_name = row["Retailer Product Name"]
+        uid      = row.get("UID", None)
+        parsed.append(parse_sku(raw_name, uid=uid))
+    return parsed
 
-# 7️⃣ Actually load the DB into COMP_DB
-COMP_DB = get_comp_db(selected_comp_file)
-# ──────────────────────────────────
-
+# 6️⃣ Build COMP_DB from the selected file
+COMP_DB = load_comp_db_manual(COMPETITOR_DIR / selected_comp_file)
+# ─────────────────────────────────────────────────
 
 #############################
 #  Custom CSS Styling Block! #
