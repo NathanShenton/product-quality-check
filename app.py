@@ -579,11 +579,13 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
 
 # ---------- Main Execution Logic ----------
 if uploaded_file and (
-        user_prompt.strip()                           # custom prompt supplied
-        or prompt_choice in {                         # built-in prompts that need no text
-            "Novel Food Checker (EU)",
-            "Competitor SKU Match"
-        }):
+    user_prompt.strip() or
+    prompt_choice in {
+        "Novel Food Checker (EU)",
+        "Competitor SKU Match",
+        "GHS Pictogram Detector"
+    }
+):
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
