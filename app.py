@@ -661,8 +661,8 @@ if uploaded_file and (
                 # 🔍 GHS Pictogram Detector logic (for rows with image URLs)
                 # -------------------------------------------------------------
                 if prompt_choice == "GHS Pictogram Detector":
-                    image_urls = row_data.get("image URLs", "")
-                    image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
+                    image_urls = row_data.get("image_link", "")
+                    image_list = [image_urls.strip()] if image_urls.strip() else []
                     pictograms_found = set()
                     debug_notes_all = []
                 
