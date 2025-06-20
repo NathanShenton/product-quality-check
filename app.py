@@ -431,9 +431,14 @@ single_image_prompts = {
     "Image: Directions for Use",
     "Image: Storage Instructions",
     "Image: Warnings and Advisory (JSON)",
-    "GHS Pictogram Detector",
     # add any other single-image crop prompts here
 }
+
+multi_image_url_prompts = {
+    "Image: Multi-Image Ingredient Extract & Compare",
+    "GHS Pictogram Detector"
+}
+
 is_image_prompt = prompt_choice in single_image_prompts
 uploaded_image = None
 uploaded_file = None
