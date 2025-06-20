@@ -431,6 +431,7 @@ single_image_prompts = {
     "Image: Directions for Use",
     "Image: Storage Instructions",
     "Image: Warnings and Advisory (JSON)",
+    "GHS Pictogram Detector",
     # add any other single-image crop prompts here
 }
 is_image_prompt = prompt_choice in single_image_prompts
@@ -645,11 +646,58 @@ if uploaded_file and (
             rolling_log = []
             log_placeholder = st.empty()
             status_placeholder = st.empty()
-
+            
             # ---------- Processing loop ----------
             for idx, row in df.iterrows():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = ""
+
+                # -------------------------------------------------------------
+                # 🔍 GHS Pictogram Detector logic (for rows with image URLs)
+                # -------------------------------------------------------------
+                if prompt_choice == "GHS Pictogram Detector":
+                    image_urls = row_data.get("image URLs", "")
+                    image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
+                    pictograms_found = set()
+                    debug_notes_all = []
+                
+                    for url in image_list:
+                        encoded = fetch_image_as_base64(url)
+                        if not encoded:
+                            debug_notes_all.append(f"⚠️ Could not fetch image: {url}")
+                            continue
+                
+                        try:
+                            gpt_response = client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=[
+                                    {"role": "system", "content": selected_prompt_text},
+                                    {"role": "user", "content": [
+                                        {"type": "text", "text": "Check this image for GHS pictograms."},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
+                                    ]}
+                                ],
+                                temperature=0.0,
+                                top_p=0
+                            )
+                            result = json.loads(gpt_response.choices[0].message.content.strip())
+                            icons = [i.strip() for i in result.get("pictograms", "").split(",") if i.strip()]
+                            pictograms_found.update(icons)
+                            debug_notes_all.append(result.get("debug_notes", ""))
+                
+                        except Exception as e:
+                            failed_rows.append(idx)
+                            results.append({
+                                "error": f"Error in GPT call for image: {url}",
+                                "debug_notes": str(e)
+                            })
+                            break  # Skip to next row
+                
+                    results.append({
+                        "pictograms": ", ".join(sorted(pictograms_found)),
+                        "debug_notes": " | ".join(debug_notes_all)
+                    })
+                    continue  # ⛔ Skip rest of the loop for this row
 
                 # Handle multi-image ingredient extract
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
