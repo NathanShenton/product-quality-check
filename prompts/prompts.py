@@ -411,26 +411,30 @@ PROMPT_OPTIONS = {
             "using <b>…</b>. Compares result to the 'full_ingredients' field from the same row."
         )
     },
-    "Spelling Checker": {
+    "Grammar & Spelling Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant. You never invent placeholder text. "
-            "Only output real spelling mistakes from 'variants_description' in the format (wrong->correct). "
-            "If you find none, respond with 'errors': '' and no placeholders.\"\n\n"
+            "\"You are a JSON-producing assistant. You check short product descriptions (sell copy) for real grammar and spelling issues only. "
+            "You *never* invent placeholder corrections. Only correct real issues from 'variants_description' in the format (wrong->correct). "
+            "You never include brand or domain-specific words. You must skip uncertain or subjective suggestions. Output only:\n"
+            "{\\n  \\\"errors\\\": \\\"(wrong->correct),(wrong2->correct2)\\\" } or, if perfect: {\\n  \\\"errors\\\": \\\"\\\" }\"\n\n"
             "USER MESSAGE:\n"
-            "Analyze the text in 'variants_description' for real English misspellings. "
-            "Output valid JSON only, like this:\n\n"
-            "{\n  \"errors\": \"(wrong->right),(wrong2->right2)\"\n}\n\n"
-            "If no mistakes, use:\n\n"
-            "{\n  \"errors\": \"\"\n}\n\n"
+            "Check the text in 'variants_description' for:\n"
+            "1. Spelling mistakes\n"
+            "2. Grammar issues (including incorrect case usage)\n"
+            "3. Easy-to-fix punctuation or clarity problems\n\n"
+            "**Output strictly in this JSON format:**\n"
+            "{\n  \"errors\": \"(wrong->right),(wrong2->right2)\" \n}\n"
+            "or if no errors:\n"
+            "{\n  \"errors\": \"\" \n}\n\n"
             "**Important**:\n"
-            "1. Do not list brand or domain words.\n"
-            "2. Never produce placeholders like 'mispell1->correct1'.\n"
-            "3. If uncertain, skip the word.\n"
-            "4. No disclaimers or instructions—just do it."
+            "1. No brand/domain-specific terms.\n"
+            "2. No placeholder suggestions.\n"
+            "3. Skip uncertain corrections.\n"
+            "4. No commentary or explanation—just the JSON."
         ),
-        "recommended_model": "gpt-3.5-turbo",
-        "description": "Use gpt-3.5-turbo for a balance of cost and complexity."
+        "recommended_model": "gpt-4o",
+        "description": "Checks spelling, grammar, punctuation, and case issues in short product copy using GPT-4o for quality and speed."
     },
     "Image: Storage Instructions": {
         "prompt": (
