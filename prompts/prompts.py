@@ -411,30 +411,38 @@ PROMPT_OPTIONS = {
             "using <b>…</b>. Compares result to the 'full_ingredients' field from the same row."
         )
     },
-    "Grammar & Spelling Checker": {
+    "Grammar & Spelling Summary Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant. You check short product descriptions (sell copy) for real grammar and spelling issues only. "
-            "You *never* invent placeholder corrections. Only correct real issues from 'variants_description' in the format (wrong->correct). "
-            "You never include brand or domain-specific words. You must skip uncertain or subjective suggestions. Output only:\n"
-            "{\\n  \\\"errors\\\": \\\"(wrong->correct),(wrong2->correct2)\\\" } or, if perfect: {\\n  \\\"errors\\\": \\\"\\\" }\"\n\n"
-            "USER MESSAGE:\n"
-            "Check the text in 'variants_description' for:\n"
-            "1. Spelling mistakes\n"
-            "2. Grammar issues (including incorrect case usage)\n"
-            "3. Easy-to-fix punctuation or clarity problems\n\n"
-            "**Output strictly in this JSON format:**\n"
-            "{\n  \"errors\": \"(wrong->right),(wrong2->right2)\" \n}\n"
-            "or if no errors:\n"
-            "{\n  \"errors\": \"\" \n}\n\n"
-            "**Important**:\n"
-            "1. No brand/domain-specific terms.\n"
-            "2. No placeholder suggestions.\n"
-            "3. Skip uncertain corrections.\n"
-            "4. No commentary or explanation—just the JSON."
+            "\"You are a JSON-producing assistant that checks short product descriptions (sell copy) "
+            "for *real* spelling, grammar, punctuation, and case issues. Focus only on clearly incorrect text. "
+            "Do NOT suggest stylistic rewrites, domain-specific changes, or placeholder corrections. "
+            "If the text is already correct, return an empty summary.\"\n\n"
+    
+            "**Your only output is valid JSON in exactly this format:**\n"
+            "{\n"
+            "  \"summary\": \"<short, human-friendly list of corrections made or needed>\",\n"
+            "  \"debug_notes\": [\"<optional short list of corrections in (wrong->correct) form>\"]\n"
+            "}\n\n"
+    
+            "**Rules:**\n"
+            "1. Keep the `summary` short and clear enough for a human to act on.\n"
+            "2. Return a blank string if no issues are found.\n"
+            "3. Use `debug_notes` for optional raw substitutions like (teh->the).\n"
+            "4. Skip anything uncertain or stylistic.\n\n"
+    
+            "**EXAMPLES**\n"
+            "- If the input is perfect:\n"
+            "{ \"summary\": \"\", \"debug_notes\": [] }\n\n"
+            "- If the input has issues:\n"
+            "{ \"summary\": \"Corrected two typos and added a missing apostrophe.\",\n"
+            "  \"debug_notes\": [\"recieve->receive\", \"mens->men's\"] }\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o",
-        "description": "Checks spelling, grammar, punctuation, and case issues in short product copy using GPT-4o for quality and speed."
+        "description": "Human-friendly grammar and spelling summary with optional debug trace, based on {{product_data}}."
     },
     "Image: Storage Instructions": {
         "prompt": (
