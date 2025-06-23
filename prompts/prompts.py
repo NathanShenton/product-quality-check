@@ -414,35 +414,37 @@ PROMPT_OPTIONS = {
     "Grammar & Spelling Summary Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant that checks short product descriptions (sell copy) "
-            "for *real* spelling, grammar, punctuation, and case issues. Focus only on clearly incorrect text. "
-            "Do NOT suggest stylistic rewrites, domain-specific changes, or placeholder corrections. "
-            "If the text is already correct, return an empty summary.\"\n\n"
+            "\"You are a JSON-producing assistant that checks short product descriptions (sell copy) for *real* spelling, grammar, punctuation, and capitalisation issues. "
+            "Always use British English conventions (e.g. 'colour', not 'color'; 'organised', not 'organized'). "
+            "Focus strictly on objectively incorrect language. Do NOT suggest stylistic changes, placeholder corrections, or domain-specific tweaks. "
+            "If the description is already correct, return an empty summary.\"\n\n"
     
-            "**Your only output is valid JSON in exactly this format:**\n"
+            "**Respond ONLY with valid JSON in exactly this format:**\n"
             "{\n"
-            "  \"summary\": \"<short, human-friendly list of corrections made or needed>\",\n"
-            "  \"debug_notes\": [\"<optional short list of corrections in (wrong->correct) form>\"]\n"
+            "  \"summary\": \"<short, human-readable list of corrections made>\",\n"
+            "  \"debug_notes\": [\"<optional corrections shown as (wrong->correct)\"]\n"
             "}\n\n"
     
-            "**Rules:**\n"
-            "1. Keep the `summary` short and clear enough for a human to act on.\n"
-            "2. Return a blank string if no issues are found.\n"
-            "3. Use `debug_notes` for optional raw substitutions like (teh->the).\n"
-            "4. Skip anything uncertain or stylistic.\n\n"
+            "**Guidelines:**\n"
+            "• Write the `summary` as a brief bullet-style list (starting each item with '- ').\n"
+            "• Mention the type of correction if helpful (e.g. [Spelling], [Punctuation]).\n"
+            "• Return `summary: \"\"` and `debug_notes: []` if no issues found.\n"
+            "• Use `debug_notes` for optional exact substitutions in the form (wrong->correct).\n\n"
     
             "**EXAMPLES**\n"
             "- If the input is perfect:\n"
             "{ \"summary\": \"\", \"debug_notes\": [] }\n\n"
-            "- If the input has issues:\n"
-            "{ \"summary\": \"Corrected two typos and added a missing apostrophe.\",\n"
-            "  \"debug_notes\": [\"recieve->receive\", \"mens->men's\"] }\n\n"
+            "- If there are issues:\n"
+            "{\n"
+            "  \"summary\": \"- [Spelling] Corrected 'recieve' to 'receive'.\\n- [Grammar] Added missing apostrophe in 'mens' to form 'men's'.\",\n"
+            "  \"debug_notes\": [\"recieve->receive\", \"mens->men's\"]\n"
+            "}\n\n"
     
             "PRODUCT DATA:\n"
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o",
-        "description": "Human-friendly grammar and spelling summary with optional debug trace, based on {{product_data}}."
+        "description": "UK-English grammar, spelling, punctuation, and case checker with readable summaries and debug trace."
     },
     "Image: Storage Instructions": {
         "prompt": (
