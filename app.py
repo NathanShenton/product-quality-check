@@ -723,14 +723,14 @@ if uploaded_file and (
                             messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}]
                         ).choices[0].message.content.strip()
                         parsed_1 = json.loads(p1)
-                
+
                         # Pass 2 – compute NPM score
                         p2 = client.chat.completions.create(
                             model=model_choice,
                             messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}]
                         ).choices[0].message.content.strip()
                         parsed_2 = json.loads(p2)
-                
+
                         # Pass 3 – determine HFSS status
                         p3 = client.chat.completions.create(
                             model=model_choice,
@@ -739,7 +739,7 @@ if uploaded_file and (
                             })}]
                         ).choices[0].message.content.strip()
                         parsed_3 = json.loads(p3)
-                
+
                         # Pass 4 – final validator
                         all_passes = {
                             "parsed_nutrients": parsed_1,
@@ -751,7 +751,7 @@ if uploaded_file and (
                             messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}]
                         ).choices[0].message.content.strip()
                         parsed_4 = json.loads(p4)
-                
+
                         # Combine all into one dict for export
                         full_result = {
                             **parsed_1,
@@ -760,7 +760,46 @@ if uploaded_file and (
                             **parsed_4
                         }
                         results.append(full_result)
-                
+
+                        # ─── Live log and progress ───────────────────────────────
+                        if "rolling_log_dicts" not in st.session_state:
+                            st.session_state.rolling_log_dicts = []
+                        st.session_state.rolling_log_dicts.append(full_result)
+                        st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
+
+                        log_placeholder.empty()
+                        log_placeholder.markdown(
+                            "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
+                            unsafe_allow_html=True
+                        )
+
+                        # Show last 3 entries fully
+                        for entry in st.session_state.rolling_log_dicts[-3:]:
+                            log_placeholder.json(entry)
+
+                        # Older entries in expanders
+                        for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
+                            row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
+                            with log_placeholder.expander(f"Row {row_num} output", expanded=False):
+                                st.json(entry)
+
+                        # Optional: expanded view of each GPT pass
+                        with log_placeholder.expander(f"Row {idx+1} | Pass-by-pass breakdown", expanded=False):
+                            st.json({
+                                "Pass 1 – Nutrients": parsed_1,
+                                "Pass 2 – NPM Score": parsed_2,
+                                "Pass 3 – HFSS Status": parsed_3,
+                                "Pass 4 – Validator": parsed_4
+                            })
+
+                        # ─── Progress UI update ─────────────────────────────────
+                        progress = (idx + 1) / n_rows
+                        progress_bar.progress(progress)
+                        progress_text.markdown(
+                            f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                            unsafe_allow_html=True
+                        )
+
                     except Exception as e:
                         failed_rows.append(idx)
                         results.append({
@@ -768,6 +807,7 @@ if uploaded_file and (
                             "raw_output": "Check individual passes for debug info"
                         })
                     continue
+
                 
                 # Handle multi-image ingredient extract
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
