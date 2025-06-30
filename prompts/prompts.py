@@ -31,6 +31,11 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "HFSS Checker": {
+        "prompt": "(no prompt needed – handled via 4-pass logic)",
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
+    },
     "NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
