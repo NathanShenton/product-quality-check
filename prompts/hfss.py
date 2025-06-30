@@ -15,6 +15,7 @@ def build_pass_1_prompt(product_data: dict) -> str:
     Returns per-100g values only.
     """
     return f"""
+You are a JSON-only assistant.
 You are a nutrition parser that outputs the UK NPM-required nutrient values.
 Extract only the following from the product's `nutritionals_info` and `full_ingredients`:
   - energy_kj
@@ -45,6 +46,8 @@ Return strictly this JSON format:
   "normalisation_notes": "<summary>"
 }}
 
+Respond ONLY with valid JSON. Do not include any explanation, markdown, headings, or natural language before or after the JSON.
+
 PRODUCT DATA:
 {product_data}
 """
@@ -54,6 +57,7 @@ def build_pass_2_prompt(parsed_nutrients: dict) -> str:
     Calculates the A and C point scores and total NPM score.
     """
     return f"""
+You are a JSON-only assistant.
 You are a scoring assistant applying the 2004/05 UK Nutrient Profiling Model (NPM).
 Score this product using the provided nutrient values per 100g.
 
@@ -78,6 +82,8 @@ Respond with JSON:
   "scoring_notes": "<explanation>"
 }}
 
+Respond ONLY with valid JSON. Do not include any explanation, markdown, headings, or natural language before or after the JSON.
+
 NUTRIENTS:
 {parsed_nutrients}
 """
@@ -87,6 +93,7 @@ def build_pass_3_prompt(npm_result: dict) -> str:
     Applies the HFSS thresholds based on NPM score and product type.
     """
     return f"""
+You are a JSON-only assistant.
 You are a compliance checker applying HFSS UK legislation.
 Use the npm_score and is_drink flag to assign the HFSS classification.
 
@@ -103,6 +110,8 @@ Return:
   "threshold_notes": "<explanation>"
 }}
 
+Respond ONLY with valid JSON. Do not include any explanation, markdown, headings, or natural language before or after the JSON.
+
 INPUT:
 {npm_result}
 """
@@ -112,6 +121,7 @@ def build_pass_4_prompt(all_passes: dict) -> str:
     Performs a final review and summarises the result.
     """
     return f"""
+You are a JSON-only assistant.
 You are a validator for a multi-pass HFSS calculator.
 
 Summarise what happened, highlight any red flags (e.g. suspicious values, missing fields),
@@ -122,6 +132,8 @@ Return:
   "validated": "Yes" | "Check manually",
   "debug_summary": "<summary>"
 }}
+
+Respond ONLY with valid JSON. Do not include any explanation, markdown, headings, or natural language before or after the JSON.
 
 ALL PASS OUTPUTS:
 {json.dumps(all_passes, indent=2)}
