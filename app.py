@@ -407,6 +407,8 @@ if prompt_choice == "Competitor SKU Match":
     else:
         st.warning("Please upload a competitor CSV to enable SKU matching.")
 
+
+
 # ─ Extract chosen prompt details ─
 selected = PROMPT_OPTIONS[prompt_choice]
 selected_prompt_text = selected["prompt"]
@@ -713,6 +715,60 @@ if uploaded_file and (
                     })
                     continue  # ⛔ Skip rest of the loop for this row
 
+                if prompt_choice == "HFSS Checker":
+                    try:
+                        # Pass 1 – extract structured nutrients
+                        p1 = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}]
+                        ).choices[0].message.content.strip()
+                        parsed_1 = json.loads(p1)
+                
+                        # Pass 2 – compute NPM score
+                        p2 = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}]
+                        ).choices[0].message.content.strip()
+                        parsed_2 = json.loads(p2)
+                
+                        # Pass 3 – determine HFSS status
+                        p3 = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[{"role": "system", "content": build_pass_3_prompt({
+                                **parsed_2, "is_drink": parsed_1.get("is_drink", False)
+                            })}]
+                        ).choices[0].message.content.strip()
+                        parsed_3 = json.loads(p3)
+                
+                        # Pass 4 – final validator
+                        all_passes = {
+                            "parsed_nutrients": parsed_1,
+                            "npm_scoring": parsed_2,
+                            "hfss_classification": parsed_3
+                        }
+                        p4 = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}]
+                        ).choices[0].message.content.strip()
+                        parsed_4 = json.loads(p4)
+                
+                        # Combine all into one dict for export
+                        full_result = {
+                            **parsed_1,
+                            **parsed_2,
+                            **parsed_3,
+                            **parsed_4
+                        }
+                        results.append(full_result)
+                
+                    except Exception as e:
+                        failed_rows.append(idx)
+                        results.append({
+                            "error": f"Row {idx}: {e}",
+                            "raw_output": "Check individual passes for debug info"
+                        })
+                    continue
+                
                 # Handle multi-image ingredient extract
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
                     image_urls = row.get("image URLs", "")
