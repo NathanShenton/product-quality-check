@@ -254,6 +254,27 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
     output_ktokens = total_output_tokens / 1000
     return (input_ktokens * cost_in) + (output_ktokens * cost_out)
 
+# JSON CLEANER #
+
+def clean_gpt_json_block(text: str) -> str:
+    """
+    Strips markdown-style ``` wrappers and leading prose to return clean JSON string.
+    """
+    import re
+    text = text.strip()
+
+    # Remove triple-backtick wrappers (``` or ```json)
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"```$", "", text.strip(), flags=re.IGNORECASE)
+
+    # Remove any leading prose before first curly brace
+    json_start = text.find("{")
+    if json_start != -1:
+        text = text[json_start:]
+
+    return text.strip()
+
 #############################
 # Model Descriptions + UI   #
 #############################
@@ -721,25 +742,25 @@ if uploaded_file and (
                         p1 = client.chat.completions.create(
                             model=model_choice,
                             messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}]
-                        ).choices[0].message.content.strip()
-                        parsed_1 = json.loads(p1)
-
+                        ).choices[0].message.content
+                        parsed_1 = json.loads(clean_gpt_json_block(p1))
+                
                         # Pass 2 – compute NPM score
                         p2 = client.chat.completions.create(
                             model=model_choice,
                             messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}]
-                        ).choices[0].message.content.strip()
-                        parsed_2 = json.loads(p2)
-
+                        ).choices[0].message.content
+                        parsed_2 = json.loads(clean_gpt_json_block(p2))
+                
                         # Pass 3 – determine HFSS status
                         p3 = client.chat.completions.create(
                             model=model_choice,
                             messages=[{"role": "system", "content": build_pass_3_prompt({
                                 **parsed_2, "is_drink": parsed_1.get("is_drink", False)
                             })}]
-                        ).choices[0].message.content.strip()
-                        parsed_3 = json.loads(p3)
-
+                        ).choices[0].message.content
+                        parsed_3 = json.loads(clean_gpt_json_block(p3))
+                
                         # Pass 4 – final validator
                         all_passes = {
                             "parsed_nutrients": parsed_1,
@@ -749,9 +770,9 @@ if uploaded_file and (
                         p4 = client.chat.completions.create(
                             model=model_choice,
                             messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}]
-                        ).choices[0].message.content.strip()
-                        parsed_4 = json.loads(p4)
-
+                        ).choices[0].message.content
+                        parsed_4 = json.loads(clean_gpt_json_block(p4))
+                
                         # Combine all into one dict for export
                         full_result = {
                             **parsed_1,
@@ -760,57 +781,44 @@ if uploaded_file and (
                             **parsed_4
                         }
                         results.append(full_result)
-                        manual_debug_logged = True  # Flag used to skip default debug logging later
-
+                        manual_debug_logged = True
+                
                         # ─── Live log and progress ───────────────────────────────
                         if not manual_debug_logged:
-                            # collect up to the last 20 raw result dicts
                             if "rolling_log_dicts" not in st.session_state:
                                 st.session_state.rolling_log_dicts = []
-                            st.session_state.rolling_log_dicts.append(results[-1])
+                            st.session_state.rolling_log_dicts.append(full_result)
                             st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
-                        
+                
                             log_placeholder.empty()
                             log_placeholder.markdown(
                                 "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
                                 unsafe_allow_html=True
                             )
-                        
-                            # first, always show the last few outright
-                            num_always_show = 3
-                            always_show = st.session_state.rolling_log_dicts[-num_always_show:]
-                            for entry in always_show:
+                
+                            for entry in st.session_state.rolling_log_dicts[-3:]:
                                 log_placeholder.json(entry)
-                        
-                            # then render each in an expander
-                            for i, entry in enumerate(st.session_state.rolling_log_dicts):
+                
+                            for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
                                 row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
-                                with log_placeholder.expander(f"Row {row_num} output", expanded=True):
+                                with log_placeholder.expander(f"Row {row_num} output", expanded=False):
                                     st.json(entry)
-
-                        # Older entries in expanders
-                        for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
-                            row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
-                            with log_placeholder.expander(f"Row {row_num} output", expanded=False):
-                                st.json(entry)
-
-                        # Optional: expanded view of each GPT pass
-                        with log_placeholder.expander(f"Row {idx+1} | Pass-by-pass breakdown", expanded=False):
-                            st.json({
-                                "Pass 1 – Nutrients": parsed_1,
-                                "Pass 2 – NPM Score": parsed_2,
-                                "Pass 3 – HFSS Status": parsed_3,
-                                "Pass 4 – Validator": parsed_4
-                            })
-
-                        # ─── Progress UI update ─────────────────────────────────
+                
+                            with log_placeholder.expander(f"Row {idx+1} | Pass-by-pass breakdown", expanded=False):
+                                st.json({
+                                    "Pass 1 – Nutrients": parsed_1,
+                                    "Pass 2 – NPM Score": parsed_2,
+                                    "Pass 3 – HFSS Status": parsed_3,
+                                    "Pass 4 – Validator": parsed_4
+                                })
+                
                         progress = (idx + 1) / n_rows
                         progress_bar.progress(progress)
                         progress_text.markdown(
                             f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                             unsafe_allow_html=True
                         )
-
+                
                     except Exception as e:
                         failed_rows.append(idx)
                         results.append({
