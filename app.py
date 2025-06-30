@@ -19,6 +19,13 @@ from prompts.competitor_match import (
     load_competitor_db,   # if you need it
 )
 
+from prompts.hfss import (
+    build_pass_1_prompt,
+    build_pass_2_prompt,
+    build_pass_3_prompt,
+    build_pass_4_prompt
+)
+
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
