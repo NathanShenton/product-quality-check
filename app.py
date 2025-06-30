@@ -760,22 +760,33 @@ if uploaded_file and (
                             **parsed_4
                         }
                         results.append(full_result)
+                        manual_debug_logged = True  # Flag used to skip default debug logging later
 
                         # ─── Live log and progress ───────────────────────────────
-                        if "rolling_log_dicts" not in st.session_state:
-                            st.session_state.rolling_log_dicts = []
-                        st.session_state.rolling_log_dicts.append(full_result)
-                        st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
-
-                        log_placeholder.empty()
-                        log_placeholder.markdown(
-                            "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
-                            unsafe_allow_html=True
-                        )
-
-                        # Show last 3 entries fully
-                        for entry in st.session_state.rolling_log_dicts[-3:]:
-                            log_placeholder.json(entry)
+                        if not manual_debug_logged:
+                            # collect up to the last 20 raw result dicts
+                            if "rolling_log_dicts" not in st.session_state:
+                                st.session_state.rolling_log_dicts = []
+                            st.session_state.rolling_log_dicts.append(results[-1])
+                            st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
+                        
+                            log_placeholder.empty()
+                            log_placeholder.markdown(
+                                "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
+                                unsafe_allow_html=True
+                            )
+                        
+                            # first, always show the last few outright
+                            num_always_show = 3
+                            always_show = st.session_state.rolling_log_dicts[-num_always_show:]
+                            for entry in always_show:
+                                log_placeholder.json(entry)
+                        
+                            # then render each in an expander
+                            for i, entry in enumerate(st.session_state.rolling_log_dicts):
+                                row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
+                                with log_placeholder.expander(f"Row {row_num} output", expanded=True):
+                                    st.json(entry)
 
                         # Older entries in expanders
                         for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
