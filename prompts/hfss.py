@@ -10,10 +10,6 @@ from typing import Dict, Any
 # --------------------------------------------------------------------------- #
 
 def build_pass_1_prompt(product_data: dict) -> str:
-    """
-    Extracts the raw nutrients used for NPM scoring.
-    Returns per-100g values only.
-    """
     return f"""
 You are a JSON-only assistant.
 You are a nutrition parser that outputs the UK NPM-required nutrient values.
@@ -53,9 +49,6 @@ PRODUCT DATA:
 """
 
 def build_pass_2_prompt(parsed_nutrients: dict) -> str:
-    """
-    Calculates the A and C point scores and total NPM score.
-    """
     return f"""
 You are a JSON-only assistant.
 You are a scoring assistant applying the 2004/05 UK Nutrient Profiling Model (NPM).
@@ -73,7 +66,7 @@ TABLES (cutoffs for 1–10 pts, use food table unless is_drink=true):
 Protein cap rule:
 If A-points ≥ 11 and FVN < 5, set protein points = 0.
 
-Respond with JSON:
+Respond ONLY with valid JSON like this:
 {{
   "a_points": {{"energy_kj": <int>, "saturated_fat_g": <int>, "total_sugars_g": <int>, "sodium_mg": <int>}},
   "c_points": {{"fibre_g": <int>, "protein_g": <int>, "fruit_veg_nut_pct": <int>}},
@@ -89,9 +82,6 @@ NUTRIENTS:
 """
 
 def build_pass_3_prompt(npm_result: dict) -> str:
-    """
-    Applies the HFSS thresholds based on NPM score and product type.
-    """
     return f"""
 You are a JSON-only assistant.
 You are a compliance checker applying HFSS UK legislation.
@@ -103,7 +93,7 @@ Rules:
 - Otherwise, classification is 'Not HFSS'.
 - hfss_legislation is always 'In Scope' unless exempt (which we assume is false here).
 
-Return:
+Respond ONLY with valid JSON like this:
 {{
   "hfss_legislation": "In Scope",
   "hfss_category": "Less healthy" | "Not HFSS",
@@ -117,9 +107,6 @@ INPUT:
 """
 
 def build_pass_4_prompt(all_passes: dict) -> str:
-    """
-    Performs a final review and summarises the result.
-    """
     return f"""
 You are a JSON-only assistant.
 You are a validator for a multi-pass HFSS calculator.
@@ -127,7 +114,7 @@ You are a validator for a multi-pass HFSS calculator.
 Summarise what happened, highlight any red flags (e.g. suspicious values, missing fields),
 and confirm if the result seems reasonable.
 
-Return:
+Respond ONLY with valid JSON like this:
 {{
   "validated": "Yes" | "Check manually",
   "debug_summary": "<summary>"
