@@ -2,7 +2,7 @@
 
 # This file acts as the orchestrator for a fully GPT-powered HFSS pipeline.
 # Each pass sends structured prompts to GPT to complete one part of the process.
-
+import json
 from typing import Dict, Any
 
 # --------------------------------------------------------------------------- #
