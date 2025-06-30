@@ -806,7 +806,6 @@ if uploaded_file and (
                             "error": f"Row {idx}: {e}",
                             "raw_output": "Check individual passes for debug info"
                         })
-                    continue
 
                 
                 # Handle multi-image ingredient extract
