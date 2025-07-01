@@ -396,6 +396,48 @@ PROMPT_OPTIONS = {
             "price-per UOM, price multiplier) with special-case handling for g/ml case and a self-validation pass."
         )
     },
+    "Spelling and Grammar Checker": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that evaluates product data for spelling and grammar issues "
+            "in UK English. Use the supplied `sku_name` and `brand_name` to avoid flagging valid brand terms or SKUs as errors. "
+            "Never hallucinate or assume facts; analyse ONLY the supplied data.\"\n\n"
+    
+            "Respond with valid JSON ONLY in exactly this shape:\n"
+            "{\n"
+            "  \"grammar_flag\": \"Pass\" | \"Fail\",\n"
+            "  \"summary\": \"<brief human-readable summary of issues or 'No issues found'>\",\n"
+            "  \"errors\": [\n"
+            "    {\n"
+            "      \"field\": \"<name of the field where the issue was found>\",\n"
+            "      \"type\": \"Spelling\" | \"Grammar\",\n"
+            "      \"text\": \"<the exact text snippet with the issue>\",\n"
+            "      \"suggestion\": \"<corrected text suggestion>\"\n"
+            "    },\n"
+            "    …\n"
+            "  ],\n"
+            "  \"debug_notes\": [\"<optional list of low-confidence or style observations>\"]\n"
+            "}\n\n"
+    
+            "RULES:\n"
+            "1. Set `grammar_flag` = \"Fail\" if **any** spelling or grammar issue is detected; else \"Pass\".\n"
+            "2. Only flag genuine English spelling or grammatical errors; do **not** flag:\n"
+            "   • Proper nouns or trademarks in `brand_name` or `sku_name`.\n"
+            "   • Alphanumeric SKUs or model numbers.\n"
+            "   • Industry-specific jargon flagged as correct UK usage.\n"
+            "3. Use UK conventions (e.g. colour, organise, centre) for all corrections.\n\n"
+    
+            "OUTPUT DETAILS:\n"
+            "• `summary` should list issue count and a short overview (e.g. \"2 spelling errors and 1 grammar issue found\").\n"
+            "• `errors` must include each issue’s location, type, original snippet, and a suggested correction.\n"
+            "• `debug_notes` can capture borderline cases or style notes (e.g. [\"'utilise' is correct UK variant but consider 'use'\"]).\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Checks variants_description for UK-English spelling & grammar, respecting sku_name and brand_name to avoid false positives."
+    },
     "Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
