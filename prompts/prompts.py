@@ -984,7 +984,7 @@ PROMPT_OPTIONS = {
         "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
     },
     "Allergen Bold Check": {
-      "prompt": (
+        "prompt": (
         # ===============================================================
         # 0) SYSTEM
         # ===============================================================
@@ -1071,8 +1071,8 @@ PROMPT_OPTIONS = {
         "\"{parent}: token '{synonym}' never bolded (e.g. '...snippet...')\" "
         "(no HTML, ≤90 chars).\n"
       ),
-      "recommended_model": "gpt-4o-mini",
-      "description": (
+    "recommended_model": "gpt-4o-mini",
+    "description": (
         "Flags only those allergens whose root token appears but is *never* bolded "
         "anywhere in the HTML column `full_ingredients`, with strict closed‑list "
         "checking, whitespace‑/NBSP‑tolerant bold detection, advisory shielding "
