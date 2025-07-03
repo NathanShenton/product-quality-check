@@ -31,6 +31,61 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Age Restriction Compliance Checker": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant that decides whether a product sold by "
+            "Holland & Barrett must be age-restricted. Base your answer **only** on the supplied "
+            "product data and the Age-Restricted Goods Policy excerpted below. Never hallucinate.\n\n"
+    
+            "Respond with **valid JSON ONLY** in exactly this shape:\n"
+            "{\n"
+            "  \"age_restriction_flag\": \"Yes\" | \"No\",\n"
+            "  \"required_minimum_age\": \"16+\" | \"18+\" | \"None\",\n"
+            "  \"matched_policy_section\": \"<one category below or 'None'>\",\n"
+            "  \"explanation\": \"<brief reason if flagged, else empty>\",\n"
+            "  \"debug_notes\": [\"<optional low-confidence signals considered>\"]\n"
+            "}\n\n"
+    
+            "Allowed values for `matched_policy_section` (policy-mandated ages in brackets):\n"
+            "• \"Weight-Loss / Appetite Suppressant\" (18+) :contentReference[oaicite:0]{index=0}\n"
+            "• \"Sexual Vitality / Performance\" (18+) :contentReference[oaicite:1]{index=1}\n"
+            "• \"Energy Drink ≥15 mg/100 ml Caffeine\" (18+) :contentReference[oaicite:2]{index=2}\n"
+            "• \"High-Caffeine Food ≥150 mg/serving\" (18+) :contentReference[oaicite:3]{index=3}\n"
+            "• \"Creatine\" (18+) :contentReference[oaicite:4]{index=4}\n"
+            "• \"Restricted CBD\" (18+) :contentReference[oaicite:5]{index=5}\n"
+            "• \"OTC Medicine\" (16+) :contentReference[oaicite:6]{index=6}\n"
+            "• \"Medical Device (incl. THR)\" (16+) :contentReference[oaicite:7]{index=7}\n"
+            "• \"Traditional Herbal Remedy – THR\" (18+) :contentReference[oaicite:8]{index=8}\n"
+            "• \"CLP-Regulated Chemical / Corrosive\" (18+)\n"
+            "• \"None\"\n\n"
+    
+            "DECISION RULES (apply top-down; exit on first clear match):\n"
+            "1. **Weight-loss keywords** (burn fat, appetite control, fat-binder) OR merchandising in "
+            "weight-management.\n"
+            "2. **Sexual vitality claims** (libido, sperm count, testosterone support).\n"
+            "3. **Caffeine thresholds** • Drinks ≥ 15 mg/100 ml • Foods ≥ 150 mg/serving.\n"
+            "4. **Creatine** (any creatine salt or ‘creatine’ in ingredients).\n"
+            "5. **Restricted CBD** (cannabinoid ingredients listed in policy).\n"
+            "6. **Regulatory flags** • OTC • THR • Medical‐device classification.\n"
+            "7. **Corrosive / CLP chemicals** (e.g. sodium hydroxide).\n"
+            "8. If multiple categories match, pick the **highest** age.\n"
+            "9. If nothing matches with high confidence: "
+            "\"age_restriction_flag\":\"No\", \"required_minimum_age\":\"None\", \"matched_policy_section\":\"None\".\n\n"
+    
+            "DEBUG NOTES:\n"
+            "• Log any partial signals (e.g. \"mentions creatine shampoo – topical, out of scope\").\n"
+            "• Return [] if there are none.\n\n"
+    
+            "POLICY EXCERPT (for reference while reasoning):\n"
+            "{{policy_snippet}}\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Flags weight-loss, libido, high-caffeine, medicinal, CBD & related products that need an age gate under H&B policy."
+    },
     "HFSS Checker": {
         "prompt": "(no prompt needed – handled via 4-pass logic)",
         "recommended_model": "gpt-4.1-mini",
