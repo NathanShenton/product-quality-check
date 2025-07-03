@@ -989,133 +989,101 @@ PROMPT_OPTIONS = {
             # 0) SYSTEM & SCOPE
             # ------------------------------------------------------------------
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant. Never invent or assume allergen "
-            "matches—report only real, fully-verified findings based on **bold-tag** "
-            "logic in an HTML-coded ingredient list. No disclaimers, no explanations: "
-            "output valid JSON *only*.\n\n"
+            "You are a JSON-producing validator. Never invent or assume allergen matches—"
+            "report only fully-verified violations of **bold-tag** rules in an HTML "
+            "ingredient list. Output VALID JSON ONLY, no prose.\n\n"
     
-            "Follow these rules precisely:\n\n"
+            "Analyse {{ingredients_html}} under the rules below. Follow them in order.\n\n"
     
             # ------------------------------------------------------------------
-            # 1) CLOSED LIST OF ALLERGENS & SYNONYMS
+            # 1) CLOSED LIST OF ALLERGENS & SYNONYMS (with ROOT TOKENS)
             # ------------------------------------------------------------------
-            "1) Regulated allergens **and ONLY their exact synonyms** (closed list):\n"
+            "1) Allergen-synonym map (closed list). Every synonym has a \"root\" "
+            "token that *must* be bolded to comply:\n"
             "{\n"
-            "  \"celery\": [\"celery\"],\n"
-            "  \"cereals_containing_gluten\": [\"wheat\", \"rye\", \"barley\", \"oat\", \"oats\"],\n"
-            "  \"crustaceans\": [\"crustacean\", \"crustaceans\"],\n"
-            "  \"eggs\": [\"egg\", \"eggs\", \"egg white\", \"egg yolk\"],\n"
-            "  \"fish\": [\"fish\", \"fish oil\", \"fish gelatin\"],\n"
-            "  \"lupin\": [\"lupin\", \"lupine\"],\n"
-            "  \"milk\": [\"milk\", \"milk powder\", \"skimmed milk\", \"whey\", \"casein\"],\n"
-            "  \"molluscs\": [\"mollusc\", \"molluscs\"],\n"
-            "  \"mustard\": [\"mustard\"],\n"
-            "  \"nuts\": [\"almonds\", \"hazelnuts\", \"walnuts\", \"cashews\", \"pecans\", "
-            "\"brazil nuts\", \"pistachios\", \"macadamias\"],\n"
-            "  \"peanuts\": [\"peanut\", \"peanuts\"],\n"
-            "  \"sesame\": [\"sesame\", \"sesame seeds\", \"sesame seed\"],\n"
-            "  \"soy\": [\"soy\", \"soya\", \"soja\"],\n"
-            "  \"sulphites\": [\"sulphites\", \"sulphite\", \"sulfur dioxide\", \"so2\", "
-            "\"e220\", \"e221\", \"e222\", \"e223\", \"e224\", \"e225\", \"e226\", \"e227\", \"e228\"]\n"
+            "  \"celery\":                {\"root\": \"celery\",  \"syns\": [\"celery\"]},\n"
+            "  \"cereals_containing_gluten\": {\"root\": \"wheat\",   \"syns\": [\"wheat\",\"rye\",\"barley\",\"oat\",\"oats\"]},\n"
+            "  \"crustaceans\":           {\"root\": \"crustacean\",\"syns\": [\"crustacean\",\"crustaceans\"]},\n"
+            "  \"eggs\":                  {\"root\": \"egg\",     \"syns\": [\"egg\",\"eggs\",\"egg white\",\"egg yolk\"]},\n"
+            "  \"fish\":                  {\"root\": \"fish\",    \"syns\": [\"fish\",\"fish oil\",\"fish gelatin\"]},\n"
+            "  \"lupin\":                 {\"root\": \"lupin\",   \"syns\": [\"lupin\",\"lupine\"]},\n"
+            "  \"milk\":                  {\"root\": \"milk\",    \"syns\": [\"milk\",\"milk powder\",\"skimmed milk\",\"whey\",\"casein\"]},\n"
+            "  \"molluscs\":              {\"root\": \"mollusc\", \"syns\": [\"mollusc\",\"molluscs\"]},\n"
+            "  \"mustard\":               {\"root\": \"mustard\", \"syns\": [\"mustard\"]},\n"
+            "  \"nuts\":                  {\"root\": \"almond\",  \"syns\": [\"almonds\",\"hazelnuts\",\"walnuts\",\"cashews\",\"pecans\",\"brazil nuts\",\"pistachios\",\"macadamias\"]},\n"
+            "  \"peanuts\":               {\"root\": \"peanut\",  \"syns\": [\"peanut\",\"peanuts\"]},\n"
+            "  \"sesame\":                {\"root\": \"sesame\",  \"syns\": [\"sesame\",\"sesame seeds\",\"sesame seed\"]},\n"
+            "  \"soy\":                   {\"root\": \"soy\",     \"syns\": [\"soy\",\"soya\",\"soja\"]},\n"
+            "  \"sulphites\":             {\"root\": \"so2\",     \"syns\": [\"sulphites\",\"sulphite\",\"sulfur dioxide\",\"so2\",\"e220\",\"e221\",\"e222\",\"e223\",\"e224\",\"e225\",\"e226\",\"e227\",\"e228\"]}\n"
             "}\n\n"
     
             # ------------------------------------------------------------------
-            # 1-B) HARD EXCLUSIONS
+            # 1-B) HARD EXCLUSIONS (never flag)
             # ------------------------------------------------------------------
-            "1-B) **NEVER** flag: corn, maize, maize starch, maltitol, mannitol, "
-            "sorbitol, xylitol, polydextrose, any sugar-alcohol, or any starch that is "
-            "not wheat / rye / barley / oat(s).\n\n"
+            "1-B) NEVER flag: corn, maize, maltitol, mannitol, sorbitol, xylitol, "
+            "polydextrose, any sugar-alcohol, or any starch except wheat / rye / barley / oat(s).\n\n"
     
             # ------------------------------------------------------------------
-            # 2) PRIMARY FLAGGING RULES
+            # 1-C) FALSE-POSITIVE PHRASE FILTER
             # ------------------------------------------------------------------
-            "2) Flag an allergen **only if ALL of these are true**:\n"
-            "   • The allergen word (or its synonym) appears entirely **outside** any "
-            "<b>, <B>, <strong>, or <STRONG> tag (punctuation adjacent to the word "
-            "does *not* count as part of the word).\n"
-            "   • The word is **not** within a precautionary statement. Ignore a match "
-            "if the phrases “may contain”, “may contain traces of”, or “traces of” "
-            "appear in the **same HTML element** *and* within ≤ 20 visible characters "
-            "before the allergen word.\n\n"
+            "1-C) Ignore matches inside these exact phrases (case-insensitive):\n"
+            "    • \"milk thistle\"    • \"tiger nut\"    • \"coconut milk\" (when coconut is not bolded)\n\n"
     
             # ------------------------------------------------------------------
-            # 3) INDEPENDENT EVALUATION
+            # 2) FLAGGING CRITERIA
             # ------------------------------------------------------------------
-            "3) Evaluate each synonym **independently**—do not merge different "
-            "allergens (e.g., ‘almond’ and ‘hazelnut’ stay separate). Discard any "
-            "candidate not present in the synonym map.\n\n"
+            "2) Flag an allergen ONLY when **all** conditions hold:\n"
+            "   • A synonym appears outside any <b>/<strong> tag **and** its root token "
+            "     is also outside bold.\n"
+            "   • The containing element does NOT include a bolded instance of the same "
+            "     root token (duplicate-token forgiveness).\n"
+            "   • No precautionary phrase (“may contain”, “traces of”) is within the same "
+            "     element ≤ 20 visible chars before the token.\n"
+            "   • The match is not in a false-positive phrase (Rule 1-C) and not on the "
+            "     hard-exclusion list (Rule 1-B).\n\n"
     
             # ------------------------------------------------------------------
-            # 4) TAG-LOGIC DETAILS
+            # 3) SELF-AUDIT PIPELINE
             # ------------------------------------------------------------------
-            "4) Bold-tag logic:\n"
-            "   • A match is **not** a violation if 100 % of its letters are inside "
-            "bold tags.\n"
-            "   • Separators such as commas or parentheses that sit outside bold tags "
-            "are irrelevant.\n"
-            "   • If **any letter** of the allergen word lies outside bold tags "
-            "(e.g., <strong>alm</strong>ond) treat it as unbolded.\n\n"
+            "3) For every synonym:\n"
+            "   a. Detect all potential plain-text hits.\n"
+            "   b. Drop the hit if *any* forgiveness condition in Rule 2 is met.\n"
+            "   c. For sulphites: flag only if the **exact** token (SO2, E220 …) is "
+            "      unbolded—never infer.\n\n"
     
             # ------------------------------------------------------------------
-            # 5) TWO-STEP VERIFICATION (SELF-AUDIT)
+            # 4) OUTPUT SPEC
             # ------------------------------------------------------------------
-            "5) Two-step verification for each candidate:\n"
-            "   • Step 1 — detect every potential unbolded match.\n"
-            "   • Step 2 — self-audit the exact HTML snippet and exclude the match if:\n"
-            "       – Any part of the word is bolded **anywhere** in that snippet, OR\n"
-            "       – A precautionary phrase (Rule 2) is within scope.\n"
-            "   • **Special rule for sulphites**: flag only if the precise token "
-            "listed in the synonym map (e.g., “SO2”, “E220”) is unbolded. Never infer "
-            "from colour codes or additive descriptions.\n\n"
-    
-            # ------------------------------------------------------------------
-            # 6) REQUIRED RESPONSE FORMAT
-            # ------------------------------------------------------------------
-            "6) Return JSON **exactly** like this:\n"
+            "4) Return JSON exactly:\n"
             "{\n"
-            "  \"unbolded_allergens\": \"milk, fish, celery\",\n"
+            "  \"unbolded_allergens\": \"comma-separated parents in lowercase\",\n"
+            "  \"debug_matches\": [ \"one line per parent as shown below\" ]\n"
+            "}\n"
+            "Example when two allergens fail:\n"
+            "{\n"
+            "  \"unbolded_allergens\": \"fish, peanuts\",\n"
             "  \"debug_matches\": [\n"
-            "    \"Confirmed unbolded 'milk': found 'milk powder' outside tags in: "
-            "'<p>milk powder, sugar, cocoa</p>'\",\n"
-            "    \"Confirmed unbolded 'wheat': found 'wheat flour' outside tags in: "
-            "'wheat flour, water, salt'\"\n"
+            "    \"Confirmed unbolded 'fish': root token plain in '<b>FISH</b> oil concentrate' (duplicate bold absent)\",\n"
+            "    \"Confirmed unbolded 'peanut': root token plain in 'Peanut Paste'\"\n"
             "  ]\n"
-            "}\n\n"
-            "If nothing is flagged, return:\n"
+            "}\n"
+            "If zero failures:\n"
             "{\n"
             "  \"unbolded_allergens\": \"\",\n"
             "  \"debug_matches\": []\n"
             "}\n\n"
     
             # ------------------------------------------------------------------
-            # 7) DEBUG_MATCHES REQUIREMENTS
+            # 5) CONSISTENCY & FINAL GATE
             # ------------------------------------------------------------------
-            "7) For every allergen in \"unbolded_allergens\" add **one** debug line:\n"
-            "   • Quote the exact synonym matched.\n"
-            "   • Show the relevant HTML snippet.\n"
-            "   • State the audit result. Example:\n"
-            "     \"Excluded 'almond': fully bolded in: '<strong>Almond</strong>'\"\n\n"
-    
-            # ------------------------------------------------------------------
-            # 7-B) SYNONYM ↔ PARENT CONSISTENCY CHECK
-            # ------------------------------------------------------------------
-            "7-B) Consistency gate:\n"
-            "   • Each parent allergen named in \"unbolded_allergens\" must have at "
-            "least one debug line whose quoted synonym maps back to that parent via "
-            "the synonym table. If not, drop that allergen and its debug line.\n\n"
-    
-            # ------------------------------------------------------------------
-            # 8) FINAL VALIDATION GATE (MANDATORY)
-            # ------------------------------------------------------------------
-            "8) Final validation before returning:\n"
-            "   • Every allergen listed must exist in the synonym map and **not** be "
-            "on the hard-exclusion list.\n"
-            "   • Each allergen must have a matching, non-contradictory debug trace.\n"
-            "   • If any trace shows bold tags or a precautionary phrase in scope, "
-            "remove that allergen from the output.\n"
+            "5) Before returning:\n"
+            "   • Ensure every parent in \"unbolded_allergens\" appears in the map.\n"
+            "   • Each must have ≥1 debug line whose quoted synonym maps back to that parent.\n"
+            "   • If any debug snippet contradicts the rules (e.g. shows the root token "
+            "     bolded), drop that allergen and its trace.\n"
         ),
-        "recommended_model": "gpt-4.1-mini",
-        "description": "Detects unbolded allergens in HTML ingredient lists with robust two-step self-audit and strict JSON output."
+        "recommended_model": "gpt-4o-mini",
+        "description": "Detects genuinely unbolded allergens with token-based logic, false-positive filters and duplicate-token forgiveness."
     },
     "GHS Pictogram Detector": {
         "prompt": (
