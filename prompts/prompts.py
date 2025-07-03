@@ -985,105 +985,112 @@ PROMPT_OPTIONS = {
     },
     "Allergen Bold Check": {
         "prompt": (
-            # =============================================================
-            # 0)  SYSTEM  –  YOU ARE A PURE JSON VALIDATOR
-            # =============================================================
+            # ===============================================================
+            # 0)  SYSTEM & SCOPE
+            # ===============================================================
             "SYSTEM MESSAGE:\n"
-            "You output *only* JSON.  Analyse the HTML supplied in "
-            "{{full_ingredients}} and list parent allergens whose **root token** "
-            "never appears fully bold (<b> / <strong>) anywhere in that HTML.  "
-            "Return no prose.\n\n"
-
-            # =============================================================
-            # 1)  ROOT-TOKEN MAP (lower-case, whole-word)
-            # =============================================================
-            "1) Closed list of parents → root tokens:\n"
+            "You are a JSON-only allergen-auditor. Inspect {{full_ingredients}} "
+            "and list ONLY those regulated parent allergens for which **every single "
+            "occurrence** of every synonym is un-bolded (i.e.\n"
+            "   — not fully wrapped by <b>, <strong> or their uppercase variants).\n"
+            "Return JSON and nothing else.\n\n"
+    
+            # ===============================================================
+            # 1)  CANONICAL ROOT-TOKEN MAP  (case-insensitive, whole-word)
+            # ===============================================================
+            "1) Allowed parents → allowed root tokens:\n"
             "{\n"
-            "    \"celery\":  [\"celery\"],\n"
-            "    \"cereals_containing_gluten\": [\"wheat\",\"rye\",\"barley\",\"oat\",\"oats\"],\n"
-            "    \"crustaceans\": [\"crustacean\",\"crustaceans\"],\n"
-            "    \"eggs\":    [\"egg\",\"eggs\"],\n"
-            "    \"fish\":    [\"fish\"],\n"
-            "    \"lupin\":   [\"lupin\",\"lupine\"],\n"
-            "    \"milk\":    [\"milk\",\"whey\",\"casein\"],\n"
-            "    \"molluscs\": [\"mollusc\",\"molluscs\"],\n"
-            "    \"mustard\": [\"mustard\"],\n"
-            "    \"nuts\":    [\"almond\",\"hazelnut\",\"walnut\",\"cashew\",\"pecan\","
+            "  \"celery\":   [\"celery\"],\n"
+            "  \"cereals_containing_gluten\": [\"wheat\",\"rye\",\"barley\",\"oat\",\"oats\"],\n"
+            "  \"crustaceans\": [\"crustacean\",\"crustaceans\"],\n"
+            "  \"eggs\":    [\"egg\",\"eggs\"],\n"
+            "  \"fish\":    [\"fish\"],\n"
+            "  \"lupin\":   [\"lupin\",\"lupine\"],\n"
+            "  \"milk\":    [\"milk\",\"whey\",\"casein\"],\n"
+            "  \"molluscs\": [\"mollusc\",\"molluscs\"],\n"
+            "  \"mustard\": [\"mustard\"],\n"
+            "  \"nuts\":    [\"almond\",\"hazelnut\",\"walnut\",\"cashew\",\"pecan\","
             "\"brazil\",\"pistachio\",\"macadamia\"],\n"
-            "    \"peanuts\": [\"peanut\",\"peanuts\"],\n"
-            "    \"sesame\":  [\"sesame\"],\n"
-            "    \"soy\":     [\"soy\",\"soya\",\"soja\"],\n"
-            "    \"sulphites\": [\"so2\",\"e220\",\"e221\",\"e222\",\"e223\",\"e224\","
+            "  \"peanuts\": [\"peanut\",\"peanuts\"],\n"
+            "  \"sesame\":  [\"sesame\"],\n"
+            "  \"soy\":     [\"soy\",\"soya\",\"soja\"],\n"
+            "  \"sulphites\": [\"so2\",\"e220\",\"e221\",\"e222\",\"e223\",\"e224\","
             "\"e225\",\"e226\",\"e227\",\"e228\",\"sulphite\",\"sulphites\","
             "\"sulfur dioxide\"]\n"
             "}\n\n"
-
-            # 1-B)  HARD EXCLUSIONS – never flag
+    
+            # ---------------------------------------------------------------
+            # 1-B)  HARD EXCLUSIONS  (never flag)
+            # ---------------------------------------------------------------
             "Never flag: corn, maize, maltitol, mannitol, sorbitol, xylitol, "
-            "polydextrose or any starch not in the token map.\n\n"
-
-            # 1-C)  KNOWN FALSE-POSITIVE PHRASES
-            "Skip tokens occurring in (case-insensitive):\n"
-            "  – milk thistle   – tiger nut   – coconut milk   – walnut hull   "
-            "– brazil coffee\n\n"
-
-            # =============================================================
-            # 2)  PIPELINE – MUST BE FOLLOWED
-            # =============================================================
-            "Step A  (bold scan):\n"
-            "    • Find every <b>…</b> or <strong>…</strong> span.\n"
-            "    • After stripping tags, HTML entities, accents & case, if the "
-            "span equals a root token, add that token to set BOLD_ROOTS.\n\n"
-
-            "Step B  (plain-text scan):\n"
-            "    • Make copy2 = {{full_ingredients}} with *each* bold span "
-            "replaced by the same number of U+2588 chars (█) so bold content "
-            "cannot leak into the plain scan.\n"
-            "    • Strip remaining tags in copy2 → PLAIN.\n"
-            "    • For every parent whose tokens are *not* in BOLD_ROOTS, search "
-            "PLAIN for whole-word hits (\\btoken\\b, case-insensitive).\n"
-            "    • Drop a hit if it is either:\n"
-            "        – inside an HTML element whose raw text matches /for allergens/i "
-            "or /see ingredients/i or /including cereals containing gluten/i, OR\n"
-            "        – inside any false-positive phrase (1-C), OR\n"
-            "        – (special) parent == \"sulphites\" *and* the hit is not an "
-            "exact map token (e.g. 'Sulphiting' ≠ 'sulphite').\n"
-            "    • If ≥1 valid hit remains, mark parent as NON-compliant.\n\n"
-
-            # =============================================================
-            # 3)  RESPONSE FORMAT  (STRICT)
-            # =============================================================
-            "Return exactly:\n"
+            "polydextrose, or any non-gluten starch.\n\n"
+    
+            # ---------------------------------------------------------------
+            # 1-C)  FALSE-POSITIVE PHRASES  (skip if token is inside)
+            # ---------------------------------------------------------------
+            "Ignore matches inside (case-insensitive substrings):\n"
+            "  • \"milk thistle\"   • \"tiger nut\"   • \"coconut milk\"   "
+            "• \"walnut hull\"   • \"brazil coffee\"   • \"gluten free\"\n\n"
+    
+            # ---------------------------------------------------------------
+            # 1-D)  ADVISORY / OUT-OF-SCOPE ZONES
+            # ---------------------------------------------------------------
+            "Skip any element whose raw HTML contains:\n"
+            "  • \"for allergens\"  • \"see ingredients\" "
+            "• \"including cereals containing gluten\"  • \"not suitable for\" "
+            "• \"allergy sufferers\"  • \"may contain\"  • \"traces of\"\n\n"
+    
+            # ===============================================================
+            # 2)  STRICT PIPELINE  (must be followed exactly)
+            # ===============================================================
+            "Step A – Collect BOLD_SYNONYMS:\n"
+            "   • For every <b>/<B>/<strong>/<STRONG> span, strip HTML, entities, "
+            "accents, case & inner whitespace.\n"
+            "   • If the cleaned text equals any synonym above, add that synonym "
+            "to BOLD_SYNONYMS.\n\n"
+    
+            "Step B – Scan plain-text copy (tags removed) with word-boundary regex.\n"
+            "   For each synonym s of each parent P:\n"
+            "       • Record every match (case-insensitive whole word). Keep its "
+            "         start-index.\n"
+            "       • Discard the match if its index falls inside a bold span OR "
+            "         inside any advisory / false-positive element (Rule 1-C/1-D).\n"
+            "   After scanning all tokens for P:\n"
+            "       • If ZERO valid matches → P is compliant.\n"
+            "       • If ≥1 valid match AND at least one synonym of P is missing "
+            "         from BOLD_SYNONYMS → P is NON-compliant.\n"
+            "       • If every synonym encountered appears at least once in bold "
+            "         somewhere → P is compliant.\n"
+            "   *Sulphites special*: only count matches that equal an exact listed "
+            "     sulphite synonym (e.g. \"E220\"). Never infer from colour codes.\n\n"
+    
+            # ===============================================================
+            # 3)  RESPONSE FORMAT (JSON ONLY)
+            # ===============================================================
+            "If any NON-compliant parents exist, return:\n"
             "{\n"
-            "    \"unbolded_allergens\": \"comma-separated parents (lower-case)\",\n"
-            "    \"debug_matches\": [\"one line per parent\"]\n"
+            "  \"unbolded_allergens\": \"parent1, parent2, … (comma-separated)\",\n"
+            "  \"debug_matches\": [\n"
+            "    \"parent1: token 'syn' never bolded (snippet)\",\n"
+            "    …one line per listed parent…\n"
+            "  ]\n"
             "}\n"
-            "Example when failures found:\n"
-            "{\n"
-            "    \"unbolded_allergens\": \"peanuts, soy\",\n"
-            "    \"debug_matches\": [\n"
-            "        \"peanuts: token 'peanut' never bolded (e.g. 'Peanut Paste')\",\n"
-            "        \"soy: token 'soya' never bolded (e.g. 'Soya Protein Isolate')\"\n"
-            "    ]\n"
-            "}\n"
-            "Example when *all* compliant:\n"
+            "If ALL parents are compliant:\n"
             "{ \"unbolded_allergens\": \"\", \"debug_matches\": [] }\n\n"
-
-            # =============================================================
-            # 4)  FINAL VALIDATION GATE
-            # =============================================================
-            "Before emitting JSON, verify:\n"
-            "    • Every parent in \"unbolded_allergens\" exists in the map & has "
-            "      at least one debug line.\n"
-            "    • No parent in BOLD_ROOTS is reported.\n"
-            "    • No debug line contradicts itself (must show an *unbolded* hit).\n"
+    
+            # ===============================================================
+            # 4)  MANDATORY SELF-CHECK BEFORE EMIT
+            # ===============================================================
+            "Emit ONLY IF:\n"
+            "  • Every parent in unbolded_allergens exists in the map.\n"
+            "  • Each has ≥1 debug line, and no line shows the token inside bold.\n"
+            "  • No hard-exclusion token sneaks in.\n"
+            "Otherwise return the compliant-empty JSON above.\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": (
-            "Flags only those regulated allergens whose root token is NEVER bold "
-            "in {{full_ingredients}}, with duplicate forgiveness, advisory shielding, "
-            "and robust false-positive suppression."
-        )
+        "description": "Flags a parent allergen ONLY when *every occurrence* "
+                       "of all its synonyms is outside bold, ignoring advisory "
+                       "text and known false-positives."
     },
     "GHS Pictogram Detector": {
         "prompt": (
