@@ -338,7 +338,7 @@ def two_pass_extract(image_bytes: bytes) -> str:
                 {"type": "image_url", "image_url": {"url": data_url}}
             ]}
         ],
-        temperature=0.0, top_p=0
+        temperature=temperature_val, top_p=0
     )
     raw = resp1.choices[0].message.content.strip()
     if "IMAGE_UNREADABLE" in raw.upper():
@@ -367,7 +367,7 @@ def two_pass_extract(image_bytes: bytes) -> str:
             {"role": "system", "content": pass2_sys},
             {"role": "user",   "content": raw}
         ],
-        temperature=0.0, top_p=0
+        temperature=temperature_val, top_p=0
     )
     html_out = resp2.choices[0].message.content.strip()
 
@@ -384,7 +384,7 @@ def two_pass_extract(image_bytes: bytes) -> str:
             {"role": "system", "content": pass3_sys},
             {"role": "user",   "content": html_out}
         ],
-        temperature=0.0, top_p=0
+        temperature=temperature_val, top_p=0
     )
     return resp3.choices[0].message.content.strip()
 
@@ -477,11 +477,24 @@ uploaded_file = None
 if is_image_prompt:
     recommended_model = "gpt-4o"
 
-# 5. Model Selector (default to recommended model, but user can override)
-all_model_keys = list(MODEL_OPTIONS.keys())
-default_index = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
-model_choice = st.selectbox("🧠 Choose GPT model", all_model_keys, index=default_index)
+# 5. Model & Temperature Selector (default model comes from the prompt metadata)
+all_model_keys  = list(MODEL_OPTIONS.keys())
+default_index   = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
+
+model_choice = st.selectbox(
+    "🧠 Choose GPT model",
+    all_model_keys,
+    index=default_index
+)
+
 st.markdown(f"**Model Info:** {MODEL_OPTIONS[model_choice]}")
+
+# 🔥 Temperature slider – default 0.00 (fully deterministic)
+temperature_val = st.slider(
+    "🎛️ Model temperature (0 = deterministic, 1 = very creative)",
+    min_value=0.0, max_value=1.0, value=0.0, step=0.05
+)
+
 st.markdown("---")
 
 # 6. User Prompt Text Area
@@ -586,7 +599,7 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
                             ]
                         }
                     ],
-                    temperature=0.0,
+                    temperature=temperature_val,
                     top_p=0
                 )
                 html_out = response.choices[0].message.content.strip()
@@ -714,7 +727,7 @@ if uploaded_file and (
                                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
                                     ]}
                                 ],
-                                temperature=0.0,
+                                temperature=temperature_val,
                                 top_p=0
                             )
                             result = json.loads(gpt_response.choices[0].message.content.strip())
@@ -849,7 +862,7 @@ if uploaded_file and (
                                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
                                     ]}
                                 ],
-                                temperature=0.0
+                                temperature=temperature_val
                             )
                             result = response.choices[0].message.content.strip()
                             if result and "IMAGE_UNREADABLE" not in result.upper():
@@ -898,7 +911,7 @@ if uploaded_file and (
                         diff_resp = client.chat.completions.create(
                             model="gpt-4.1-mini",
                             messages=diff_prompt,
-                            temperature=0.0
+                            temperature=temperature_val
                         )
                         diff_content = diff_resp.choices[0].message.content.strip()
                         # Parse GPT output (JSON)
@@ -946,7 +959,7 @@ if uploaded_file and (
                                 resp = client.chat.completions.create(
                                     model=model_choice,
                                     messages=[{"role": "system", "content": system_prompt}],
-                                    temperature=0.0,
+                                    temperature=temperature_val,
                                     top_p=0
                                 )
                                 gpt_json = json.loads(resp.choices[0].message.content)
@@ -955,7 +968,7 @@ if uploaded_file and (
                                 resp = client.chat.completions.create(
                                     model=model_choice,
                                     messages=[{"role": "system", "content": system_prompt}],
-                                    temperature=0.0,
+                                    temperature=temperature_val,
                                     top_p=0
                                 )
                                 gpt_json = json.loads(resp.choices[0].message.content)
@@ -1029,7 +1042,7 @@ if uploaded_file and (
                                 {"role": "system", "content": system_txt},
                                 {"role": "user",   "content": user_txt}
                             ],
-                            temperature=0.0,
+                            temperature=temperature_val,
                             top_p=0
                         )
                         content = response.choices[0].message.content.strip()
