@@ -10,6 +10,7 @@ from PIL import Image
 import io
 from openai import OpenAI
 from rapidfuzz import fuzz
+from sidebar import render_sidebar
 
 from prompts.prompts import PROMPT_OPTIONS
 from prompts.competitor_match import (
