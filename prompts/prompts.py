@@ -1047,13 +1047,13 @@ PROMPT_OPTIONS = {
                • If it contains any of: vitamin, supplement, tablet, gummy, effervescent, tea, honey, powder, drink, food → the product is treated as *consumable/supplement* and **must** provide a nutrition panel.\\n
             2. **Locate a nutrition panel**:\\n
                • Look for a JSON-like array, table, or key/value block of nutrients OR headings such as “nutrition”, “nutrition facts”, “typical values”.\\n
-               • If none is found → set \\\"nutrition_flag\\\" = \\\"Fail\\\" and add a “Missing Data” error.\\n
-               • Otherwise → \\\"nutrition_flag\\\" = \\\"Pass\\\".\\n
+               • If none is found ⇒ set \\\"nutrition_flag\\\" = \\\"Fail\\\" and add a “Missing Data” error.\\n
+               • Otherwise ⇒ \\\"nutrition_flag\\\" = \\\"Pass\\\".\\n
             3. **NRV / RI requirement for supplements**:\\n
                • When stricter supplement cues (vitamin, supplement, tablet, gummy, effervescent) are present **and** a panel exists:\\n
-                 – Scan the panel text for any occurrence of the tokens “NRV” or “RI” (with or without a preceding % symbol, case-insensitive).\\n
-                 – If **zero** matches are found → set \\\"nrv_flag\\\" = \\\"Fail\\\" and add a “Missing NRV” error.\\n
-                 – Otherwise → \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
+                 – Scan the *entire* panel text for any occurrence of the tokens “NRV” or “RI” (with or without a preceding % symbol, case-insensitive).\\n
+                 – **If ZERO matches are found, set \\\"nrv_flag\\\" = \\\"Fail\\\" and add an error of type “Missing NRV”.**\\n
+                 – Otherwise set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
                • If the product is **not** a supplement, always set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
             4. **summary** must be concise (e.g. “Supplement missing NRV” or “All checks passed”).\\n
             5. Omit the \\\"errors\\\" array when there are no failures.\\n
