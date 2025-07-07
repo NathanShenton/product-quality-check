@@ -1021,11 +1021,11 @@ PROMPT_OPTIONS = {
         "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
     },
     "AUDIT: Nutritionals": {
-                "prompt": (
+        "prompt": (
             """SYSTEM MESSAGE:\\n
-            \"You are a JSON-producing assistant that audits product data for basic nutritional-panel compliance. "
+            \"You are a JSON-producing assistant that performs a **three-step nutritional audit**. "
             "Never hallucinate or assume facts — analyse ONLY the composite object passed in `{{PRODUCT_DATA}}`. "
-            "Field names may vary; therefore parse holistically (SKU, SKU Name, description, ingredients, nutritionals, etc.).\"\\n\\n
+            "Field names may vary, so parse holistically (SKU, SKU name, description, ingredients, nutritionals array, free-text, etc.).\"\\n\\n
 
             Respond with **valid JSON ONLY** in exactly this shape:\\n\\n
             {\\n
@@ -1041,23 +1041,30 @@ PROMPT_OPTIONS = {
               ]\\n
             }\\n\\n
 
-            RULES (holistic, field-agnostic):\\n
-            1. **Stage 1 – Does the product need a nutrition panel?**\\n
-               • Lower-case the concatenation of all text fields.\\n
-               • If it contains ANY of: vitamin, supplement, tablet, gummy, effervescent, tea, honey, powder, drink, food → treat as *consumable/supplement* and a nutrition panel is **mandatory**.\\n
-            2. **Stage 2 – Locate a nutrition panel**\\n
-               • Search for a JSON array, table, or key/value block of nutrients OR headings such as “nutrition”, “nutrition facts”, “typical values”.\\n
-               • If none found ⇒ set \\\"nutrition_flag\\\" = \\\"Fail\\\" and push an error {field:\"nutritionals\",type:\"Missing Data\"}.\\n
-               • Otherwise ⇒ \\\"nutrition_flag\\\" = \\\"Pass\\\".\\n
-            3. **Stage 3 – NRV / RI requirement for supplements**\\n
-               • If stricter supplement cues (vitamin, supplement, tablet, gummy, effervescent) are present **and** a panel exists:\\n
-                 – Scan the ENTIRE panel text for ANY occurrence of the tokens “NRV” or “RI” (case-insensitive, with OR without a preceding ‘%’).\\n
-                 – **If ZERO matches are found, you MUST set \\\"nrv_flag\\\" = \\\"Fail\\\" and add an error {field:\"nutritionals\",type:\"Missing NRV\",message:\"No NRV/RI percentages present\"}.**\\n
-                 – Otherwise set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
-               • If the product is **not** a supplement, always set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
-            4. **summary** must be concise (e.g. “Supplement missing NRV” or “All checks passed”).\\n
-            5. Omit the \\\"errors\\\" array when there are no failures.\\n
-            6. Output **only** the JSON object — no extra keys, no markdown.\\n\\n
+            ### AUDIT LOGIC (rigid three-step process) ###\\n
+            **STEP 1 – Classify product** (holistic search)\\n
+              • Build one lower-case string from *all* fields.\\n
+              • Flags:\\n
+                – *consumable?*  → true if it contains any of: vitamin, supplement, tablet, gummy, effervescent, tea, honey, powder, drink, food.\\n
+                – *supplement?* → true if it also contains stricter cues: vitamin, supplement, tablet, gummy, effervescent.\\n\\n
+            **STEP 2 – If supplement?**\\n
+              • Locate a nutrition panel (JSON array, table, or heading “nutrition”, “nutrition facts”, “typical values”).\\n
+              • If none found ⇒ add error {Missing Data} and set `nutrition_flag = Fail`.\\n
+              • Else set `nutrition_flag = Pass`.\\n
+              • Scan the panel text for ANY occurrence of “NRV” or “RI” (case-insensitive, with or without “%”).\\n
+                – **If ZERO matches are found, you MUST set `nrv_flag = Fail` and add error {Missing NRV}.**\\n
+                – Else set `nrv_flag = Pass`.\\n\\n
+            **STEP 3 – If consumable but NOT supplement**\\n
+              • Locate a nutrition panel as above.\\n
+              • If none found ⇒ error {Missing Data} and `nutrition_flag = Fail`; otherwise `nutrition_flag = Pass`.\\n
+              • Always set `nrv_flag = Pass` (NRV not required for non-supplement foods/drinks).\\n\\n
+            **If not consumable at all**\\n
+              • Set `nutrition_flag = Pass`, `nrv_flag = Pass`, and summary “Not a consumable product”.\\n\\n
+
+            OUTPUT RULES:\\n
+            • `summary` must be concise (e.g. “Supplement missing NRV” or “All checks passed”).\\n
+            • Omit the `errors` array when there are no failures.\\n
+            • Output **only** the JSON object — no extra keys, no markdown.\\n\\n
 
             USER MESSAGE:\\n
             Audit the following product (all fields bundled):\\n\\n
@@ -1065,7 +1072,7 @@ PROMPT_OPTIONS = {
             Only respond with the JSON described above."""
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Holistically audits nutrition information across all provided fields and guarantees supplements fail when NRV/RI percentages are absent."
+        "description": "Three-step audit: classify, check nutrition panel, then NRV requirement for supplements."
 },
     "AUDIT: Allergen Bold Check": {
         "prompt": (
