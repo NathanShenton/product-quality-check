@@ -1051,8 +1051,8 @@ PROMPT_OPTIONS = {
                • Otherwise ⇒ \\\"nutrition_flag\\\" = \\\"Pass\\\".\\n
             3. **NRV / RI requirement for supplements**:\\n
                • When stricter supplement cues (vitamin, supplement, tablet, gummy, effervescent) are present **and** a panel exists:\\n
-                 – Scan the *entire* panel text for any occurrence of the tokens “NRV” or “RI” (with or without a preceding % symbol, case-insensitive).\\n
-                 – **If ZERO matches are found, set \\\"nrv_flag\\\" = \\\"Fail\\\" and add an error of type “Missing NRV”.**\\n
+                 – Scan the panel text for any occurrence of “NRV” or “RI” (case-insensitive, with or without “%” just before or after).\\n
+                 – – **If ZERO matches are found, `nrv_flag` MUST be "Fail" and an error of type "Missing NRV" MUST be added.**\\n
                  – Otherwise set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
                • If the product is **not** a supplement, always set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n
             4. **summary** must be concise (e.g. “Supplement missing NRV” or “All checks passed”).\\n
