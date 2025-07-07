@@ -518,6 +518,7 @@ PROMPT_OPTIONS = {
             "(A) clear spelling errors in ingredient names, and (B) residual **non-ingredient** text such as marketing blurbs or usage claims. "
             "Ignore boilerplate headings like ‘Ingredients:’ or ‘Full Ingredients:’ and benign serving phrases such as ‘per gummy’, ‘per gummies’, "
             "‘per tablet’, ‘per capsule’. Use only the supplied `sku`, `sku_name`, and `full_ingredients` — never hallucinate or assume facts.\"\\n\\n"
+
             "Respond with **valid JSON ONLY** in exactly this shape:\\n"
             "{\\n"
             "  \\\"spelling_flag\\\": \\\"Pass\\\" | \\\"Fail\\\",\\n"
@@ -527,23 +528,26 @@ PROMPT_OPTIONS = {
             "  \\\"residuals\\\": [{ \\\"field\\\": \\\"full_ingredients\\\", \\\"text\\\": \\\"<snippet>\\\", \\\"position\\\": \\\"<offset>\\\" }],\\n"
             "  \\\"debug_notes\\\": [\\\"<optional notes>\\\"]\\n"
             "}\\n\\n"
+
             "RULES:\\n"
             "1. **Spelling check** – flag alphabetic tokens ≥ 4 chars that a UK-English spell-checker marks as incorrect (high confidence). "
-            "Skip proper nouns/trademarks from `sku_name`, hyphenated domain terms, or tokens with edit-distance > 1. "
-            "Set `spelling_flag` = \"Fail\" if any misspelling is found.\\n"
-            "2. **Residual detection** – flag strings clearly **not ingredients** (e.g. flavour descriptors “rich chocolate flavour”, marketing claims "
+            "Skip proper nouns/trademarks from `sku_name`, hyphen-ated domain terms, or tokens with edit-distance > 1. "
+            "Set `spelling_flag` = \\\"Fail\\\" if any misspelling is found; otherwise \\\"Pass\\\".\\n"
+            "2. **Residual detection** – flag strings that are clearly **not ingredients** (e.g. flavour descriptors “rich chocolate flavour”, marketing claims "
             "“supports immunity”). Exclude heading labels /^(ingredients|full ingredients):?$/i and serving strings "
-            "/^per (gummy|gummies|tablet|capsule|serving|dose)s?$/i. Heuristics: adjectives such as tasty, refreshing, premium; verbs like supports, boosts; "
-            "stand-alone flavour words not followed by ‘flavouring’/‘extract’. Set `residual_flag` = \"Fail\" if any are found.\\n"
-            "3. The `summary` must report counts (e.g. \"1 misspelling, 2 residual snippets\" or \"No issues found\").\\n"
-            "4. Omit the `misspellings` or `residuals` array if empty.\\n"
-            "5. Output **only** the JSON object – no prose, no markdown.\\n\\n"
+            "/^per (gummy|gummies|tablet|capsule|serving|dose)s?$/i. Heuristics (case-insensitive): adjectives like tasty, refreshing, premium; "
+            "verbs like supports, boosts; stand-alone flavour words not followed by ‘flavouring’ or ‘extract’. "
+            "**Set `residual_flag` = \\\"Fail\\\" only when at least one residual snippet is detected; otherwise set it to \\\"Pass\\\".**\\n"
+            "3. The `summary` must report counts (e.g. \\\"1 misspelling, 2 residual snippets\\\" or \\\"No issues found\\\").\\n"
+            "4. Omit the `misspellings` or `residuals` array if it is empty.\\n"
+            "5. Output **only** the JSON object — no prose, no markdown.\\n\\n"
+
             "PRODUCT DATA:\\n"
             "{{product_data}}\\n"
-      ),
+        ),
         "recommended_model": "gpt-4o-mini",
         "description": "Audits `full_ingredients` for misspelled ingredient tokens and filters out marketing/descriptive residue, ignoring header or serving phrases."
-    },
+},
     "Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
