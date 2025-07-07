@@ -469,7 +469,7 @@ PROMPT_OPTIONS = {
             "price-per UOM, price multiplier) with special-case handling for g/ml case and a self-validation pass."
         )
     },
-    "Spelling and Grammar Checker": {
+    "AUDIT: Spelling and Grammar Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that evaluates product data for spelling and grammar issues "
@@ -511,6 +511,56 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Checks variants_description for UK-English spelling & grammar, respecting sku_name and brand_name to avoid false positives."
     },
+    "AUDIT: Ingredient Spelling": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that audits the `full_ingredients` field of product data for two things: clear spelling errors in ingredient names, and any residual non-ingredient text such as warnings, dosage notes, or advisory phrases. "
+            "Use only the supplied `sku`, `sku_name`, and `full_ingredients`—never hallucinate or assume facts.\"\n\n"
+    
+            "Respond with valid JSON ONLY in exactly this shape:\n"
+            "{\n"
+            "  \"spelling_flag\": \"Pass\" | \"Fail\",\n"
+            "  \"residual_flag\": \"Pass\" | \"Fail\",\n"
+            "  \"summary\": \"<brief human-readable overview of findings or 'No issues found'>\",\n"
+            "  \"misspellings\": [\n"
+            "    {\n"
+            "      \"field\": \"full_ingredients\",\n"
+            "      \"text\": \"<exact token with potential misspelling>\",\n"
+            "      \"suggestion\": \"<corrected spelling suggestion>\"\n"
+            "    }\n"
+            "    …\n"
+            "  ],\n"
+            "  \"residuals\": [\n"
+            "    {\n"
+            "      \"field\": \"full_ingredients\",\n"
+            "      \"text\": \"<residual phrase or snippet>\",\n"
+            "      \"position\": \"<token index or character offset>\"\n"
+            "    }\n"
+            "    …\n"
+            "  ],\n"
+            "  \"debug_notes\": [\"<optional low-confidence or edge-case observations>\"]\n"
+            "}\n\n"
+    
+            "RULES:\n"
+            "1. Set `spelling_flag` = \"Fail\" if any clear spelling error is found; otherwise \"Pass\".\n"
+            "2. Only flag tokens of alphabetic length ≥4 that a general UK-English spell-checker marks as incorrect with high-confidence suggestions. Do not flag:\n"
+            "   • Proper nouns or trademarks present in `sku_name` or the SKU itself.\n"
+            "   • Domain-style words containing hyphens or known industry terms if the edit distance >1.\n"
+            "3. Set `residual_flag` = \"Fail\" if any advisory, warning, dosage, or other non-ingredient snippet is detected; otherwise \"Pass\".\n"
+            "4. Detect residuals by regex matching (case-insensitive) of phrases like “contains”, “warning”, “keep refrigerated”, “per \\d+”, “% NRV”, “µg”, etc.\n\n"
+    
+            "OUTPUT DETAILS:\n"
+            "• `summary` should state counts, e.g. \"2 misspellings and 1 residual data snippet found\" or \"No issues found\".\n"
+            "• `misspellings` entries must include the exact token and one suggestion each.\n"
+            "• `residuals` entries must include the snippet and its approximate location (token index or offset).\n"
+            "• `debug_notes` may capture borderline cases (e.g. [\"'sorbitol' flagged but within distance threshold; review manually\"]).\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Audits `full_ingredients` for misspelled ingredient tokens and leftover non-ingredient text."
+},
     "Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -983,7 +1033,44 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
     },
-    "Allergen Bold Check": {
+    "AUDIT: Nutritionals": {
+        "prompt": (
+            """SYSTEM MESSAGE:\\n
+            \"You are a JSON-producing assistant that audits the `nutritionals_info` field of product data for basic nutritional compliance. Never hallucinate or assume facts — analyse ONLY the supplied `sku`, `name`, and `nutritionals_info`.\"\\n\\n
+            Respond with **valid JSON ONLY** in exactly this shape:\\n\\n
+            {\\n
+              \\\"nutrition_flag\\\": \\\"Pass\\\" | \\\"Fail\\\",\\n
+              \\\"nrv_flag\\\": \\\"Pass\\\" | \\\"Fail\\\",\\n
+              \\\"summary\\\": \\\"<brief human-readable overview of findings or 'All checks passed'>\\\",\\n
+              \\\"errors\\\": [\\n
+                {\\n
+                  \\\"field\\\": \\\"nutritionals_info\\\",\\n
+                  \\\"type\\\": \\\"Missing Data\\\" | \\\"Missing NRV\\\",\\n
+                  \\\"message\\\": \\\"<description of the issue>\\\"\\n
+                }\\n
+              ]\\n
+            }\\n\\n
+            RULES:\\n
+            1. A product **requires nutritionals** if its `name` contains any keyword from: [\\\"vitamin\\\", \\\"supplement\\\", \\\"tablet\\\", \\\"gummy\\\", \\\"effervescent\\\", \\\"tea\\\", \\\"honey\\\", \\\"powder\\\", \\\"drink\\\", \\\"food\\\"].\\n
+            2. If nutritionals are required **and** `nutritionals_info` is null or empty ⇒ set \\\"nutrition_flag\\\" = \\\"Fail\\\" and add an error {\\\"field\\\":\\\"nutritionals_info\\\", \\\"type\\\":\\\"Missing Data\\\", \\\"message\\\":\\\"Missing nutritionals for consumable/supplement\\\"}. Otherwise set \\\"nutrition_flag\\\" = \\\"Pass\\\".\\n
+            3. For products whose `name` contains any of the stricter supplement terms [\\\"vitamin\\\", \\\"supplement\\\", \\\"tablet\\\", \\\"gummy\\\", \\\"effervescent\\\"] **and** `nutritionals_info` is non-empty:\\n
+               • Scan every `value` string for the pattern \\\"% NRV\\\" or \\\"% RI\\\" (case-insensitive).\\n
+               • If none found ⇒ set \\\"nrv_flag\\\" = \\\"Fail\\\" and add an error {\\\"field\\\":\\\"nutritionals_info\\\", \\\"type\\\":\\\"Missing NRV\\\", \\\"message\\\":\\\"No % NRV/RI present for supplement\\\"}. Otherwise set \\\"nrv_flag\\\" = \\\"Pass\\\".\\n\\n
+            OUTPUT DETAILS:\\n
+            • \\\"summary\\\" must be concise (e.g. \\\"Supplement missing NRV; tea missing nutritionals\\\" or \\\"All checks passed\\\").\\n
+            • Omit the \\\"errors\\\" array if there are no failures.\\n
+            • Output **only** the JSON described above — no extra keys, explanations, or formatting.\\n\\n
+            USER MESSAGE:\\n
+            Audit the following product:\\n\\n
+            - sku: {sku}\\n
+            - name: {name}\\n
+            - nutritionals_info: {nutritionals_info}\\n\\n
+            Only respond with the JSON described above."""
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Audits nutritionals_info for required data and ensures supplements include % NRV/RI."
+    },
+    "AUDIT: Allergen Bold Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant. You never invent or assume allergen matches. You only report real, verified findings based on bold tag logic in an HTML-coded ingredient list. No disclaimers, no explanation — just valid JSON.\n\n"
