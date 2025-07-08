@@ -516,7 +516,7 @@ PROMPT_OPTIONS = {
             "SYSTEM MESSAGE:\n"
             "You are a deterministic JSON auditor. You must follow every rule below exactly. "
             "If any rule is broken, you must output the fallback object:\n"
-            "{ \"sku\": \"\", \"claim\": \"\", \"violated\": false, \"matched_term\": \"\", \"explanation\": \"\" }\n\n"
+            "{ \"sku\": \"\", \"claim\": \"\", \"violated\": false, \"matched_term\": \"\", \"explanation\": \"\", \"debug\": \"\" }\n\n"
     
             "INPUT FIELDS (runtime):\n"
             "  sku               - string (the product identifier)\n"
@@ -534,7 +534,8 @@ PROMPT_OPTIONS = {
             "    • If you determine a violation, set violated=true, and capture:\n"
             "        matched_term = the exact word or phrase from the ingredients or warnings that triggered the violation\n"
             "        explanation  = a brief rationale (e.g. “‘milk powder’ indicates dairy”).\n"
-            "    • If you determine no violation, set violated=false and leave matched_term and explanation empty.\n\n"
+            "        debug        = a single message describing the match (e.g. “warning_info contains 'milk powder'”).\n"
+            "    • If you determine no violation, set violated=false and leave matched_term, explanation, and debug empty.\n\n"
     
             "STEP 3 – OUTPUT (strict JSON ONLY):\n"
             "{\n"
@@ -542,13 +543,14 @@ PROMPT_OPTIONS = {
             "  \"claim\": \"<same as input>\",\n"
             "  \"violated\": <true|false>,\n"
             "  \"matched_term\": \"<if violated, the triggering phrase; otherwise empty>\",\n"
-            "  \"explanation\": \"<brief rationale; empty if no violation>\"\n"
+            "  \"explanation\": \"<brief rationale; empty if no violation>\",\n"
+            "  \"debug\": \"<single debug message; empty if no violation>\"\n"
             "}\n"
             "Output nothing else."
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Single-claim free-from auditor: contextually assesses one claim per call, returns strict JSON."
-},
+        "description": "Single-claim free-from auditor: contextually assesses one claim per call, returns strict JSON with a single debug string."
+    },
     "AUDIT: Ingredient Spelling": {
         "prompt": (
             "SYSTEM MESSAGE:\\n"
