@@ -511,6 +511,85 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Checks variants_description for UK-English spelling & grammar, respecting sku_name and brand_name to avoid false positives."
     },
+    "AUDIT: Free-From Claim Check": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant. You never invent or assume conflicts—you only report real, verified violations based on the fields provided. No disclaimers, no explanation—just valid JSON.\n\n"
+    
+            "CONSTANTS (do not modify):\n"
+            "{\n"
+            "  \"supported_claims\": [\n"
+            "    \"Gluten Free\", \"Dairy Free\", \"Sugar Free\", \"Celery Free\", \"Cereal Free\", \"Crustaceans Free\",\n"
+            "    \"Egg Free\", \"Fish Free\", \"Lupin Free\", \"Milk Free\", \"Mollusc Free\", \"Mustard Free\",\n"
+            "    \"Nuts Free\", \"Peanut Free\", \"Sesame Free\", \"Soya Free\", \"Sulphites Free\", \"Wheat Free\", \"Kiwi Free\"\n"
+            "  ],\n"
+            "  \"synonyms\": {\n"
+            "    \"Gluten\": [\"wheat\", \"rye\", \"barley\", \"oat\", \"oats\", \"spelt\", \"farro\", \"kamut\", \"durum\", \"semolina\", \"bulgur\", \"triticale\", \"einkorn\", \"emmer\", \"graham\", \"seitan\"],\n"
+            "    \"Dairy\": [\"milk\", \"milk powder\", \"whey\", \"casein\", \"lactose\", \"butter\", \"cream\", \"cheese\", \"yogurt\", \"ghee\", \"curds\", \"caseinate\", \"caseinates\", \"lactalbumin\", \"lactoglobulin\", \"milk solids\", \"nougat\", \"whey protein\", \"whey protein concentrate\", \"whey protein isolate\"],\n"
+            "    \"Sugar\": [\"sugar\", \"sucrose\", \"glucose\", \"dextrose\", \"fructose\", \"agave syrup\", \"cane sugar\", \"honey\", \"maltose\", \"molasses\", \"brown sugar\", \"invert sugar\", \"corn syrup\", \"high fructose corn syrup\", \"hfcs\", \"malt syrup\", \"maple syrup\", \"treacle\", \"panela\", \"rapadura\"],\n"
+            "    \"Soya\": [\"soy\", \"soya\", \"soja\", \"soybean\", \"soy lecithin\", \"soy sauce\", \"tempeh\", \"edamame\", \"tofu\", \"natto\"],\n"
+            "    \"Nuts\": [\"almond\", \"hazelnut\", \"walnut\", \"cashew\", \"pecan\", \"brazil nut\", \"pistachio\", \"macadamia\", \"nut oil\", \"nut butter\", \"praline\", \"marzipan\", \"ground nuts\"],\n"
+            "    \"Peanut\": [\"peanut\", \"peanut oil\", \"arachis oil\"],\n"
+            "    \"Sulphites\": [\"sulphites\", \"so2\", \"sulfur dioxide\", \"metabisulfite\", \"bisulfite\", \"e220\", \"e221\", \"e222\", \"e223\", \"e224\", \"e225\", \"e226\", \"e227\", \"e228\"],\n"
+            "    \"Celery\": [\"celery\", \"celeriac\", \"celery root\", \"celery salt\", \"apium graveolens\"],\n"
+            "    \"Crustaceans\": [\"crab\", \"lobster\", \"shrimp\", \"prawn\", \"crayfish\", \"krill\"],\n"
+            "    \"Eggs\": [\"egg\", \"egg white\", \"egg yolk\", \"albumen\", \"ovum\", \"lysozyme\", \"lysozyme e1105\", \"ovalbumin\"],\n"
+            "    \"Fish\": [\"fish\", \"tuna\", \"salmon\", \"cod\", \"haddock\", \"trout\", \"anchovy\", \"sardine\", \"mackerel\", \"pollock\", \"surimi\", \"fish stock\", \"bonito\", \"dashi\", \"roe\"],\n"
+            "    \"Lupin\": [\"lupin\"],\n"
+            "    \"Mustard\": [\"mustard\", \"sinapis alba\", \"brassica juncea\", \"brassica hirta\", \"mustard seed\", \"mustard flour\"],\n"
+            "    \"Sesame\": [\"sesame\", \"tahini\", \"gingelly\", \"benne seed\"],\n"
+            "    \"Wheat\": [\"wheat\", \"spelt\", \"farro\", \"kamut\", \"durum\", \"semolina\", \"bulgur\", \"triticale\", \"einkorn\", \"emmer\", \"graham\", \"seitan\"],\n"
+            "    \"Kiwi\": [\"kiwi\", \"chinese gooseberry\"],\n"
+            "    \"Molluscs\": [\"mollusc\", \"mussel\", \"clam\", \"oyster\", \"scallop\", \"octopus\", \"squid\"]\n"
+            "  }\n"
+            "}\n\n"
+    
+            "Follow these rules carefully:\n\n"
+    
+            "1) Identify all free-from claims in the diet_info field:\n"
+            "   - Split diet_info on commas and trim whitespace.\n"
+            "   - Keep only those that exactly match (case-insensitive) a value in supported_claims.\n\n"
+    
+            "2) Conflict detection:\n"
+            "   - For each claim, map it to the root key (e.g. 'Gluten Free' → 'Gluten').\n"
+            "   - Search full_ingredients and warning_info for any synonym belonging to that root key.\n"
+            "   - Matches are whole-word, case-insensitive, and must tolerate simple plural 's' and optional hyphen/space (e.g. 'soy lecithin', 'soy-lecithin').\n"
+            "   - If a synonym is found anywhere in either field, that claim is violated—context such as 'may contain' does NOT excuse it.\n\n"
+    
+            "3) Build two arrays:\n"
+            "   - violated_claims: a comma-separated string listing each violated claim exactly as it appeared in diet_info (preserve order of appearance).\n"
+            "   - debug_matches: one entry per violated claim in the format:\n"
+            "     \"Confirmed violation for '<Claim>': <field> contains '<matched text>'\"\n\n"
+    
+            "4) Output format (strict):\n"
+            "{\n"
+            "  \"violated_claims\": \"Gluten Free, Dairy Free\",\n"
+            "  \"debug_matches\": [\n"
+            "    \"Confirmed violation for 'Gluten Free': warning_info contains 'cereals containing gluten'\",\n"
+            "    \"Confirmed violation for 'Dairy Free': full_ingredients contains 'whey protein'\"\n"
+            "  ]\n"
+            "}\n\n"
+            "If no violations are found:\n"
+            "{\n"
+            "  \"violated_claims\": \"\",\n"
+            "  \"debug_matches\": []\n"
+            "}\n\n"
+    
+            "5) Validation rules (mandatory):\n"
+            "   - Every claim in violated_claims must have a corresponding debug entry and vice-versa.\n"
+            "   - Do NOT include claims with no actual synonym match.\n\n"
+    
+            "6) Scratch-pad self-double-check (MANDATORY):\n"
+            "   - You may create ONE internal scratch-pad block delimited by '@@@' to redo the entire analysis.\n"
+            "   - Inside the block, recompute violated_claims and debug_matches from scratch (call them recalc_*).\n"
+            "   - If the recomputed values differ in any way from the first pass, discard the first pass and use the recomputed values.\n"
+            "   - DELETE the entire '@@@ … @@@' block before you send the final answer. The user must receive ONLY valid JSON.\n\n"
+    
+            "7) Final step: After deleting the scratch-pad, send the JSON object exactly—no prose, no extra fields.\n"
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Checks product free-from claims against ingredient and warning statements using an extensible synonym map and a mandatory self-double-check to guarantee accuracy."
+    },
     "AUDIT: Ingredient Spelling": {
         "prompt": (
             "SYSTEM MESSAGE:\\n"
