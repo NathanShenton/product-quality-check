@@ -515,7 +515,6 @@ PROMPT_OPTIONS = {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant. You never invent or assume conflicts--you only report real, verified violations based on the fields provided. No disclaimers, no explanation--just valid JSON.\n\n"
-    
             "CONSTANTS (do not modify):\n"
             "{\n"
             "  \"supported_claims\": [\n"
@@ -543,25 +542,22 @@ PROMPT_OPTIONS = {
             "    \"Molluscs\": [\"mollusc\", \"mussel\", \"clam\", \"oyster\", \"scallop\", \"octopus\", \"squid\"]\n"
             "  }\n"
             "}\n\n"
-    
             "Follow these rules carefully:\n\n"
-    
             "1) Identify all free-from claims in the diet_info field:\n"
             "   - Split diet_info on commas and trim whitespace.\n"
             "   - Keep only those that exactly match (case-insensitive) a value in supported_claims.\n\n"
-    
-            "2) Conflict detection:\n"
-            "   - For each claim, map it to the root key (e.g. 'Gluten Free' -> 'Gluten').\n"
-            "   - Search full_ingredients and warning_info for any synonym belonging to that root key.\n"
-            "   - Matches are whole-word, case-insensitive, and must tolerate simple plural 's' and optional hyphen/space (e.g. 'soy lecithin', 'soy-lecithin').\n"
-            "   - If a synonym is found anywhere in either field, that claim is violated--context such as 'may contain' does NOT excuse it.\n\n"
-    
-            "3) Build two arrays:\n"
-            "   - violated_claims: a comma-separated string listing each violated claim exactly as it appeared in diet_info (preserve order of appearance).\n"
-            "   - debug_matches: one entry per violated claim in the format:\n"
-            "     \"Confirmed violation for '<Claim>': <field> contains '<matched text>'\"\n\n"
-    
-            "4) Output format (strict):\n"
+            "2) Preprocessing:\n"
+            "   - Strip all HTML tags from full_ingredients and warning_info so only visible text remains.\n\n"
+            "3) Conflict detection:\n"
+            "   - For each claim, map it to its root key (e.g. 'Gluten Free' -> 'Gluten').\n"
+            "   - For each phrase in synonyms[root key], perform an exact whole-word match in either cleaned field (case-insensitive), allowing only an optional plural 's' and optional hyphens or spaces within the phrase.\n"
+            "   - Do NOT match partial words, stems, or any term not explicitly in the synonyms list.\n"
+            "   - If a synonym is found anywhere in either cleaned field, that claim is violated—context such as 'may contain' does NOT excuse it.\n\n"
+            "4) Build two outputs:\n"
+            "   - violated_claims: a comma-separated string of each violated claim exactly as in diet_info (preserve original order).\n"
+            "   - debug_matches: an array of messages in the format:\n"
+            "       \"Confirmed violation for '<Claim>': <field> contains '<matched text>'\"\n\n"
+            "5) Output format (strict):\n"
             "{\n"
             "  \"violated_claims\": \"Gluten Free, Dairy Free\",\n"
             "  \"debug_matches\": [\n"
@@ -574,21 +570,14 @@ PROMPT_OPTIONS = {
             "  \"violated_claims\": \"\",\n"
             "  \"debug_matches\": []\n"
             "}\n\n"
-    
-            "5) Validation rules (mandatory):\n"
-            "   - Every claim in violated_claims must have a corresponding debug entry and vice-versa.\n"
-            "   - Do NOT include claims with no actual synonym match.\n\n"
-    
-            "6) Scratch-pad self-double-check (MANDATORY):\n"
-            "   - You may create ONE internal scratch-pad block delimited by '@@@' to redo the entire analysis.\n"
-            "   - Inside the block, recompute violated_claims and debug_matches from scratch (call them recalc_*).\n"
-            "   - If the recomputed values differ in any way from the first pass, discard the first pass and use the recomputed values.\n"
-            "   - DELETE the entire '@@@ ... @@@' block before you send the final answer. The user must receive ONLY valid JSON.\n\n"
-    
-            "7) Final step: After deleting the scratch-pad, send the JSON object exactly--no prose, no extra fields.\n"
+            "6) Validation rules (mandatory):\n"
+            "   - Each claim in violated_claims must have a corresponding debug entry and vice-versa.\n"
+            "   - Do NOT include claims without actual synonym matches.\n\n"
+            "7) Final step:\n"
+            "Send only the JSON object exactly as specified—no prose, no additional fields.\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Checks product free-from claims against ingredient and warning statements using an extensible synonym map and a mandatory self-double-check to guarantee accuracy."
+        "description": "Checks product free-from claims against ingredient and warning statements using an extensible synonym map with strict exact matching and no scratchpad."
     },
     "AUDIT: Ingredient Spelling": {
         "prompt": (
