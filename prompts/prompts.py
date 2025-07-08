@@ -514,7 +514,7 @@ PROMPT_OPTIONS = {
     "AUDIT: Free-From Claim Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant. You never invent or assume conflicts—you only report real, verified violations based on the fields provided. No disclaimers, no explanation—just valid JSON.\n\n"
+            "You are a JSON-producing assistant. You never invent or assume conflicts--you only report real, verified violations based on the fields provided. No disclaimers, no explanation--just valid JSON.\n\n"
     
             "CONSTANTS (do not modify):\n"
             "{\n"
@@ -551,10 +551,10 @@ PROMPT_OPTIONS = {
             "   - Keep only those that exactly match (case-insensitive) a value in supported_claims.\n\n"
     
             "2) Conflict detection:\n"
-            "   - For each claim, map it to the root key (e.g. 'Gluten Free' → 'Gluten').\n"
+            "   - For each claim, map it to the root key (e.g. 'Gluten Free' -> 'Gluten').\n"
             "   - Search full_ingredients and warning_info for any synonym belonging to that root key.\n"
             "   - Matches are whole-word, case-insensitive, and must tolerate simple plural 's' and optional hyphen/space (e.g. 'soy lecithin', 'soy-lecithin').\n"
-            "   - If a synonym is found anywhere in either field, that claim is violated—context such as 'may contain' does NOT excuse it.\n\n"
+            "   - If a synonym is found anywhere in either field, that claim is violated--context such as 'may contain' does NOT excuse it.\n\n"
     
             "3) Build two arrays:\n"
             "   - violated_claims: a comma-separated string listing each violated claim exactly as it appeared in diet_info (preserve order of appearance).\n"
@@ -583,9 +583,9 @@ PROMPT_OPTIONS = {
             "   - You may create ONE internal scratch-pad block delimited by '@@@' to redo the entire analysis.\n"
             "   - Inside the block, recompute violated_claims and debug_matches from scratch (call them recalc_*).\n"
             "   - If the recomputed values differ in any way from the first pass, discard the first pass and use the recomputed values.\n"
-            "   - DELETE the entire '@@@ … @@@' block before you send the final answer. The user must receive ONLY valid JSON.\n\n"
+            "   - DELETE the entire '@@@ ... @@@' block before you send the final answer. The user must receive ONLY valid JSON.\n\n"
     
-            "7) Final step: After deleting the scratch-pad, send the JSON object exactly—no prose, no extra fields.\n"
+            "7) Final step: After deleting the scratch-pad, send the JSON object exactly--no prose, no extra fields.\n"
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Checks product free-from claims against ingredient and warning statements using an extensible synonym map and a mandatory self-double-check to guarantee accuracy."
