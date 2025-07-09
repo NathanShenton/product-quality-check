@@ -97,6 +97,14 @@ def clean_gpt_json_block(text: str) -> str:
 
     return text.strip()
 
+def _flatten(x):
+    if isinstance(x, (list, dict, tuple)):
+        try:
+            return json.dumps(x, ensure_ascii=False)
+        except Exception:
+            return str(x)
+    return x
+
 #############################
 # Model Descriptions + UI   #
 #############################
@@ -965,20 +973,30 @@ if uploaded_file and (
 
             # Combine original CSV with GPT results
             results_df = pd.DataFrame(results)
-            final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
+            final_df   = pd.concat([df.reset_index(drop=True), results_df], axis=1)
+            
             st.success("✅ GPT processing complete!")
-
+            
             st.markdown(
                 "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
                 unsafe_allow_html=True
             )
-            # Stringify any complex columns so Streamlit can render them
+            
+            # ─── Flatten every cell ─────────────────────────
+            # (turn any list/dict/tuple into a JSON string so PyArrow can serialize)
+            final_df = final_df.applymap(_flatten)
+            
+            # Optional: still keep your per-column JSON dumps if you like
             if "fuzzy_debug_matches" in final_df.columns:
-                final_df["fuzzy_debug_matches"] = final_df["fuzzy_debug_matches"].apply(lambda x: json.dumps(x, ensure_ascii=False))
+                final_df["fuzzy_debug_matches"] = final_df["fuzzy_debug_matches"].apply(
+                    lambda x: json.dumps(x, ensure_ascii=False)
+                )
             if "candidate_debug" in final_df.columns:
                 final_df["candidate_debug"] = final_df["candidate_debug"].apply(
                     lambda x: json.dumps(x, ensure_ascii=False)
                 )
+            
+            # Finally, render
             st.dataframe(final_df)
 
             # Download buttons
