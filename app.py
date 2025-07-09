@@ -983,10 +983,12 @@ if uploaded_file and (
                 "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
                 unsafe_allow_html=True
             )
-            # 1. Flatten every cell so Streamlit/PyArrow can handle it
+            # 1. Flatten every cell so PyArrow can serialize
             final_df = final_df.applymap(_flatten)
+            # 2. Cast all columns to string to avoid any unsupported types
+            final_df = final_df.astype(str)
 
-            # 2. Let the user choose how many rows to preview
+            # 3. Let the user choose how many rows to preview
             max_preview = st.number_input(
                 "How many rows would you like to preview?",
                 min_value=1,
@@ -995,8 +997,9 @@ if uploaded_file and (
                 step=1
             )
 
-            # 3. Display only the first N rows
-            st.dataframe(final_df.head(int(max_preview)))
+            # 4. Display only the first N rows
+            preview_df = final_df.head(int(max_preview))
+            st.dataframe(preview_df)
 
             # Download buttons
             st.download_button(
@@ -1015,3 +1018,4 @@ if uploaded_file and (
                     "gpt_failed_rows.csv",
                     "text/csv"
                 )
+
