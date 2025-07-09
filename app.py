@@ -962,31 +962,27 @@ if uploaded_file and (
 
 
             # ---------- end for loop ----------
-
             # Combine original CSV with GPT results
             results_df = pd.DataFrame(results)
-            final_df = pd.concat([df.reset_index(drop=True), results_df], axis=1)
+            final_df   = pd.concat([df.reset_index(drop=True), results_df], axis=1)
             st.success("✅ GPT processing complete!")
 
             st.markdown(
                 "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
                 unsafe_allow_html=True
             )
-            # 1. Stringify any complex columns so Streamlit can render them
-            if "fuzzy_debug_matches" in final_df.columns:
-                final_df["fuzzy_debug_matches"] = final_df["fuzzy_debug_matches"].apply(lambda x: json.dumps(x, ensure_ascii=False))
-            if "candidate_debug" in final_df.columns:
-                final_df["candidate_debug"] = final_df["candidate_debug"].apply(lambda x: json.dumps(x, ensure_ascii=False))
-            
+            # 1. Flatten every cell (turn lists/dicts/tuples into JSON strings)
+            final_df = final_df.applymap(_flatten)
+
             # 2. Let the user choose how many rows to preview
             max_preview = st.number_input(
                 "How many rows would you like to preview?",
                 min_value=1,
-                max_value=min(1000, len(final_df)),  # don’t allow more than 1000
-                value=min(20, len(final_df)),        # default to 20
+                max_value=min(1000, len(final_df)),
+                value=min(20, len(final_df)),
                 step=1
             )
-            
+
             # 3. Display only the first N rows (this slice will never blow up PyArrow)
             st.dataframe(final_df.head(int(max_preview)))
 
