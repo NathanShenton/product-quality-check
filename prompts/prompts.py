@@ -31,6 +31,47 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "EXTRACT: Nutrient Data & Compute NPM Score": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that parses raw `nutritionals_info` arrays for a single SKU, extracts the per-100 g values of key nutrients, and computes the UK Nutrient Profiling Model (NPM) score excluding any fruit/vegetable/nut component. "
+            "Never hallucinate or assume facts; analyze ONLY the supplied data.\"\n\n"
+    
+            "Respond with valid JSON ONLY, in exactly this shape:\n"
+            "{\n"
+            "    \"sku\": \"<the SKU from the input>\",\n"
+            "    \"name\": \"<the product name from the input>\",\n"
+            "    \"energy_kj_per_100g\": <number or null>,\n"
+            "    \"saturated_fat_g_per_100g\": <number or null>,\n"
+            "    \"sugars_g_per_100g\": <number or null>,\n"
+            "    \"salt_mg_per_100g\": <number or null>,\n"
+            "    \"fibre_g_per_100g\": <number or null>,\n"
+            "    \"protein_g_per_100g\": <number or null>,\n"
+            "    \"npm_score\": <integer or null>\n"
+            "}\n\n"
+    
+            "RULES:\n"
+            "1. For each nutrient entry, determine which value is per 100 g. If `value` contains two parts separated by “/”, the first is per 100 g; if only one part, assume it is per 100 g.\n"
+            "2. Normalize units: convert “g” to grams, “kJ” to kilojoules, “mg” to milligrams (e.g. 0.72 g salt → 720 mg), and ignore any per-serving values.\n"
+            "3. Key nutrients to extract (all per 100 g):\n"
+            "    • Energy (in kJ)\n"
+            "    • Saturated fat (in g)\n"
+            "    • Total sugars (in g) — look for “sugars” or “of which sugars”\n"
+            "    • Salt or sodium (convert salt g → mg sodium per 100 g)\n"
+            "    • Fibre (in g)\n"
+            "    • Protein (in g)\n"
+            "4. If any nutrient is missing or cannot be parsed, set its field to `null`.\n"
+            "5. Compute the NPM score (excluding fruit/vegetable/nut points) using:\n"
+            "    • A-points: energy_kj_per_100g, saturated_fat_g_per_100g, sugars_g_per_100g, sodium_mg_per_100g\n"
+            "    • C-points: fibre_g_per_100g, protein_g_per_100g\n"
+            "    • Use UK NPM algorithm thresholds per 100 g. If any input is null, or score cannot be computed, set `npm_score` to `null`.\n\n"
+    
+            "INPUT DATA:\n"
+            "{{product_data}}"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Parses messy `nutritionals_info` JSON, extracts per-100 g nutrient values, normalizes units, and calculates NPM score without FVN component."
+    },
     "Age Restriction Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
