@@ -97,6 +97,18 @@ def clean_gpt_json_block(text: str) -> str:
 
     return text.strip()
 
+def _flatten(x):
+    """
+    Turn any list/dict/tuple into a JSON string (so PyArrow can serialize),
+    otherwise leave the value alone.
+    """
+    if isinstance(x, (list, dict, tuple)):
+        try:
+            return json.dumps(x, ensure_ascii=False)
+        except Exception:
+            return str(x)
+    return x
+
 #############################
 # Model Descriptions + UI   #
 #############################
@@ -971,7 +983,7 @@ if uploaded_file and (
                 "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
                 unsafe_allow_html=True
             )
-            # 1. Flatten every cell (turn lists/dicts/tuples into JSON strings)
+            # 1. Flatten every cell so Streamlit/PyArrow can handle it
             final_df = final_df.applymap(_flatten)
 
             # 2. Let the user choose how many rows to preview
@@ -983,7 +995,7 @@ if uploaded_file and (
                 step=1
             )
 
-            # 3. Display only the first N rows (this slice will never blow up PyArrow)
+            # 3. Display only the first N rows
             st.dataframe(final_df.head(int(max_preview)))
 
             # Download buttons
