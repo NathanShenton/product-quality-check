@@ -31,10 +31,10 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
-    "EXTRACT: Nutrient Data & Compute NPM Score": {
+    "EXTRACT: Nutrient Data Only": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant that parses raw `nutritionals_info` arrays for a single SKU, extracts the per-100 g values of key nutrients, and computes the UK Nutrient Profiling Model (NPM) score excluding any fruit/vegetable/nut component. "
+            "\"You are a JSON-producing assistant that parses a raw `nutritionals_info` array for a single SKU and extracts the per-100 g values of key nutrients. "
             "Never hallucinate or assume facts; analyse ONLY the supplied data.\"\n\n"
     
             "Respond with valid JSON ONLY in exactly this shape:\n"
@@ -46,31 +46,36 @@ PROMPT_OPTIONS = {
             "    \"sugars_g_per_100g\": <number|null>,\n"
             "    \"salt_mg_per_100g\": <number|null>,\n"
             "    \"fibre_g_per_100g\": <number|null>,\n"
-            "    \"protein_g_per_100g\": <number|null>,\n"
-            "    \"npm_score\": <integer|null>\n"
+            "    \"protein_g_per_100g\": <number|null>\n"
             "}\n\n"
     
             "RULES:\n"
-            "1. Identify per-100 g values: if `value` contains two parts separated by “/”, take the first as per 100 g; if only one part, assume per 100 g.\n"
-            "2. Normalize units: “g” → grams, “kJ” → kilojoules, “mg” → milligrams (e.g. 0.72 g salt → 720 mg); ignore any per-serving figures.\n"
-            "3. Extract these nutrients per 100 g:\n"
-            "    • Energy (kJ)\n"
-            "    • Saturated fat (g)\n"
-            "    • Total sugars (g)\n"
-            "    • Salt (report as milligrams per 100 g)\n"
-            "    • Fibre (g)\n"
-            "    • Protein (g)\n"
-            "4. If any nutrient is missing or cannot be parsed, set its field to `null`.\n"
-            "5. Compute the NPM score (excluding any fruit/veg/nut points) using:\n"
-            "    • A-points: energy_kj_per_100g, saturated_fat_g_per_100g, sugars_g_per_100g, salt_mg_per_100g\n"
-            "    • C-points: fibre_g_per_100g, protein_g_per_100g\n"
-            "    • Use the UK NPM thresholds per 100 g; if any input is `null` or score can’t be computed, set `npm_score` to `null`.\n\n"
+            "1. Identify per-100 g values: if a `value` contains two parts separated by '/', take the first part as the per-100 g value; if only one value is present, assume it refers to per 100 g.\n"
+            "2. Normalise units:\n"
+            "   • 'g' → grams\n"
+            "   • 'kJ' → kilojoules\n"
+            "   • 'mg' → milligrams\n"
+            "   • 'µg' or 'mcg' → micrograms (ignore for this task)\n"
+            "3. Salt handling:\n"
+            "   • If sodium is provided instead of salt, convert sodium (mg) to salt (mg) using: `salt_mg = sodium_mg × 2.5`\n"
+            "   • Prioritise 'salt' if both 'salt' and 'sodium' are present\n"
+            "4. Extract and report per-100 g values for:\n"
+            "   • Energy (kJ)\n"
+            "   • Saturated fat (g)\n"
+            "   • Total sugars (g)\n"
+            "   • Salt (in milligrams per 100 g)\n"
+            "   • Fibre (g)\n"
+            "   • Protein (g)\n"
+            "5. If any nutrient is missing, unparseable, or not applicable, set its value to `null`.\n\n"
     
             "INPUT DATA:\n"
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Parses messy `nutritionals_info` JSON, extracts per-100 g nutrients, normalises units, and computes the NPM score without the FVN component."
+        "description": (
+            "Extracts per-100 g nutrients from `nutritionals_info`, normalises units "
+            "(including sodium→salt conversion), and outputs in structured JSON format without NPM scoring."
+        )
     },
     "Age Restriction Compliance Checker": {
         "prompt": (
