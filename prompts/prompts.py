@@ -7,7 +7,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-3.5-turbo",
         "description": "No pre-written prompt selected."
     },
-    "Gluten Free Contextual Check": {
+    "INCOMPLETE: Gluten Free Contextual Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant for high-criticality compliance checking. Your task is to review the ingredient list of a product claimed to be \"gluten free\" and identify any ingredient entries that appear inconsistent with that claim.\n\n"
@@ -31,7 +31,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
-    "EXTRACT: Nutrient Data Only": {
+    "COMPLETE: Nutrient Data Only": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that parses a raw `nutritionals_info` array for a single SKU and extracts the per-100 g values of key nutrients. "
@@ -77,7 +77,7 @@ PROMPT_OPTIONS = {
             "(including sodium→salt conversion), and outputs in structured JSON format without NPM scoring."
         )
     },
-    "Age Restriction Compliance Checker": {
+    "COMPLETE: Age Restriction Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant that decides whether a product sold by "
@@ -150,12 +150,12 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Uses holistic field parsing and numeric normalisation to flag weight-loss, libido, high-caffeine, CBD, OTC/THR & similar items requiring an age gate."
     },
-    "HFSS Checker": {
+    "INCOMPLETE: HFSS Checker": {
         "prompt": "(no prompt needed – handled via 4-pass logic)",
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
-    "NPM & HFSS Classification": {
+    "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-only assistant for calculating UK Nutrient Profiling Model (2004/05) "
@@ -215,12 +215,12 @@ PROMPT_OPTIONS = {
             "computes NPM scores, checks HFSS status, and self-verifies."
         )
     },
-    "Competitor SKU Match": {
+    "COMPLETE: Competitor SKU Match": {
         "prompt": "(auto-generated, not used directly)",
         "recommended_model": "gpt-4.1-mini",
         "description": "Find the best competitor product match for each SKU"
     },
-    "Prohibited Marketplace Compliance Checker": {
+    "COMPLETE: Prohibited Marketplace Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that evaluates product data for compliance with "
@@ -309,7 +309,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Prohibited-item checker with expanded medicinal-condition logic and debugging output."
     },
-    "Food Supplement Compliance Check": {
+    "COMPLETE: Food Supplement Compliance Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant for **mission-critical UK food-supplement compliance checks**. "
@@ -350,12 +350,12 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Classifies a SKU as a food supplement or not, then checks for every mandatory UK food-supplement label statement with zero reliance on specific field names."
     },
-    "Novel Food Checker (EU)": {
+    "COMPLETE: Novel Food Checker (EU)": {
         "prompt": "",  # We'll generate this dynamically per row
     "recommended_model": "gpt-4o-mini",
     "description": "Flags presence of authorised EU novel foods by comparing ingredient statements to the consolidated EU 2017/2470 list."
 },
-    "Medicinal Language Compliance Checker": {
+    "INCOMPLETE: Medicinal Language Compliance Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that evaluates product marketing copy for regulatory compliance. "
@@ -412,7 +412,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Contextually flags non-compliant medicinal language in food and drink product copy, reducing false positives by focusing on explicit therapeutic claims."
     },
-    "Image: Ingredient Scrape (HTML)": {
+    "COMPLETE: Image: Ingredient Scrape (HTML)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a **regulatory-grade data-capture agent** for UK food labels.\n"
@@ -446,7 +446,7 @@ PROMPT_OPTIONS = {
             "<b></b>. Returns only an HTML string or the sentinel IMAGE_UNREADABLE."
     )
 },
-    "shelf_label_validation": {
+    "INCOMPLETE: shelf_label_validation": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant for high-criticality shelf-label compliance checking. "
@@ -515,7 +515,7 @@ PROMPT_OPTIONS = {
             "price-per UOM, price multiplier) with special-case handling for g/ml case and a self-validation pass."
         )
     },
-    "AUDIT: Spelling and Grammar Checker": {
+    "COMPLETE: AUDIT: Spelling and Grammar Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that evaluates product data for spelling and grammar issues "
@@ -557,7 +557,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Checks variants_description for UK-English spelling & grammar, respecting sku_name and brand_name to avoid false positives."
     },
-    "AUDIT: Free-From Claim Check": {
+    "INCOMPLETE: AUDIT: Free-From Claim Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a deterministic JSON auditor. You must follow every rule below exactly. "
@@ -597,7 +597,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Single-claim free-from auditor: contextually assesses one claim per call, returns strict JSON with a single debug string."
     },
-    "AUDIT: Ingredient Spelling": {
+    "COMPLETE: AUDIT: Ingredient Spelling": {
         "prompt": (
             "SYSTEM MESSAGE:\\n"
             "\"You are a JSON-producing assistant that audits the `full_ingredients` field of product data for two things: "
@@ -634,7 +634,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Audits `full_ingredients` for misspelled ingredient tokens and filters out marketing/descriptive residue, ignoring header or serving phrases."
 },
-    "Image: Directions for Use": {
+    "COMPLETE: Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a product data capture assistant for UK food and supplement labels.\n"
@@ -650,7 +650,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "More flexible extraction of usage instructions from cropped label. Looks for any clearly implied direction, even without a heading."
     },
-    "Image: Multi-Image Ingredient Extract & Compare": {
+    "INCOMPLETE: Image: Multi-Image Ingredient Extract & Compare": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a high-accuracy image OCR assistant for UK food product packaging.\n\n"
@@ -671,7 +671,7 @@ PROMPT_OPTIONS = {
             "using <b>…</b>. Compares result to the 'full_ingredients' field from the same row."
         )
     },
-    "Grammar & Spelling Summary Checker": {
+    "COMPLETE: Grammar & Spelling Summary Checker": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant that checks short product descriptions (sell copy) for *real* spelling, grammar, punctuation, and capitalisation issues. "
@@ -706,7 +706,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "UK-English grammar, spelling, punctuation, and case checker with readable summaries and debug trace."
     },
-    "Image: Storage Instructions": {
+    "COMPLETE: Image: Storage Instructions": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a product label transcription assistant. Your task is to extract the product's STORAGE instructions from the supplied UK food or supplement label image.\n\n"
@@ -723,7 +723,7 @@ PROMPT_OPTIONS = {
     "recommended_model": "gpt-4o",
     "description": "Safely extracts storage text from label images, verbatim only. Avoids paraphrasing or guessing."
     },
-    "Product Name & Variant Extractor": {
+    "COMPLETE: Product Name & Variant Extractor": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant. You never invent placeholder text. "
@@ -761,7 +761,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Extracts `product_name` and `variant_name`, ensuring variant never contains size/pack info and product name never repeats variant content."
 },
-    "Gelatin Source Classifier": {
+    "COMPLETE: Gelatin Source Classifier": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant. You must not hallucinate or assume information. "
@@ -790,7 +790,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Classifies the animal origin of gelatin using only explicit evidence from the ingredient statement or variant description."
     },
-    "Image: Warnings and Advisory (JSON)": {
+    "COMPLETE: Image: Warnings and Advisory (JSON)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a food safety and regulatory extraction assistant. You will identify and classify any relevant text from a UK product label image into the following categories:\n"
@@ -821,7 +821,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "Flexibly extracts warnings, advisory, and 'may contain' text based on content, not just headings. Outputs exact JSON."
     },
-    "Price Marking Order Category": {
+    "INCOMPLETE: Price Marking Order Category": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant. Never invent placeholder text. "
@@ -892,7 +892,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Maps each product to its Schedule 1 PMO category and the correct unit price basis (e.g. per 100 g, per 10 ml)."
     },
-    "Free From Quick-Check": {
+    "INCOMPLETE: Free From Quick-Check": {
     "prompt": (
         "SYSTEM MESSAGE:\n"
         "You are a rule-based compliance screener.  Only two outputs are allowed:\n"
@@ -934,7 +934,7 @@ PROMPT_OPTIONS = {
     "recommended_model": "gpt-4-turbo",
     "description": "Binary screener: flags SKUs only when a claim-specific keyword appears; no cross-claim leakage."
 },
-    "French Sell Copy Translator": {
+    "INCOMPLETE: French Sell Copy Translator": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant. You never invent placeholder text. "
@@ -952,7 +952,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Use gpt-4.1-mini for more nuanced translation tasks."
     },
-    "Product Usage Type Checker": {
+    "INCOMPLETE: Product Usage Type Checker": {
             "prompt": (
                 "SYSTEM MESSAGE:\n"
                 "\"You are a JSON-producing assistant. You never invent placeholder text. "
@@ -975,7 +975,7 @@ PROMPT_OPTIONS = {
             "recommended_model": "gpt-4.1-mini",
             "description": "Classifies product usage type as consumable, topical, other, or unsure based on product data."
     },
-    "Vegan Flag Check": {
+    "INCOMPLETE: Vegan Flag Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant performing a high-criticality data audit. "
@@ -1007,7 +1007,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Validates vegan status solely from ingredient text; flags any animal-derived terms."
     },
-    "Methylated Vitamin Check": {
+    "COMPLETE: Methylated Vitamin Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "\"You are a JSON-producing assistant. You never invent placeholder text and you must "
@@ -1036,7 +1036,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Flags products that contain methylfolate or methylcobalamin, returning Yes/No/Unsure plus the matched string."
     },
-    "food_supplement_classifier": {
+    "INCOMPLETE: food_supplement_classifier": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant that classifies whether a product SKU is a food supplement.  \n"
@@ -1066,7 +1066,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Holistically classifies a product as a food supplement, confirms its decision via self-validation, and returns a concise debug reason."
     },
-    "Legal Category Classifier": {
+    "INCOMPLETE: Legal Category Classifier": {
         "prompt": (
             """SYSTEM MESSAGE:\\n
                 "You are a JSON-producing assistant. Valid output:\\n\\n
@@ -1106,7 +1106,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Classifies products into legally defined categories or returns 'unsure' when data are inadequate."
     },
-    "AUDIT: Nutritionals": {
+    "INCOMPLETE: AUDIT: Nutritionals": {
         "prompt": (
             """SYSTEM MESSAGE:\\n
             \"You are a JSON-producing assistant that performs a **three-step nutritional audit**. "
@@ -1160,7 +1160,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Three-step audit: classify, check nutrition panel, then NRV requirement for supplements."
 },
-    "AUDIT: Allergen Bold Check": {
+    "COMPLETE: AUDIT: Allergen Bold Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant. You never invent or assume allergen matches. You only report real, verified findings based on bold tag logic in an HTML-coded ingredient list. No disclaimers, no explanation — just valid JSON.\n\n"
@@ -1233,7 +1233,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Checks HTML-coded ingredients for unbolded allergens using strict two-step logic with verified debug outputs."
     },
-    "GHS Pictogram Detector": {
+    "COMPLETE: GHS Pictogram Detector": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are an image‑analysis assistant that identifies GB CLP / GHS hazard pictograms on retail packaging.\n"
