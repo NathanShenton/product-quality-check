@@ -821,41 +821,6 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "Flexibly extracts warnings, advisory, and 'may contain' text based on content, not just headings. Outputs exact JSON."
     },
-    "TEST-Image: Warnings, Advisory, Directions & Storage (JSON)": {
-        "prompt": (
-            "SYSTEM MESSAGE:\n"
-            "You are a food safety and regulatory extraction assistant. You will identify and classify any relevant text from a UK product label image into the following categories:\n"
-            "- **warnings** (e.g., health risks, dosage risks, serious safety notices)\n"
-            "- **advisory** notes (e.g., consult a doctor, not suitable for...)\n"
-            "- **may_contain** statements (e.g., 'may contain traces of nuts')\n"
-            "- **directions_for_use** (e.g., preparation, dosage, how to consume)\n"
-            "- **storage_instructions** (e.g., ‘store in a cool, dry place’, refrigeration guidance)\n\n"
-            "TASK:\n"
-            "1. Read the entire image text. Do **not** rely only on headings — also check for standalone lines that match the meaning of each category.\n"
-            "2. If a line clearly matches one of the five types, assign it to that category.\n"
-            "3. If you're unsure where something fits, use 'advisory' as the fallback.\n"
-            "4. If multiple items appear in one category, separate them using line breaks ('\\n').\n\n"
-            "OUTPUT:\n"
-            "Return a valid, minified JSON object using this structure:\n"
-            "{\n"
-            "  \"filename\": \"[EXACT_FILENAME].png\",\n"
-            "  \"warnings\": \"...\",\n"
-            "  \"advisory\": \"...\",\n"
-            "  \"may_contain\": \"...\",\n"
-            "  \"directions_for_use\": \"...\",\n"
-            "  \"storage_instructions\": \"...\"\n"
-            "}\n\n"
-            "RULES:\n"
-            "- Only copy exact label text. Do NOT invent or complete sentences.\n"
-            "- Do not summarise or reword anything.\n"
-            "- If a field is empty, use an empty string (\"\").\n"
-            "- If nothing relevant is readable, use this output exactly:\n"
-            "{ \"filename\": \"[FILENAME].png\", \"warnings\": \"\", \"advisory\": \"\", \"may_contain\": \"IMAGE_UNREADABLE\", \"directions_for_use\": \"\", \"storage_instructions\": \"\" }\n"
-            "- Output JSON only. No extra text, no markdown."
-        ),
-        "recommended_model": "gpt-4o",
-        "description": "Flexibly extracts warnings, advisory, 'may contain', directions for use, and storage instruction text based on content, not just headings. Outputs exact JSON."
-    },    
     "Price Marking Order Category": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
