@@ -155,6 +155,52 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
+    "COMPLETE: FNV Line-by-Line Estimator": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "\"You are a JSON-producing assistant that estimates the Fruit, Nut & Vegetable (FNV) content of a single "
+            "food product using ONLY the supplied ingredient list. Never hallucinate or invent numeric percentages. "
+            "Distinguish between figures that are *explicitly stated* (certain_fnv) and proportions you *infer* "
+            "(presumptive_fnv).\"\n\n"
+    
+            "Respond with valid JSON ONLY in exactly this shape:\n"
+            "{\n"
+            "  \"certain_fnv\": <integer 0-100>,\n"
+            "  \"presumptive_fnv\": <integer 0-100>,\n"
+            "  \"fnv_ingredients\": [\"<comma-separated list of recognised FNV components>\"] ,\n"
+            "  \"debug_notes\": [\"<short free-text items explaining assumptions, edge cases or low-confidence cues>\"]\n"
+            "}\n\n"
+    
+            "–––––  DEFINITIONS  –––––\n"
+            "• **Fruits**: all culinary fruits plus berries, citrus, coconut, cocoa, tomato, rowanberry, etc.\n"
+            "• **Nuts & Seeds**: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
+            "• **Vegetables & Legumes**: any edible veg, pulses, tubers, herbs (e.g. cauliflower, pea, sorghum, onion).\n\n"
+    
+            "–––––  SCORING LOGIC  –––––\n"
+            "1. **certain_fnv** = sum of all numeric percentage declarations that clearly map to FNV items.\n"
+            "   • e.g. \"Raspberries (50%)\" → +50.\n"
+            "   • If a grouped statement gives one % for multiple items (\"Fruit blend (70%)\"), allocate the full %.\n"
+            "2. **presumptive_fnv** covers any *additional* FNV content you reasonably infer when no % is stated.\n"
+            "   • Heuristics (apply cautiously):\n"
+            "     – First ingredient without a % often ≈ 50 % of recipe.\n"
+            "     – For snack chips/crisps, the named base (e.g. plantain) is usually ≥60 %.\n"
+            "     – Seasonings, extracts, powders rarely exceed 2 %.\n"
+            "   • If you cannot justify an estimate, use 0 and note uncertainty in debug_notes.\n"
+            "3. Never let (certain_fnv + presumptive_fnv) exceed 100.\n\n"
+    
+            "–––––  OUTPUT GUIDELINES  –––––\n"
+            "• Populate **fnv_ingredients** with every ingredient that contributed to either score, in descending order.\n"
+            "• Keep **debug_notes** concise (≤20 words each). Examples:\n"
+            "  [\"plantain assumed 70% as first ingredient\", \"apple powder in 10% seasoning ≈1%\", \"no % given for veg mix\"]\n"
+            "• If ALL FNV percentages are explicit, set presumptive_fnv = 0.\n"
+            "• If NO numeric % present, set certain_fnv = 0 and place total guess in presumptive_fnv.\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Estimates explicit vs. inferred Fruit/Nut/Vegetable percentages, returning JSON with debug notes."
+    }.
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
