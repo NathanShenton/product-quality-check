@@ -157,53 +157,62 @@ PROMPT_OPTIONS = {
     },
     "COMPLETE: FNV Line-by-Line Estimator": {
         "prompt": (
-            "### ROLE\n"
-            "Return STRICT JSON estimating Fruit-Nut-Veg share.\n\n"
-        
-            "### JSON SHAPE (copy exactly)\n"
-            "{\n"
-            "    \"certain_fnv\": <0-100 int>,\n"
-            "    \"presumptive_fnv\": <0-100 int>,\n"
-            "    \"fnv_ingredients\": [\"<ingredient1>\", \"<ingredient2>\", ...],\n"
-            "    \"debug_notes\": [\"<≤20-word note>\", ...]\n"
-            "}\n\n"
-        
-            "### FNV vs EXCLUSIONS (memorise!)\n"
-            "Fruits: culinary fruits, berries, citrus, coconut, cocoa, tomato.\n"
-            "Nuts/Seeds: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin.\n"
-            "Veg & Legumes: horticultural veg, herbs, pulses, tubers.\n"
-            "EXCLUDE always: wheat, barley, rye, oats, corn/maize, rice, quinoa, spelt, sorghum, millet, teff; "
+            "    ### ROLE\n"
+            "    Return STRICT JSON estimating Fruit-Nut-Veg share.\n\n"
+    
+            "    ### JSON SHAPE (copy exactly)\n"
+            "    {\n"
+            "        \"certain_fnv\": <0-100 int>,\n"
+            "        \"presumptive_fnv\": <0-100 int>,\n"
+            "        \"fnv_ingredients\": [\"<ingredient1>\", \"<ingredient2>\", ...],  # unique, lowercase, no excluded words\n"
+            "        \"debug_notes\": [\"<≤20-word note>\", ...]\n"
+            "    }\n\n"
+    
+            "    ### FNV vs EXCLUSIONS (memorise!)\n"
+            "    Fruits: culinary fruits, berries, citrus, coconut, cocoa, tomato.\n"
+            "    Nuts/Seeds: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin.\n"
+            "    Veg & Legumes: horticultural veg, herbs, pulses, tubers.\n"
+            "    EXCLUDE always: wheat, barley, rye, oats, corn/maize, rice, quinoa, spelt, sorghum, millet, teff; "
             "any bran/flour; refined protein isolates; dairy; water; **oils or butters**; all additives.\n\n"
-        
-            "### RULE 1 – CERTAIN_FNV\n"
-            "For every ingredient with a numeric % that is NOT excluded, add that % to certain_fnv.\n\n"
-        
-            "### RULE 2 – PRESUMPTIVE_FNV (only BEFORE any numeric % is copied)\n"
-            "1st eligible FNV → +40 %.\n"
-            "2nd → +25 %.\n"
-            "Seasonings/extracts/colour powders → ≤2 % each.\n"
-            "Veg crisps default 60 %.\n"
-            "Water-first beverage: first concentrate after water = 15 %.\n"
-            "Stop assigning presumptive as soon as a numeric % has been added.\n\n"
-        
-            "### RULE 3 – SPECIAL CASES\n"
-            "Standalone nut/seed + salt/oil → certain_fnv = 0, presumptive_fnv = 95.\n"
-            "Multi-flavour packs: score each sub-recipe, keep the single highest FNV % as certain_fnv.\n\n"
-        
-            "### RULE 4 – ROUND & CAP\n"
-            "Round BOTH numbers UP to whole integers; make sure certain + presumptive ≤ 100.\n\n"
-        
-            "### RULE 5 – FINAL SANITY PASS (must run AFTER rules 1-4)\n"
-            "- Remove any EXCLUDE term that slipped into fnv_ingredients; reduce the matching score.\n"
-            "- Re-run RULE 4.\n"
-            "- Rewrite debug_notes so arithmetic matches the final figures.\n\n"
-        
-            "Respond ONLY with the JSON.\n\n"
-            "### PRODUCT DATA\n"
-            "{{product_data}}\n"
+    
+            "    ### RULE 1 – CERTAIN_FNV\n"
+            "    For every ingredient with a numeric % that is NOT excluded, add that % to certain_fnv.\n\n"
+    
+            "    ### RULE 2 – PRESUMPTIVE_FNV (only BEFORE you copy the first numeric % into certain_fnv)\n"
+            "    1st eligible FNV → +40 %.\n"
+            "    2nd → +25 %.\n"
+            "    Seasonings/extracts/colour powders → ≤2 % each.\n"
+            "    Veg crisps default 60 %.\n"
+            "    Water-first beverage: first concentrate after water = 15 %.\n"
+            "    Stop assigning presumptive as soon as the first numeric % is copied.\n\n"
+    
+            "    ### RULE 3 – SPECIAL CASES\n"
+            "    Stand-alone nut/seed + salt/oil → certain_fnv = 0, presumptive_fnv = 95.\n"
+            "    Multi-flavour packs: score each sub-recipe, keep the single highest FNV % as certain_fnv.\n\n"
+    
+            "    ### RULE 4 – ROUND & CAP\n"
+            "    Round BOTH numbers UP to whole integers; make sure certain + presumptive ≤ 100.\n\n"
+    
+            "    ### RULE 5 – FINAL SANITY PASS (run AFTER rules 1-4)\n"
+            "    – Remove any EXCLUDE term that slipped into fnv_ingredients and reduce the matching score.\n"
+            "    – Re-run RULE 4.\n"
+            "    – Rewrite debug_notes so arithmetic matches the final figures.\n\n"
+    
+            "    ### HARD TESTS (MUST PASS BEFORE YOU REPLY)\n"
+            "    1. For every token in fnv_ingredients: if it matches an EXCLUDE term **or** ends with "
+            "'oil'/'butter'/'isolate', delete it and adjust scores.\n"
+            "    2. If certain_fnv > 0 then presumptive_fnv MUST be 0.\n"
+            "    3. Never invent or apportion hidden percentages inside composite ingredients – copy explicit numbers only.\n"
+            "    4. Confirm certain_fnv + presumptive_fnv ≤ 100 and both are whole integers.\n"
+            "    5. Ensure debug_notes exactly explain the final maths.\n"
+            "    6. If any test fails, FIX the JSON and re-run these tests before responding.\n\n"
+    
+            "    Respond ONLY with the JSON.\n\n"
+            "    ### PRODUCT DATA\n"
+            "    {{product_data}}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict exclusions, rounding, precedence rules – plus a final self-audit pass to eject stray cereals/dairy."
+        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict exclusions, rounding, precedence rules, and hard post-checks to block cereal/oil leaks or invented %."
     },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
