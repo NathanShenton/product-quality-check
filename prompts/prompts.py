@@ -155,72 +155,67 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
-    "COMPLETE: FNV Line-by-Line Estimator": {
-        "prompt": (
-            "    ### ROLE\n"
-            "    Return STRICT JSON estimating Fruit-Nut-Veg share.\n\n"
-    
-            "    ### JSON SHAPE (copy exactly)\n"
-            "    {\n"
-            "        \"certain_fnv\": <0-100 int>,\n"
-            "        \"presumptive_fnv\": <0-100 int>,\n"
-            "        \"fnv_ingredients\": [\"<ingredient1>\", \"<ingredient2>\", ...],  # unique, lowercase, no excluded words\n"
-            "        \"debug_notes\": [\"<≤20-word note>\", ...]\n"
-            "    }\n\n"
-    
-            "    ### FNV vs EXCLUSIONS (memorise!)\n"
-            "    Fruits: culinary fruits, berries, citrus, coconut, cocoa, tomato.\n"
-            "    Nuts/Seeds: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin.\n"
-            "    Veg & Legumes: horticultural veg, **tea leaves / chicory / herbs**, pulses, tubers.\n"
-            "    EXCLUDE always: wheat, barley, rye, oats, corn/maize, rice, quinoa, spelt, sorghum, millet, teff; "
-            "any bran/flour; refined protein isolates; dairy; water; **oils or butters**; all additives.\n\n"
-    
-            "    ### RULE 1 – CERTAIN_FNV\n"
-            "    Copy the **exact** numeric % printed on-pack for every NON-excluded FNV item.\n"
-            "    • When a numeric % covers a composite that contains **at least one** eligible FNV item, "
-            "copy the **full %** (even if the mix also contains excluded ingredients). "
-            "If the composite contains zero eligible FNV items, ignore the %.\n"
-            "    • Never create, split or estimate a % that is not printed on the label.\n\n"
-    
-            "    ### RULE 2 – PRESUMPTIVE_FNV "
-            "(only BEFORE you copy the first valid FNV % into certain_fnv)\n"
-            "    1st eligible FNV → +40 %.\n"
-            "    2nd → +25 %.\n"
-            "    Seasonings/extracts/colour powders → ≤2 % each.\n"
-            "    Veg crisps default 60 %.\n"
-            "    Water-first beverage: first concentrate after water = 15 %.\n"
-            "    • If the first numeric % you meet belongs to an **EXCLUDED** ingredient, "
-            "keep assigning presumptive until a valid FNV % is copied.\n"
-            "    STOP assigning presumptive **immediately** after the first valid FNV % is copied.\n\n"
-    
-            "    ### RULE 3 – SPECIAL CASES\n"
-            "    Stand-alone nut/seed + salt/oil → certain_fnv = 0, presumptive_fnv = 95.\n"
-            "    Multi-flavour packs: score each sub-recipe, keep the single highest FNV % as certain_fnv.\n\n"
-    
-            "    ### RULE 4 – ROUND & CAP\n"
-            "    Round BOTH numbers **UP** to whole integers; ensure certain + presumptive ≤ 100.\n\n"
-    
-            "    ### RULE 5 – FINAL SANITY PASS (run AFTER rules 1-4)\n"
-            "    – Remove any EXCLUDE term that slipped into fnv_ingredients and adjust scores.\n"
-            "    – Re-run RULE 4.\n"
-            "    – Rewrite debug_notes so arithmetic matches the final figures.\n\n"
-    
-            "    ### HARD TESTS (MUST PASS **before you reply**)\n"
-            "    1. Scrub fnv_ingredients **and the maths**: if a token matches an EXCLUDE term **or** ends with "
-            "\"oil\", \"butter\", or \"isolate\", delete it, recalc scores, then re-run RULE 4.\n"
-            "    2. If certain_fnv > 0, presumptive_fnv **MUST be 0**.\n"
-            "    3. Never invent or apportion hidden percentages inside composite ingredients – copy explicit numbers only.\n"
-            "    4. Confirm certain_fnv + presumptive_fnv ≤ 100 and both are whole integers.\n"
-            "    5. Ensure debug_notes exactly explain the final maths.\n"
-            "    6. If any test fails, FIX the JSON and re-run these tests before responding.\n\n"
-    
-            "    Respond **ONLY** with the JSON.\n\n"
-            "    ### PRODUCT DATA\n"
-            "    {{product_data}}\n"
-        ),
-        "recommended_model": "gpt-4.1-mini",
-        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict exclusions, rounding, precedence rules, and hard post-checks to block cereal/oil leaks or invented %."
-    },
+"COMPLETE: FNV Line-by-Line Estimator": {
+    "prompt": (
+        "    ### ROLE\n"
+        "    Return STRICT JSON estimating Fruit-Nut-Veg share. Bias toward under-counting.\n\n"
+
+        "    ### JSON SHAPE (copy exactly)\n"
+        "    {\n"
+        "        \"certain_fnv\": <0-100 int>,\n"
+        "        \"presumptive_fnv\": <0-100 int>,\n"
+        "        \"fnv_ingredients\": [\"<ingredient1>\", \"<ingredient2>\", ...],  # unique, lowercase, no excluded words\n"
+        "        \"debug_notes\": [\"<≤20-word note>\", ...]\n"
+        "    }\n\n"
+
+        "    ### FNV vs EXCLUSIONS (memorise!)\n"
+        "    Fruits: culinary fruits, berries, citrus, coconut, cocoa, tomato.\n"
+        "    Nuts/Seeds: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin.\n"
+        "    Veg & Legumes: horticultural veg, **tea leaves / chicory / herbs**, pulses, tubers.\n"
+        "    EXCLUDE always: wheat, barley, rye, oats, corn/maize, rice, quinoa, spelt, sorghum, millet, teff; "
+        "any bran/flour; anything containing the words gluten, isolate, concentrate, blend, \"protein blend\"; "
+        "dairy; water; **oils or butters**; all additives.\n\n"
+
+        "    ### RULE 1 – CERTAIN_FNV  (copy-only ‘pure’ labels)\n"
+        "    • Copy the **exact** on-pack % **only when** the labelled ingredient (or “blend”) is 100 % FNV.\n"
+        "    • If the bracketed list mixes excluded items (e.g. oil, isolate, flour) → ignore the % (treat as 0).\n"
+        "    • Never invent, split or apportion an unseen %. Copy or ignore—nothing in-between.\n\n"
+
+        "    ### RULE 2 – PRESUMPTIVE_FNV  (fires only if certain_fnv == 0)\n"
+        "    1st eligible FNV   → +30 %.\n"
+        "    2nd eligible FNV   → +15 % (cap presumptive at 45 %).\n"
+        "    Seasonings / extracts / colour powders → ≤1 % each.\n"
+        "    Veg crisps (e.g. plantain chips) → 50 %.\n"
+        "    Water-first beverage: first fruit/veg concentrate after water → 10 %.\n\n"
+
+        "    ### RULE 3 – SPECIAL CASES\n"
+        "    Stand-alone nut/seed + salt/oil → certain_fnv = 0, presumptive_fnv = 90.\n"
+        "    Multi-flavour packs: score each sub-recipe, keep the single highest FNV % as certain_fnv.\n\n"
+
+        "    ### RULE 4 – ROUND & CAP\n"
+        "    Round BOTH numbers **UP** to whole integers; ensure certain + presumptive ≤ 100.\n\n"
+
+        "    ### RULE 5 – FINAL SANITY PASS (run AFTER rules 1-4)\n"
+        "    – Remove any EXCLUDE term that slipped into fnv_ingredients and adjust scores.\n"
+        "    – Re-run RULE 4.\n"
+        "    – Rewrite debug_notes so arithmetic matches the final figures.\n\n"
+
+        "    ### HARD TESTS (MUST PASS **before you reply**)\n"
+        "    1. Scrub fnv_ingredients **and the maths**: if a token matches an EXCLUDE term **or** ends with "
+        "\"oil\", \"butter\", \"isolate\", \"concentrate\", or \"blend\", delete it, recalc, then re-run RULE 4.\n"
+        "    2. If certain_fnv > 0 ⇒ presumptive_fnv **MUST** be 0.\n"
+        "    3. Never copy a % unless RULE 1 says it is 100 % FNV.\n"
+        "    4. Confirm certain_fnv + presumptive_fnv ≤ 100 and both are whole integers.\n"
+        "    5. Ensure debug_notes exactly explain the final maths.\n"
+        "    6. If any test fails, FIX the JSON and re-run these tests before responding.\n\n"
+
+        "    Respond **ONLY** with the JSON.\n\n"
+        "    ### PRODUCT DATA\n"
+        "    {{product_data}}\n"
+    ),
+    "recommended_model": "gpt-4.1-mini",
+    "description": "Ultra-low-temperature prompt (0.1) for conservative FNV scoring – under-counts by design to minimise HFSS false-compliance risk."
+},
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
