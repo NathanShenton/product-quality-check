@@ -213,7 +213,7 @@ PROMPT_OPTIONS = {
             "• Re-verify (certain_fnv + presumptive_fnv) ≤ 100 and both are whole integers.\n"
             "• Ensure every arithmetic note in **debug_notes** matches the final numbers.\n"
             "If you changed anything, overwrite the draft JSON before responding.\n"
-            "ALWAYS obey rules 1-5 before self-check.\n"\n"
+            "ALWAYS obey rules 1-5 before self-check.\n\n"
 
             "–––––  OUTPUT GUIDELINES  –––––\n"
             "• **fnv_ingredients** – list every ingredient that contributed to either score, ordered by % impact.\n"
