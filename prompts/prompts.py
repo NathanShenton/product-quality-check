@@ -200,7 +200,7 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4o-mini",
         "description": "Estimates explicit vs. inferred Fruit/Nut/Vegetable percentages, returning JSON with debug notes."
-    }.
+    },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
