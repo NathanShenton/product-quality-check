@@ -155,7 +155,6 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
-{
     "COMPLETE: FNV Line-by-Line Estimator": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -218,8 +217,7 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict exclusions, rounding, precedence rules – plus a final self-audit pass to eject stray cereals/dairy."
-    }
-},
+    },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
