@@ -189,7 +189,7 @@ PROMPT_OPTIONS = {
             "     – Veg-based crisps/chips (e.g. plantain) with no % → **≥60 %** (use 60 % unless evidence suggests higher/lower).\n"
             "     – Water-first beverages: fruit/veg concentrate after water → **15 %** unless another clue.\n"
             "     – Seasonings, extracts, colour powders → ≤2 % each unless % provided.\n"
-            "   • **Single-ingredient nut/seed spreads** (peanut-butter, tahini, etc.) with only salt/oil → set presumptive_fnv = 95 %.\n"
+            "   • **Standalone** nut/seed spreads (ingredient list == nut/seed + salt/oil) → presumptive_fnv = 95 %.\n"
             "   • If >3 eligible FNV items appear **before the first %**, assign 30 % to the first, 15 % to the second and **cap total presumptive at 45 %**.\n"
             "   • Never add a sub-ingredient note like “(100 % peanuts)” to certain_fnv; it describes purity, not recipe share.\n"
             "   • **If at least one FNV already has a numeric %, apply presumptive only to FNVs that appear *earlier* in the list; "
