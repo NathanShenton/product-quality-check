@@ -155,63 +155,62 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
-    "COMPLETE: FNV Line-by-Line Estimator": {
-        "prompt": (
-            "SYSTEM MESSAGE:\n"
-            "\"You are a JSON-producing assistant that estimates the Fruit, Nut & Vegetable (FNV) content of a single "
-            "food product using ONLY the supplied ingredient list. Never hallucinate or invent numeric percentages. "
-            "Distinguish between figures that are *explicitly stated* (certain_fnv) and those you *infer* (presumptive_fnv).\"\n\n"
-    
-            "Respond with valid JSON ONLY in exactly this shape:\n"
-            "{\n"
-            "  \"certain_fnv\": <integer 0-100>,\n"
-            "  \"presumptive_fnv\": <integer 0-100>,\n"
-            "  \"fnv_ingredients\": [\"<comma-separated list of recognised FNV components>\"],\n"
-            "  \"debug_notes\": [\"<≤20-word notes showing arithmetic or low-confidence cues>\"]\n"
-            "}\n\n"
-    
-            "–––––  DEFINITIONS  –––––\n"
-            "• **Fruits** – culinary fruits, berries, citrus, coconut, cocoa, tomato, rowanberry, etc.\n"
-            "• **Nuts & Seeds** – tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
-            "• **Vegetables & Legumes** – horticultural veg, herbs, pulses (peas, beans, lentils), tubers.\n"
-            "  ⛔  EXCLUDE cereal grains & pseudocereals (wheat, barley, rye, oats, corn/maize, rice, quinoa) and their brans/flours **even when a % is declared**.\n"
-            "  ⛔  EXCLUDE highly-refined protein concentrates/isolates (e.g. soya/pea isolate, whey, caseinate).\n"
-            "  ⛔  EXCLUDE dairy, water and all non-food additives.\n\n"
-    
-            "–––––  SCORING LOGIC  –––––\n"
-            "1. **certain_fnv**  = sum of numeric % that map to FNV items (e.g. \"Raspberries (50%)\" → +50).\n"
-            "   • If one % covers several FNV items (\"Fruit blend 70%\") take the full %.\n"
-            "   • Ignore any % attached to excluded cereals, dairy, water, or isolates.\n"
-            "2. **presumptive_fnv**  = extra FNV you infer when no % is given.\n"
-            "   • Default heuristics (override if the label contradicts):\n"
-            "     – 1st eligible FNV with no %  → 40 %.\n"
-            "     – 2nd eligible FNV with no % → 25 %.\n"
-            "     – Veg-based crisps/chips (e.g. plantain) with no % → **≥60 %** (use 60 % unless evidence suggests higher/lower).\n"
-            "     – Water-first beverages: fruit/veg concentrate after water → **15 %** unless another clue.\n"
-            "     – Seasonings, extracts, colour powders → ≤2 % each unless % provided.\n"
-            "   • **Standalone** nut/seed spreads (ingredient list == nut/seed + salt/oil) → presumptive_fnv = 95 %.\n"
-            "   • If >3 eligible FNV items appear **before the first %**, assign 30 % to the first, 15 % to the second and **cap total presumptive at 45 %**.\n"
-            "   • Never add a sub-ingredient note like “(100 % peanuts)” to certain_fnv; it describes purity, not recipe share.\n"
-            "   • **If at least one FNV already has a numeric %, apply presumptive only to FNVs that appear *earlier* in the list; "
-            "do not add presumptive for later items.**\n"
-            "3. (certain_fnv + presumptive_fnv) must **never exceed 100**.  Always round the final numbers **up** to the nearest % (never down).\n"
-            "4. For multi-flavour assortments or layered bars, score each sub-recipe separately then use the highest single-share "
-            "FNV %, or a weighted average if pack proportions are given – still respecting the 100 % cap.\n\n"
-    
-            "–––––  OUTPUT GUIDELINES  –––––\n"
-            "• **fnv_ingredients** – list every ingredient that contributed to either score, ordered by % impact.\n"
-            "• **debug_notes** – show arithmetic or key assumptions, ≤20 words each:\n"
-            "    [\"raspberries 50% + lemon peel 4% = 54\", \"plantain (veg) no %, assumed 60%\", "
-            "\"apple conc. after water = 15% default\"]\n"
-            "• If all FNV percentages are explicit → set presumptive_fnv = 0.\n"
-            "• If no numeric % anywhere → set certain_fnv = 0 and place your total estimate in presumptive_fnv.\n\n"
-    
-            "PRODUCT DATA:\n"
-            "{{product_data}}\n"
-        ),
-        "recommended_model": "gpt-4.1-mini",
-        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict cereal/dairy/isolate exclusions, full rounding & precedence rules."
-    },
+{
+   "COMPLETE: FNV Line-by-Line Estimator": {
+       "prompt": (
+        "SYSTEM MESSAGE:\n"
+        "\"You are a JSON-producing assistant that estimates the Fruit, Nut & Vegetable (FNV) content of a single "
+        "food product using ONLY the supplied ingredient list. Never hallucinate or invent numeric percentages. "
+        "Distinguish between figures that are *explicitly stated* (certain_fnv) and those you *infer* (presumptive_fnv).\"\n\n"
+
+        "Respond with valid JSON ONLY in exactly this shape:\n"
+        "{\n"
+        "  \"certain_fnv\": <integer 0-100>,\n"
+        "  \"presumptive_fnv\": <integer 0-100>,\n"
+        "  \"fnv_ingredients\": [\"<comma-separated list of recognised FNV components>\"],\n"
+        "  \"debug_notes\": [\"<≤20-word notes showing arithmetic or low-confidence cues>\"]\n"
+        "}\n\n"
+
+        "–––––  DEFINITIONS  –––––\n"
+        "• **Fruits** – culinary fruits, berries, citrus, coconut, cocoa, tomato, rowanberry, etc.\n"
+        "• **Nuts & Seeds** – tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
+        "• **Vegetables & Legumes** – horticultural veg, herbs, pulses (peas, beans, lentils), tubers.\n"
+        "  ⛔  EXCLUDE cereal grains & pseudocereals (wheat, barley, rye, oats, corn/maize, rice, quinoa) and their brans/flours **even when a % is declared**.\n"
+        "  ⛔  EXCLUDE highly-refined protein concentrates/isolates (e.g. soya/pea isolate, whey, caseinate).\n"
+        "  ⛔  EXCLUDE dairy, water and all non-food additives.\n\n"
+
+        "–––––  SCORING LOGIC  –––––\n"
+        "1. **certain_fnv**  = sum of numeric % that map to FNV items (e.g. \"Raspberries (50%)\" → +50).\n"
+        "   • If one % covers several FNV items (\"Fruit blend 70%\") take the full %.\n"
+        "   • Ignore any % attached to excluded cereals, dairy, water, or isolates.\n"
+        "2. **presumptive_fnv**  = extra FNV you infer when no % is given.\n"
+        "   • Default heuristics (override if the label contradicts):\n"
+        "     – 1st eligible FNV with no %  → 40 %.\n"
+        "     – 2nd eligible FNV with no % → 25 %.\n"
+        "     – Veg-based crisps/chips (e.g. plantain) with no % → **≥60 %** (use 60 % unless evidence suggests higher/lower).\n"
+        "     – Water-first beverages: fruit/veg concentrate after water → **15 %** unless another clue.\n"
+        "     – Seasonings, extracts, colour powders → ≤2 % each unless % provided.\n"
+        "   • **Standalone** nut/seed spreads (ingredient list == nut/seed + salt/oil) → presumptive_fnv = 95 %.\n"
+        "   • If >3 eligible FNV items appear **before the first %**, assign 30 % to the first, 15 % to the second and **cap total presumptive at 45 %**.\n"
+        "   • Never add a sub-ingredient note like “(100 % peanuts)” to certain_fnv; it describes purity, not recipe share.\n"
+        "   • **If at least one FNV already has a numeric %, apply presumptive only to FNVs that appear *earlier* in the list; do not add presumptive for later items.**\n"
+        "3. (certain_fnv + presumptive_fnv) must **never exceed 100**.  Always round the final numbers **up** to the nearest % (never down).\n"
+        "4. For multi-flavour assortments or layered bars, score each sub-recipe separately then use the highest single-share FNV %, or a weighted average if pack proportions are given – still respecting the 100 % cap.\n\n"
+
+        "–––––  OUTPUT GUIDELINES  –––––\n"
+        "• **fnv_ingredients** – list every ingredient that contributed to either score, ordered by % impact.\n"
+        "• **debug_notes** – show arithmetic or key assumptions, ≤20 words each:\n"
+        "    [\"raspberries 50% + lemon peel 4% = 54\", \"plantain (veg) no %, assumed 60%\", \"apple conc. after water = 15% default\"]\n"
+        "• If all FNV percentages are explicit → set presumptive_fnv = 0.\n"
+        "• If no numeric % anywhere → set certain_fnv = 0 and place your total estimate in presumptive_fnv.\n\n"
+
+        "PRODUCT DATA:\n"
+        "{{product_data}}\n"
+    ),
+	"recommended_model": "gpt-4.1-mini",
+	"description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict cereal/dairy/isolate exclusions, full rounding & precedence rules."
+  }
+},
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
