@@ -174,7 +174,7 @@ PROMPT_OPTIONS = {
             "• **Fruits** – culinary fruits, berries, citrus, coconut, cocoa, tomato, rowanberry, etc.\n"
             "• **Nuts & Seeds** – tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
             "• **Vegetables & Legumes** – horticultural veg, herbs, pulses (peas, beans, lentils), tubers.\n"
-            "  ⛔  EXCLUDE cereal grains & pseudocereals (wheat, barley, rye, oats, corn/maize, rice, quinoa) and their brans/flours.\n"
+            "  ⛔  EXCLUDE cereal grains & pseudocereals (wheat, barley, rye, oats, corn/maize, rice, quinoa) and their brans/flours **even when a % is declared**.\n"
             "  ⛔  EXCLUDE highly-refined protein concentrates/isolates (e.g. soya/pea isolate, whey, caseinate).\n"
             "  ⛔  EXCLUDE dairy, water and all non-food additives.\n\n"
     
@@ -190,11 +190,13 @@ PROMPT_OPTIONS = {
             "     – Water-first beverages: fruit/veg concentrate after water → **15 %** unless another clue.\n"
             "     – Seasonings, extracts, colour powders → ≤2 % each unless % provided.\n"
             "   • **Single-ingredient nut/seed spreads** (peanut-butter, tahini, etc.) with only salt/oil → set presumptive_fnv = 95 %.\n"
-            "   • If >3 ingredients before the first % → assume 30 % for the first FNV, 15 % for the second, cap total presumptive at 60 %.\n"
+            "   • If >3 eligible FNV items appear **before the first %**, assign 30 % to the first, 15 % to the second and **cap total presumptive at 45 %**.\n"
             "   • Never add a sub-ingredient note like “(100 % peanuts)” to certain_fnv; it describes purity, not recipe share.\n"
-            "3. (certain_fnv + presumptive_fnv) must **never exceed 100**.  Round the final numbers **up** to the nearest %.\n"
-            "4. For multi-flavour assortments or layered bars, score each sub-recipe separately then choose the highest single-share "
-            "FNV %, or a weighted average if the pack explicitly states proportions – but still respect the 100 % cap.\n\n"
+            "   • **If at least one FNV already has a numeric %, apply presumptive only to FNVs that appear *earlier* in the list; "
+            "do not add presumptive for later items.**\n"
+            "3. (certain_fnv + presumptive_fnv) must **never exceed 100**.  Always round the final numbers **up** to the nearest % (never down).\n"
+            "4. For multi-flavour assortments or layered bars, score each sub-recipe separately then use the highest single-share "
+            "FNV %, or a weighted average if pack proportions are given – still respecting the 100 % cap.\n\n"
     
             "–––––  OUTPUT GUIDELINES  –––––\n"
             "• **fnv_ingredients** – list every ingredient that contributed to either score, ordered by % impact.\n"
@@ -208,7 +210,7 @@ PROMPT_OPTIONS = {
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict cereal/dairy/isolate exclusions."
+        "description": "Low-temperature prompt (0.1) for deterministic FNV scoring with strict cereal/dairy/isolate exclusions, full rounding & precedence rules."
     },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
