@@ -172,26 +172,34 @@ PROMPT_OPTIONS = {
             "}\n\n"
     
             "–––––  DEFINITIONS  –––––\n"
-            "• **Fruits**: all culinary fruits plus berries, citrus, coconut, cocoa, tomato, rowanberry, etc.\n"
-            "• **Nuts & Seeds**: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
-            "• **Vegetables & Legumes**: any edible veg, pulses, tubers, herbs (e.g. cauliflower, pea, sorghum, onion).\n\n"
+            "• **Fruits** – culinary fruits, berries, citrus, coconut, cocoa, rowanberry, tomato, etc.\n"
+            "• **Nuts & Seeds** – tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin, amaranth, etc.\n"
+            "• **Vegetables & Legumes** – horticultural veg, herbs, pulses (peas, beans, lentils), tubers.\n"
+            "  ⛔ **EXCLUDE** all cereal grains and pseudocereals (wheat, barley, rye, oats, corn/maize, rice, quinoa) and "
+            "their brans/flours from FNV.\n"
+            "  ⛔ Highly refined protein isolates (soya/pea) are NOT counted as FNV.\n\n"
     
             "–––––  SCORING LOGIC  –––––\n"
-            "1. **certain_fnv** = sum of all numeric percentage declarations that clearly map to FNV items.\n"
-            "   • e.g. \"Raspberries (50%)\" → +50.\n"
-            "   • If a grouped statement gives one % for multiple items (\"Fruit blend (70%)\"), allocate the full %.\n"
-            "2. **presumptive_fnv** covers any *additional* FNV content you reasonably infer when no % is stated.\n"
-            "   • Heuristics (apply cautiously):\n"
-            "     – First ingredient without a % often ≈ 50 % of recipe.\n"
-            "     – For snack chips/crisps, the named base (e.g. plantain) is usually ≥60 %.\n"
-            "     – Seasonings, extracts, powders rarely exceed 2 %.\n"
-            "   • If you cannot justify an estimate, use 0 and note uncertainty in debug_notes.\n"
+            "1. **certain_fnv** = sum of numeric percentages that clearly map to FNV items.\n"
+            "   • \"Raspberries (50%)\" → +50.\n"
+            "   • If a grouped statement gives one % for multiple FNV items (\"Fruit blend (70%)\"), allocate the full %.\n"
+            "2. **presumptive_fnv** covers additional FNV you infer when no % is provided.\n"
+            "   • Core heuristics (apply cautiously – override if the label contradicts):\n"
+            "     – If the first ingredient has no %, assume **40 %**.\n"
+            "     – If the second ingredient has no %, assume **25 %**.\n"
+            "     – Snack crisps/chips where the named base is a veg (e.g. plantain) → minimum **60 %** if no % given.\n"
+            "     – Beverage concentrates/juices after water → assume **10–20 %**; use 15 % unless another clue.\n"
+            "     – Seasonings, extracts, powders, colour concentrates → assume ≤2 % each unless a % is stated.\n"
+            "   • Never invent percentages for sub-ingredients labelled \"(100 % peanuts)\" – this refers to the "
+            "     sub-ingredient itself, not the recipe share. Use 0 certain and infer only if justified.\n"
             "3. Never let (certain_fnv + presumptive_fnv) exceed 100.\n\n"
     
             "–––––  OUTPUT GUIDELINES  –––––\n"
-            "• Populate **fnv_ingredients** with every ingredient that contributed to either score, in descending order.\n"
-            "• Keep **debug_notes** concise (≤20 words each). Examples:\n"
-            "  [\"plantain assumed 70% as first ingredient\", \"apple powder in 10% seasoning ≈1%\", \"no % given for veg mix\"]\n"
+            "• List every ingredient that contributed to either score in **fnv_ingredients**, descending by impact.\n"
+            "• Keep **debug_notes** concise (≤20 words each) **and show your arithmetic** when you combine numbers.\n"
+            "  Examples:\n"
+            "  [\"raspberries 50 % + lemon peel 4 % = 54\", \"plantain no %, assumed 60 % base\", "
+            "\"apple conc. after water → 15 %\"]\n"
             "• If ALL FNV percentages are explicit, set presumptive_fnv = 0.\n"
             "• If NO numeric % present, set certain_fnv = 0 and place total guess in presumptive_fnv.\n\n"
     
@@ -199,7 +207,7 @@ PROMPT_OPTIONS = {
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Estimates explicit vs. inferred Fruit/Nut/Vegetable percentages, returning JSON with debug notes."
+        "description": "Returns certain vs. inferred FNV %, excluding cereals & protein isolates, with arithmetic in debug notes."
     },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
