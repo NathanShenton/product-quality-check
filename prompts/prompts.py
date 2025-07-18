@@ -171,15 +171,16 @@ PROMPT_OPTIONS = {
             "    ### FNV vs EXCLUSIONS (memorise!)\n"
             "    Fruits: culinary fruits, berries, citrus, coconut, cocoa, tomato.\n"
             "    Nuts/Seeds: tree nuts, peanuts, sesame, chia, flax, sunflower, pumpkin.\n"
-            "    Veg & Legumes: horticultural veg, **tea leaves / chicory / herbs**, pulses, tubers.\n"
+            "    Veg & Legumes: horticultural veg, pulses, tubers, herbs.\n"
+            "        • Tea & herbal infusions count **only if the edible leaf/flower is consumed** (e.g. matcha powder, dried nettle in soup);\n"
+            "          exclude when merely steeped then discarded (typical tea-bag infusion).\n"
             "    EXCLUDE always: wheat, barley, rye, oats, corn/maize, rice, quinoa, spelt, sorghum, millet, teff; "
-            "any bran/flour; refined protein isolates; dairy; water; **oils or butters**; all additives.\n\n"
+            "any bran/flour; refined protein isolates; dairy; water; **oils or butters**; **spices/bark (cinnamon, nutmeg, etc.)**; all additives.\n\n"
     
-            "    ### RULE 1 – CERTAIN_FNV  (copy, then verify)\n"
-            "    • If the leading token before the bracket is an eligible FNV term, copy the printed % into certain_fnv.\n"
-            "      Example: “cinnamon (52 %)” → +52.\n"
-            "    • After copying, scan inside the brackets:\n"
-            "        – If it lists ONLY excluded items **and no other FNV** → delete that % and note: “❗ % removed (non-FNV blend)”.\n"
+            "    ### RULE 1 – CERTAIN_FNV  (collect, SUM, then verify)\n"
+            "    • Collect **ALL** printed percentages attached to eligible FNV ingredients and SUM them → certain_fnv.\n"
+            "      Example: “green tea (36%), peppermint (36%)” → +36 +36 (=72).\n"
+            "    • If a bracket lists ONLY excluded items **and no other FNV** → subtract that % and add note “❗ % removed (non-FNV blend)”.\n"
             "    • Never invent or apportion unseen percentages.\n\n"
     
             "    ### RULE 2 – PRESUMPTIVE_FNV  (runs only if certain_fnv is still 0)\n"
@@ -197,22 +198,24 @@ PROMPT_OPTIONS = {
             "    Round BOTH numbers **UP** to whole integers; ensure certain + presumptive ≤ 100.\n\n"
     
             "    ### RULE 5 – FINAL SELF-AUDIT (run AFTER rules 1-4)\n"
-            "    – Purge any EXCLUDE word (or token ending oil/butter/isolate) from fnv_ingredients and fix the maths.\n"
+            "    – Purge any EXCLUDE word (or token ending oil/butter/isolate/spice/bark) from fnv_ingredients and fix the maths.\n"
+            "    – Assert every ingredient remaining in fnv_ingredients contributed to certain_fnv or presumptive_fnv; if not, move it to EXCLUDE and explain.\n"
             "    – Re-run RULE 4.\n"
             "    – Ensure debug_notes match the final figures.\n\n"
     
             "    ### HARD TESTS (fail ⇒ fix and re-run audit)\n"
             "    1. certain_fnv > 0 ⇒ presumptive_fnv **MUST** be 0.\n"
             "    2. certain_fnv + presumptive_fnv ≤ 100 & both whole ints.\n"
-            "    3. No invented % values.\n"
-            "    4. Debug notes explain the final maths in ≤20 words each.\n\n"
+            "    3. certain_fnv equals the **sum** of declared % attached to items in fnv_ingredients.\n"
+            "    4. No invented % values.\n"
+            "    5. Debug notes explain the final maths in ≤20 words and reference any exclusions.\n\n"
     
             "    Respond **ONLY** with the JSON.\n\n"
             "    ### PRODUCT DATA\n"
             "    {{product_data}}\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Low-temp prompt (0.1) that copies printed % for single-token FNV items, discards dubious blends, and defaults to cautious presumptive caps (≤45 %) to reduce HFSS false-compliance risk."
+        "description": "Low-temp prompt (0.1) that sums all printed % for eligible FNV items, excludes spices/bark and non-consumed infusions, and keeps presumptive caps (≤45 %) to reduce HFSS false-compliance risk."
     },
     "INCOMPLETE: NPM & HFSS Classification": {
         "prompt": (
