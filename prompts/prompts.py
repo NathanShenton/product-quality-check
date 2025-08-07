@@ -474,7 +474,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Contextually flags non-compliant medicinal language in food and drink product copy, reducing false positives by focusing on explicit therapeutic claims."
     },
-    "COMPLETE: Image: Ingredient Scrape (HTML)": {
+    "Image: Ingredient Scrape (HTML)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a **regulatory-grade data-capture agent** for UK food labels.\n"
@@ -696,7 +696,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Audits `full_ingredients` for misspelled ingredient tokens and filters out marketing/descriptive residue, ignoring header or serving phrases."
 },
-    "COMPLETE: Image: Directions for Use": {
+    "Image: Directions for Use": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a product data capture assistant for UK food and supplement labels.\n"
@@ -712,7 +712,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "More flexible extraction of usage instructions from cropped label. Looks for any clearly implied direction, even without a heading."
     },
-    "INCOMPLETE: Image: Multi-Image Ingredient Extract & Compare": {
+    "Image: Multi-Image Ingredient Extract & Compare": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a high-accuracy image OCR assistant for UK food product packaging.\n\n"
@@ -768,7 +768,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o",
         "description": "UK-English grammar, spelling, punctuation, and case checker with readable summaries and debug trace."
     },
-    "COMPLETE: Image: Storage Instructions": {
+    "Image: Storage Instructions": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a product label transcription assistant. Your task is to extract the product's STORAGE instructions from the supplied UK food or supplement label image.\n\n"
@@ -852,7 +852,7 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4o-mini",
         "description": "Classifies the animal origin of gelatin using only explicit evidence from the ingredient statement or variant description."
     },
-    "COMPLETE: Image: Warnings and Advisory (JSON)": {
+    "Image: Warnings and Advisory (JSON)": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
             "You are a food safety and regulatory extraction assistant. You will identify and classify any relevant text from a UK product label image into the following categories:\n"
@@ -1336,3 +1336,4 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
