@@ -31,6 +31,79 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
+    "Daily Unit Dose Extractor": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant that determines the total number of solid dose units "
+            "(e.g., tablets, capsules, softgels, caplets, gummies, lozenges) to be taken per day for a product. "
+            "Base your answer only on the supplied product data and the decision rules below. Never hallucinate.\n\n"
+    
+            "GENERAL ANALYSIS INSTRUCTIONS (read carefully):\n"
+            "• Treat {{product_data}} as a dictionary that may contain fields such as sku_id, sku_name, quantity, "
+            "  description, directions, format, nutritionals, other_ingredients, warnings.\n"
+            "• Search ALL fields case-insensitively for dosage instructions; do not rely on just one field.\n"
+            "• Strip HTML/markup, normalise whitespace, and be case-insensitive.\n"
+            "• Directions field has the highest authority if it clearly specifies a daily dosage.\n"
+            "• If Directions is missing or unclear, use Description, then Nutritionals.\n"
+            "• Nutritionals often state serving sizes (e.g., 'Per 2 capsules') — treat this as serving size only "
+            "  unless it explicitly states 'per day' or 'daily'.\n"
+            "• If conflicting instructions are found, prefer Directions > Description > Nutritionals, but flag the conflict.\n"
+            "• Support both exact numbers and ranges (e.g., '1–3 daily'), and frequency phrases (e.g., 'two tablets twice daily').\n"
+            "• If range is given, return both min and max values.\n"
+            "• If dosage must be derived from frequency (e.g., 'two tablets twice daily' = 4 daily), set derived_from_frequency to true.\n"
+            "• If no daily dosage is found, return status = 'no_dosage_info'.\n"
+            "• If daily dosage is ambiguous or only serving size is known, return status = 'unclear' and set serving_size_only = true.\n"
+            "• Ignore marketing claims and unrelated text. Do not guess based on common usage norms.\n\n"
+    
+            "UNIT TYPE NORMALISATION:\n"
+            "• tablet, capsule, softgel, caplet, gummy, lozenge, powder_scoop, sachet, spray (puffs), drop (liquid drops)\n"
+            "• Always return singular form in unit_type.\n"
+            "• Normalise synonyms (e.g., 'soft gel' → 'softgel', 'caplets' → 'caplet').\n\n"
+    
+            "OUTPUT SCHEMA (return valid JSON only in exactly this shape):\n"
+            "{\n"
+            "  \"sku_id\": \"string\",\n"
+            "  \"unit_type\": \"tablet|capsule|softgel|caplet|gummy|lozenge|powder_scoop|sachet|spray|drop|null\",\n"
+            "  \"status\": \"ok|no_dosage_info|unclear\",\n"
+            "  \"daily_units\": null,\n"
+            "  \"daily_units_min\": null,\n"
+            "  \"daily_units_max\": null,\n"
+            "  \"derived_from_frequency\": false,\n"
+            "  \"sources\": {\n"
+            "    \"directions\": \"string or null\",\n"
+            "    \"description\": \"string or null\",\n"
+            "    \"nutritionals\": \"string or null\"\n"
+            "  },\n"
+            "  \"flags\": {\n"
+            "    \"has_conflict\": false,\n"
+            "    \"serving_size_only\": false\n"
+            "  },\n"
+            "  \"notes\": \"short human-readable rationale\"\n"
+            "}\n\n"
+    
+            "DECISION RULES (apply in order):\n"
+            "1. Parse Directions for explicit daily dosage. Examples:\n"
+            "   • 'Take 1 tablet per day' → daily_units = 1.\n"
+            "   • 'Take 1–3 capsules daily' → daily_units_min = 1, daily_units_max = 3.\n"
+            "   • 'Two tablets twice daily' → daily_units = 4, derived_from_frequency = true.\n"
+            "2. If Directions missing or unclear, search Description for dosage.\n"
+            "3. If still unclear, check Nutritionals for explicit daily or 'per day' phrases.\n"
+            "4. Treat 'Per X unit(s)' in Nutritionals without 'daily' as serving size only.\n"
+            "5. If sources disagree, set flags.has_conflict = true.\n"
+            "6. If only serving size found, set status = 'unclear' and flags.serving_size_only = true.\n"
+            "7. If nothing usable, status = 'no_dosage_info'.\n\n"
+    
+            "DEBUG & EDGE CASES:\n"
+            "• Support parsing numeric ranges (1–3, one to three).\n"
+            "• Support multiplication from frequency ('twice daily', 'x3 per day').\n"
+            "• Disregard dosage in unrelated contexts (e.g., ingredient amounts, nutrient amounts without daily reference).\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Extracts daily dosage count and unit type from multiple product data fields, resolving conflicts and flagging unclear or missing cases."
+    },
     "COMPLETE: Nutrient Data Only": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -1336,4 +1409,5 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
