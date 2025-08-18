@@ -70,15 +70,15 @@ PROMPT_OPTIONS = {
             "  \"daily_units_max\": null,\n"
             "  \"derived_from_frequency\": false,\n"
             "  \"sources\": {\n"
-            "    \"directions\": \"string or null\",\n"
-            "    \"description\": \"string or null\",\n"
-            "    \"nutritionals\": \"string or null\"\n"
+            "    \"directions\": \"string (<=120 chars) or null\",\n"
+            "    \"description\": \"string (<=120 chars) or null\",\n"
+            "    \"nutritionals\": \"string (<=120 chars) or null\"\n"
             "  },\n"
             "  \"flags\": {\n"
             "    \"has_conflict\": false,\n"
             "    \"serving_size_only\": false\n"
             "  },\n"
-            "  \"notes\": \"short human-readable rationale\"\n"
+            "  \"notes\": \"<=20 words concise rationale\"\n"
             "}\n\n"
     
             "DECISION RULES (apply in order):\n"
@@ -97,6 +97,15 @@ PROMPT_OPTIONS = {
             "• Support parsing numeric ranges (1–3, one to three).\n"
             "• Support multiplication from frequency ('twice daily', 'x3 per day').\n"
             "• Disregard dosage in unrelated contexts (e.g., ingredient amounts, nutrient amounts without daily reference).\n\n"
+    
+            "TOKEN & EVIDENCE CONTROL (strict):\n"
+            "• Never copy full field contents into sources.\n"
+            "• For each sources value, return ONLY the shortest exact clause or sentence that justifies the decision,\n"
+            "  trimmed to <=120 characters; include ellipses … if truncated.\n"
+            "• Prefer the clause containing 'daily', 'per day', or the frequency phrase (e.g., 'twice daily').\n"
+            "• If no qualifying evidence in a field, set that field to null.\n"
+            "• Output must be compact, single-line JSON with minimal whitespace (no pretty-print).\n"
+            "• Keep \"notes\" to <=20 words; do not restate long text.\n\n"
     
             "PRODUCT DATA:\n"
             "{{product_data}}\n"
@@ -1409,5 +1418,6 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
