@@ -115,6 +115,28 @@ def segment_ingredients(ingredients_text: str) -> List[str]:
     # strip empties and super-short tokens
     return [p.strip() for p in parts if p and len(p.strip()) >= 2]
 
+# Treat only real token hits (no 'tea' inside 'stearate')
+# Treat only real token hits (no 'tea' inside 'stearate')
+_WORD = r"[A-Za-z0-9]"
+
+def _whole_word_in_segment(variant_norm: str, seg: str) -> bool:
+    """
+    Return True if variant_norm appears as a real token (or token phrase) in seg.
+    – Multi-word phrases allow flexible whitespace.
+    – Word class excludes hyphen, so 'sodium-salt' still splits.
+    """
+    patt = re.escape(variant_norm).replace(r"\ ", r"\s+")
+    rx = re.compile(rf"(?<!{_WORD}){patt}(?!{_WORD})", re.I)
+    return rx.search(seg) is not None
+
+# 1) Exact (token-boundary) match by segment
+for seg in segments:
+    for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
+        # OPTIONAL: ignore ultra-short variants for exact too
+        if len(variant_norm) < 3:
+            continue
+        if _whole_word_in_segment(variant_norm, seg):
+            consider_hit(canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
 # --------------------------------------------------------------------------- #
 # 3) Core matcher
@@ -171,10 +193,10 @@ def find_banned_matches(
                 "matched_segment": seg,
             }
 
-    # 1) Exact substring by segment
+    # 1) Exact (token-boundary) match by segment
     for seg in segments:
         for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
-            if variant_norm in seg:
+            if _whole_word_in_segment(variant_norm, seg):
                 consider_hit(canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
     # 2) Fuzzy (only for canonicals not already exact-hit or to improve score)
@@ -211,10 +233,12 @@ def build_banned_prompt(
     ingredient_text: str,
 ) -> str:
     """
-    Build a strict, deterministic adjudication prompt for GPT. The model
-    must only judge the provided *candidates* and must output valid JSON.
+    Strict, deterministic adjudication prompt:
+    - Judge ONLY the provided CANDIDATES against the literal INGREDIENT_TEXT.
+    - Enforce token-boundary logic (no 'tea' inside 'stearate').
+    - Normalise E-numbers (E150d == e 150d == e-150d).
+    - Provide precise follow-up hints for Restricted items.
     """
-    # compress candidate list to essentials to keep token usage low
     compact = [
         {
             "canonical": c["canonical"],
@@ -229,8 +253,8 @@ def build_banned_prompt(
     ]
 
     schema = """
-You are a strict label compliance checker. Use ONLY the provided INGREDIENT_TEXT.
-Evaluate ONLY the substances in CANDIDATES. Return valid JSON matching:
+You are a strict label-compliance checker. Use ONLY the provided INGREDIENT_TEXT.
+Evaluate ONLY the substances in CANDIDATES. Return **valid JSON only**:
 
 {
   "items": [
@@ -239,11 +263,11 @@ Evaluate ONLY the substances in CANDIDATES. Return valid JSON matching:
       "e_number": "string",
       "type": "Banned" | "Restricted",
       "present": boolean,            // true only if the exact substance is clearly present
-      "matched_span": "string",      // copy exact substring from INGREDIENT_TEXT if present
-      "reason": "string",            // 1 short sentence explaining the decision
-      "confidence": 0.0-1.0,         // subjective, align with evidence strength
-      "needs_follow_up": boolean,    // for Restricted items with missing info (e.g., quantity or certification)
-      "follow_up": "string|null"     // e.g., "quantity per 100g", "certification evidence (RSPO)"
+      "matched_span": "string",      // exact substring copied from INGREDIENT_TEXT
+      "reason": "string",            // 1 short sentence for the decision
+      "confidence": 0.0-1.0,         // align with evidence strength
+      "needs_follow_up": boolean,    // for Restricted items missing required info
+      "follow_up": "string|null"     // e.g. "certification evidence (RSPO)"
     }
   ],
   "overall": {
@@ -252,11 +276,26 @@ Evaluate ONLY the substances in CANDIDATES. Return valid JSON matching:
   }
 }
 
-Rules:
-- Mark present=true only if a definitive name, synonym, or normalized E-number appears.
-- Be conservative: if ambiguous, present=false and confidence<=0.5 with a brief reason.
-- Do NOT invent substances not in CANDIDATES.
-- If type=="Restricted" and the text lacks required data (e.g., grams, certification), set needs_follow_up=true with a specific follow_up hint.
+DETECTION RULES (read carefully):
+• Token boundaries only. A candidate counts as present if its name/synonym appears as a real token/phrase.
+  – Do NOT match substrings inside longer words (e.g. "tea" inside "stearate" is NOT a match).
+  – Multi-word synonyms may have flexible whitespace (e.g. "palm  oil" still matches "palm oil").
+• E-number normalisation: "E150d", "e 150d", and "e-150d" are equivalent.
+• Mark present=true only with a definitive name/synonym or normalised E-number in INGREDIENT_TEXT.
+• Be conservative. If ambiguous, set present=false and confidence<=0.5 with a brief reason.
+• Do NOT invent substances not listed in CANDIDATES. Do NOT add extra items.
+
+FOLLOW-UP HINTS for Restricted items (set needs_follow_up=true when relevant):
+• Palm oil → "certification evidence (RSPO or equivalent)"
+• Soya / Soy → "certification evidence (RTRS or ProTerra)"
+• Cocoa → "certification evidence (Rainforest Alliance or Fairtrade)"
+• Tea → "certification evidence (Rainforest Alliance or Fairtrade)"
+(If none apply, leave follow_up = null.)
+
+OUTPUT RULES:
+• Copy matched_span verbatim from INGREDIENT_TEXT (preserve case/punctuation).
+• "overall.banned_present" is true iff any item with type=="Banned" has present=true (same for Restricted).
+• JSON only. No markdown, no commentary.
 """.strip()
 
     return (
@@ -264,3 +303,4 @@ Rules:
         f"CANDIDATES:\n{compact}\n\n"
         f"INGREDIENT_TEXT:\n{ingredient_text}"
     )
+
