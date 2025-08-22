@@ -12,6 +12,7 @@ from openai import OpenAI
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
+from bannedingredients import find_banned_matches, build_banned_prompt
 
 from prompts.prompts import PROMPT_OPTIONS
 from prompts.competitor_match import (
@@ -289,6 +290,14 @@ if prompt_choice == "Novel Food Checker (EU)":
         help="Lower = catch more variants (but watch for false positives)."
     )
 
+# Slider for the Banned/Restricted checker
+if prompt_choice == "Banned/Restricted Checker":
+    banned_fuzzy_threshold = st.slider(
+        "Banned/Restricted fuzzy threshold",
+        min_value=80, max_value=100, value=90,
+        help="Lower = catch more variants (but watch false positives)."
+    )
+
 # --- Determine if image-based (single-image cropping prompts only) ---
 single_image_prompts = {
     "Image: Ingredient Scrape (HTML)",
@@ -460,7 +469,8 @@ if uploaded_file and (
     prompt_choice in {
         "Novel Food Checker (EU)",
         "Competitor SKU Match",
-        "GHS Pictogram Detector"
+        "GHS Pictogram Detector",
+        "Banned/Restricted Checker"
     }
 ):
     df = pd.read_csv(uploaded_file, dtype=str)
@@ -493,6 +503,16 @@ if uploaded_file and (
             "Which column contains *your* product name / volume?",
             options=cols_to_use,            # user may pick only among those already passed to GPT
             help="e.g. 'Product_Name' or 'SKU Title'"
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    #  NEW: ask **only** for Banned/Restricted Checker
+    # ──────────────────────────────────────────────────────────────
+    if prompt_choice == "Banned/Restricted Checker":
+        banned_ing_col = st.selectbox(
+            "Which column contains the full ingredients text?",
+            options=cols_to_use,
+            help="Pick the column with the product’s ingredient statement."
         )
 
     # Display estimated cost (dark background card with white text)
@@ -823,6 +843,73 @@ if uploaded_file and (
                                 results.append({"error": f"Row {idx}: {e}"})
                             finally:
                                 continue  # skip the rest of the loop body
+
+                        # ------------------------------------------------------------------
+                        # 🚫  Banned/Restricted Checker
+                        # ------------------------------------------------------------------
+                        if prompt_choice == "Banned/Restricted Checker":
+                            try:
+                                ing_text = row_data.get(banned_ing_col, "")
+                                if not ing_text.strip():
+                                    results.append({
+                                        "overall": {"banned_present": False, "restricted_present": False},
+                                        "items": [],
+                                        "explanation": f"No ingredients in '{banned_ing_col}'",
+                                        "candidates_debug": []
+                                    })
+                                    continue
+                        
+                                # 1) Local fuzzy + exact screen
+                                cands = find_banned_matches(
+                                    ing_text,
+                                    threshold=banned_fuzzy_threshold,
+                                    return_details=True
+                                )
+                        
+                                if not cands:
+                                    results.append({
+                                        "overall": {"banned_present": False, "restricted_present": False},
+                                        "items": [],
+                                        "explanation": "No candidates found via substring/fuzzy screen.",
+                                        "candidates_debug": []
+                                    })
+                                    continue
+                        
+                                # 2) Build strict JSON system prompt for GPT adjudication
+                                system_txt = build_banned_prompt(cands, ing_text)
+                                user_txt   = ""
+                        
+                                # 3) GPT call (expects JSON)
+                                resp = client.chat.completions.create(
+                                    model=model_choice,  # default comes from PROMPT_OPTIONS; can override in UI
+                                    messages=[
+                                        {"role": "system", "content": system_txt},
+                                        {"role": "user",   "content": user_txt}
+                                    ],
+                                    temperature=temperature_val,
+                                    top_p=0
+                                )
+                                content = resp.choices[0].message.content.strip()
+
+                                # Parse JSON safely
+                                try:
+                                    parsed = json.loads(clean_gpt_json_block(content))
+                                except Exception as e:
+                                    parsed = {
+                                        "error": f"JSON parse failed: {e}",
+                                        "raw_output": content
+                                    }
+                        
+                                # Attach local-screening debug so you can tune the threshold & synonyms
+                                parsed["candidates_debug"] = cands
+                                results.append(parsed)
+                        
+                            except Exception as e:
+                                failed_rows.append(idx)
+                                results.append({"error": f"Row {idx} (Banned/Restricted): {e}"})
+                            finally:
+                                continue  # important: skip the rest of the loop for this row
+                        
                         if prompt_choice == "Novel Food Checker (EU)":
                             from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
 
