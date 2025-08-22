@@ -1,4 +1,4 @@
-# banned_matcher.py
+# prompts/banningredients.py
 from __future__ import annotations
 
 import re
@@ -9,31 +9,24 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 from rapidfuzz import fuzz
 
-# --------------------------------------------------------------------------- #
+__all__ = ["load_banned_index", "find_banned_matches", "build_banned_prompt"]
+
+# -----------------------------------------------------------------------------
 # 1) CSV → variant index (cached)
-#     Input CSV columns expected:
-#     Canonical,E-Number,Type,Synonym[,Notes]
-# --------------------------------------------------------------------------- #
+#    Expect columns: Canonical, E-Number, Type, Synonym[, Notes]
+# -----------------------------------------------------------------------------
 
 _BANNED_INDEX: Optional[Dict[str, Tuple[str, str, str, str]]] = None
 # maps normalized variant -> (canonical, e_number, type, variant_raw)
+
 
 def load_banned_index(
     path: str | Path = "data/banned_restricted_ingredients.csv",
 ) -> Dict[str, Tuple[str, str, str, str]]:
     """
-    Load a flattened synonyms CSV and build a normalized variant index.
-
-    CSV columns required:
-      - Canonical      (str)
-      - E-Number       (str or blank)
-      - Type           ("Banned"|"Restricted")
-      - Synonym        (str)
-    Optional:
-      - Notes          (ignored here)
-
-    Returns:
-      dict: { normalized_variant: (canonical, e_number, type, variant_raw) }
+    Load the synonyms CSV and build a normalized variant index:
+      { normalized_variant: (canonical, e_number, type, variant_raw) }
+    Required CSV columns: Canonical, E-Number, Type, Synonym
     """
     global _BANNED_INDEX
     if _BANNED_INDEX is not None:
@@ -48,20 +41,16 @@ def load_banned_index(
     index: Dict[str, Tuple[str, str, str, str]] = {}
     for _, row in df.iterrows():
         canonical = row["Canonical"].strip()
-        e_number  = row["E-Number"].strip()
-        ing_type  = row["Type"].strip()
-        synonym   = row["Synonym"].strip()
-        if not synonym:
-            # also index the canonical itself as a fallback
-            synonym = canonical
+        e_number = row["E-Number"].strip()
+        ing_type = row["Type"].strip()
+        synonym = (row["Synonym"] or canonical).strip()
 
         norm = normalize(synonym)
         if not norm:
             continue
-        # last one wins if duplicates normalize to same string (fine for us)
         index[norm] = (canonical, e_number, ing_type, synonym)
 
-        # Also index the canonical form directly (just in case it wasn’t listed)
+        # also index the canonical itself (if not already covered)
         can_norm = normalize(canonical)
         if can_norm and can_norm not in index:
             index[can_norm] = (canonical, e_number, ing_type, canonical)
@@ -70,22 +59,30 @@ def load_banned_index(
     return _BANNED_INDEX
 
 
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 # 2) Normalisation helpers
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 
 _WIN1252_FIXES = {
-    "â€˜": "'", "â€™": "'", "â€“": "-", "â€”": "-",
-    "â€œ": '"', "â€�": '"',
+    "â€˜": "'",
+    "â€™": "'",
+    "â€“": "-",
+    "â€”": "-",
+    "â€œ": '"',
+    "â€�": '"',
 }
+
+_WORD = r"[A-Za-z0-9]"  # custom "word" class that excludes hyphen
+
 
 def normalize(text: str) -> str:
     """
-    - Fix common mojibake (Windows-1252 artifacts)
-    - Unicode NFKD → ASCII
-    - Lowercase
-    - Collapse whitespace
-    - Canonicalize E-numbers: "E 171" / "e-171" / "E0171" → "e171"
+    • Fix common mojibake
+    • Unicode NFKD → ASCII
+    • Lowercase
+    • Collapse whitespace, unify dashes
+    • Canonicalize E-numbers:
+      E 150 d / e-150D / E0150 d  →  e150d
     """
     if text is None:
         return ""
@@ -96,51 +93,43 @@ def normalize(text: str) -> str:
     text = text.lower()
 
     # unify whitespace & hyphens
-    text = re.sub(r"[‐-‒–—]", "-", text)          # various dashes → hyphen
+    text = re.sub(r"[‐‒–—]", "-", text)  # various dashes → hyphen
     text = re.sub(r"\s+", " ", text).strip()
 
-    # E-number normalization: e 160e / e-160e / e0160e → e160e
-    text = re.sub(r"\be\s*0*([0-9]{2,3}[a-z]?)\b", r"e\1", text)
+    # robust E-number normalisation:
+    # capture "e" + 2-3 digits (allow leading zeros) + optional letter with optional space/hyphen
+    def _enorm_sub(m: re.Match) -> str:
+        digits = m.group(1).lstrip("0") or "0"
+        letter = (m.group(2) or "").strip().replace("-", "")
+        return f"e{digits}{letter}"
 
+    text = re.sub(r"\be\s*0*([0-9]{2,3})\s*[- ]?\s*([a-zA-Z]?)\b", _enorm_sub, text)
     return text
 
 
 def segment_ingredients(ingredients_text: str) -> List[str]:
     """
-    Split an ingredient statement into smaller segments for fuzzy comparison.
+    Split an ingredient statement into smaller, meaningful segments.
     """
     s = normalize(ingredients_text)
-    # split on common delimiters while keeping meaningful chunks
     parts = re.split(r"[;,/]| and |\(|\)", s)
-    # strip empties and super-short tokens
     return [p.strip() for p in parts if p and len(p.strip()) >= 2]
 
-# Treat only real token hits (no 'tea' inside 'stearate')
-# Treat only real token hits (no 'tea' inside 'stearate')
-_WORD = r"[A-Za-z0-9]"
 
 def _whole_word_in_segment(variant_norm: str, seg: str) -> bool:
     """
-    Return True if variant_norm appears as a real token (or token phrase) in seg.
-    – Multi-word phrases allow flexible whitespace.
-    – Word class excludes hyphen, so 'sodium-salt' still splits.
+    True if variant_norm appears as a real token/phrase in seg.
+    – Multi-word phrases: spaces are flexible (\s+)
+    – Excludes substrings inside longer tokens (e.g., 'tea' in 'stearate')
     """
     patt = re.escape(variant_norm).replace(r"\ ", r"\s+")
     rx = re.compile(rf"(?<!{_WORD}){patt}(?!{_WORD})", re.I)
     return rx.search(seg) is not None
 
-# 1) Exact (token-boundary) match by segment
-for seg in segments:
-    for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
-        # OPTIONAL: ignore ultra-short variants for exact too
-        if len(variant_norm) < 3:
-            continue
-        if _whole_word_in_segment(variant_norm, seg):
-            consider_hit(canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 # 3) Core matcher
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 
 def find_banned_matches(
     ingredient_text: str,
@@ -148,40 +137,36 @@ def find_banned_matches(
     return_details: bool = True,
 ) -> List[Dict]:
     """
-    Scan *ingredient_text* for banned/restricted ingredients using:
-      1) exact-substring checks on segments (auto 100 score), else
-      2) fuzzy comparison via token_set_ratio & partial_ratio.
+    Scan ingredient_text for banned/restricted ingredients using:
+      (1) exact token/phrase matches per segment (score=100), else
+      (2) fuzzy comparison via token_set_ratio / partial_ratio.
 
-    Returns a list of dicts (one per *canonical*) with best evidence:
-      {
-        "canonical": str,
-        "e_number": str,              # may be ""
-        "type": "Banned"|"Restricted",
-        "score": int,                 # 0..100
-        "source": "exact"|"fuzzy",
-        "variant": str,               # synonym that matched from the index
-        "matched_segment": str        # segment of the ingredient text
-      }
-
-    Notes:
-      - Deduplicates by canonical, keeping the highest score / strongest source.
-      - Lower the threshold (e.g. 88) if you want more aggressive recall.
+    Returns list of dicts (one per canonical) with the best evidence:
+    {
+      "canonical": str,
+      "e_number": str,
+      "type": "Banned"|"Restricted",
+      "score": int,                 # 0..100
+      "source": "exact"|"fuzzy",
+      "variant": str,               # the synonym that matched from the index
+      "matched_segment": str
+    }
     """
     segments = segment_ingredients(ingredient_text)
     if not segments:
         return []
 
     index = load_banned_index()
-    # For speed, we’ll iterate variants once and compare to segments
-    # Track best per canonical
     best_by_canonical: Dict[str, Dict] = {}
 
     def consider_hit(canonical, e_number, ing_type, variant, seg, score, source):
         prev = best_by_canonical.get(canonical)
-        # Prefer exact over fuzzy; then higher score
+        # prefer exact over fuzzy; then higher score
         key = (1 if source == "exact" else 0, score)
-        prev_key = (1 if prev and prev["source"] == "exact" else 0,
-                    prev["score"] if prev else -1)
+        prev_key = (
+            1 if prev and prev["source"] == "exact" else 0,
+            prev["score"] if prev else -1,
+        )
         if not prev or key > prev_key:
             best_by_canonical[canonical] = {
                 "canonical": canonical,
@@ -196,37 +181,37 @@ def find_banned_matches(
     # 1) Exact (token-boundary) match by segment
     for seg in segments:
         for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
+            # skip ultra-short variants (too noisy)
+            if len(variant_norm) < 3:
+                continue
             if _whole_word_in_segment(variant_norm, seg):
                 consider_hit(canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
-    # 2) Fuzzy (only for canonicals not already exact-hit or to improve score)
+    # 2) Fuzzy (only to add/upgrade non-exact matches)
     for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
-        # Skip tiny variants; they’re too noisy
         if len(variant_norm) < 4:
             continue
         best = 0
         best_seg = ""
         for seg in segments:
-            # compute two robust scorers
             s1 = fuzz.token_set_ratio(variant_norm, seg)
             s2 = fuzz.partial_ratio(variant_norm, seg)
             s = max(s1, s2)
             if s > best:
                 best, best_seg = s, seg
-                if best == 100:  # can’t do better
+                if best == 100:
                     break
         if best >= threshold:
             consider_hit(canonical, e_number, ing_type, variant_raw, best_seg, best, "fuzzy")
 
-    # return ordered by score desc, exact-first
     out = list(best_by_canonical.values())
     out.sort(key=lambda d: (1 if d["source"] == "exact" else 0, d["score"]), reverse=True)
     return out if return_details else [d["canonical"] for d in out]
 
 
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 # 4) Prompt builder for GPT adjudication (JSON-only)
-# --------------------------------------------------------------------------- #
+# -----------------------------------------------------------------------------
 
 def build_banned_prompt(
     candidates: List[Dict],
@@ -234,10 +219,10 @@ def build_banned_prompt(
 ) -> str:
     """
     Strict, deterministic adjudication prompt:
-    - Judge ONLY the provided CANDIDATES against the literal INGREDIENT_TEXT.
-    - Enforce token-boundary logic (no 'tea' inside 'stearate').
-    - Normalise E-numbers (E150d == e 150d == e-150d).
-    - Provide precise follow-up hints for Restricted items.
+      • Judge ONLY the provided CANDIDATES against the literal INGREDIENT_TEXT.
+      • Enforce token-boundary logic (no 'tea' inside 'stearate').
+      • Normalise E-numbers (E150d == e 150 d == e-150d).
+      • Provide precise follow-up hints for Restricted items.
     """
     compact = [
         {
@@ -278,9 +263,9 @@ Evaluate ONLY the substances in CANDIDATES. Return **valid JSON only**:
 
 DETECTION RULES (read carefully):
 • Token boundaries only. A candidate counts as present if its name/synonym appears as a real token/phrase.
-  – Do NOT match substrings inside longer words (e.g. "tea" inside "stearate" is NOT a match).
-  – Multi-word synonyms may have flexible whitespace (e.g. "palm  oil" still matches "palm oil").
-• E-number normalisation: "E150d", "e 150d", and "e-150d" are equivalent.
+  – Do NOT match substrings inside longer words (e.g., "tea" inside "stearate" is NOT a match).
+  – Multi-word synonyms may have flexible whitespace (e.g., "palm  oil" still matches "palm oil").
+• E-number normalisation: "E150d", "e 150 d", and "e-150d" are equivalent.
 • Mark present=true only with a definitive name/synonym or normalised E-number in INGREDIENT_TEXT.
 • Be conservative. If ambiguous, set present=false and confidence<=0.5 with a brief reason.
 • Do NOT invent substances not listed in CANDIDATES. Do NOT add extra items.
@@ -298,9 +283,4 @@ OUTPUT RULES:
 • JSON only. No markdown, no commentary.
 """.strip()
 
-    return (
-        f"{schema}\n\n"
-        f"CANDIDATES:\n{compact}\n\n"
-        f"INGREDIENT_TEXT:\n{ingredient_text}"
-    )
-
+    return f"{schema}\n\nCANDIDATES:\n{compact}\n\nINGREDIENT_TEXT:\n{ingredient_text}"
