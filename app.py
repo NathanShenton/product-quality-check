@@ -12,7 +12,7 @@ from openai import OpenAI
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
-from prompts.banningredients import find_banned_matches, build_banned_prompt
+from prompts.bannedingredients import find_banned_matches, build_banned_prompt
 
 from prompts.prompts import PROMPT_OPTIONS
 from prompts.competitor_match import (
