@@ -615,49 +615,48 @@ if uploaded_file and (
                 # -------------------------------------------------------------
                 # ✅ Progress + Gauge + Debug Log (runs after every row)
                 # -------------------------------------------------------------
+                # ✅ Progress + Gauge + Debug Log (runs every 5 rows and on the last row)
                 if (idx + 1) % 5 == 0 or (idx + 1) == n_rows:
-                progress_bar.progress(progress)
-                progress_text.markdown(
-                    f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
-                    unsafe_allow_html=True
-                )
-
-                # Rolling log (last 5 rows)
-                # Rolling log (last 5 rows only, inline display)
-                if "rolling_log_dicts" not in st.session_state:
-                    st.session_state.rolling_log_dicts = []
-                st.session_state.rolling_log_dicts.append(results[-1])
-                st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-5:]
+                    progress = (idx + 1) / n_rows
+                    progress_bar.progress(progress)
+                    progress_text.markdown(
+                        f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                        unsafe_allow_html=True
+                    )
                 
-                log_placeholder.empty()
-                log_placeholder.markdown(
-                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 5)</h4>",
-                    unsafe_allow_html=True
-                )
+                    # Rolling log (last 5 rows only, inline display)
+                    if "rolling_log_dicts" not in st.session_state:
+                        st.session_state.rolling_log_dicts = []
+                    st.session_state.rolling_log_dicts.append(results[-1])
+                    st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-5:]
                 
-                # Show last 5 rows inline
-                for entry in st.session_state.rolling_log_dicts:
-                    log_placeholder.json(entry)
+                    log_placeholder.empty()
+                    log_placeholder.markdown(
+                        "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 5)</h4>",
+                        unsafe_allow_html=True
+                    )
+                    for entry in st.session_state.rolling_log_dicts:
+                        log_placeholder.json(entry)
+                
+                    # Gauge indicator
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=progress * 100,
+                        number={'font': {'color': '#4A4443'}},
+                        title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                        gauge={
+                            'axis': {'range': [0, 100], 'tickcolor': '#4A4443'},
+                            'bar': {'color': "#C2EA46"},
+                            'bgcolor': "#E1FAD1",
+                            'borderwidth': 1,
+                            'steps': [
+                                {'range': [0, 50], 'color': "#E1FAD1"},
+                                {'range': [50, 100], 'color': "#F2FAF4"}
+                            ]
+                        }
+                    ))
+                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
-
-                # Gauge indicator
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=progress * 100,
-                    number={'font': {'color': '#4A4443'}},
-                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
-                    gauge={
-                        'axis': {'range': [0, 100], 'tickcolor': '#4A4443'},
-                        'bar': {'color': "#C2EA46"},
-                        'bgcolor': "#E1FAD1",
-                        'borderwidth': 1,
-                        'steps': [
-                            {'range': [0, 50], 'color': "#E1FAD1"},
-                            {'range': [50, 100], 'color': "#F2FAF4"}
-                        ]
-                    }
-                ))
-                gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
             # ---------- end for loop ----------
 
