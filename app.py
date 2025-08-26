@@ -1012,36 +1012,46 @@ if uploaded_file and (
                             user_txt = user_txt.strip().format(**row_data)
                             user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                        # GPT call remains unchanged
-                        response = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[
+                        def build_chat_args(model_choice, system_txt, user_txt):
+                            messages = [
                                 {"role": "system", "content": system_txt},
                                 {"role": "user",   "content": user_txt}
-                            ],
-                            temperature=temperature_val,
-                            top_p=0
-                        )
-                        content = response.choices[0].message.content.strip()
-
-                        if content.startswith("```"):
-                            parts = content.split("```", maxsplit=2)
-                            content = parts[1].lstrip("json").strip().split("```")[0].strip()
-
-                        parsed = json.loads(content)
-                        # attach debug scores to your parsed result if you like
-                        if prompt_choice == "Novel Food Checker (EU)":
-                            parsed["fuzzy_debug_matches"] = debug_scores
-
-                        results.append(parsed)
-
-                    except Exception as e:
-                        failed_rows.append(idx)
-                        error_result = {
-                            "error": f"Failed to process row {idx}: {e}",
-                            "raw_output": content if content else "No content returned"
-                        }
-                        results.append(error_result)
+                            ]
+                            args = {"model": model_choice, "messages": messages}
+                        
+                            if model_choice.startswith("gpt-5"):
+                                if temperature_val < 0.5:
+                                    messages[0]["content"] += "\n\nIMPORTANT: Output deterministically, avoid creativity."
+                                elif temperature_val > 0.5:
+                                    messages[0]["content"] += "\n\nIMPORTANT: Allow creativity and variation in responses."
+                            else:
+                                args["temperature"] = temperature_val
+                                args["top_p"] = 0
+                        
+                            return args
+                        
+                        try:
+                            resp = client.chat.completions.create(**build_chat_args(model_choice, system_txt, user_txt))
+                            content = resp.choices[0].message.content.strip()
+                        
+                            if content.startswith("```"):
+                                parts = content.split("```", maxsplit=2)
+                                content = parts[1].lstrip("json").strip().split("```")[0].strip()
+                        
+                            parsed = json.loads(content)
+                        
+                            if prompt_choice == "Novel Food Checker (EU)":
+                                parsed["fuzzy_debug_matches"] = debug_scores
+                        
+                            results.append(parsed)
+                        
+                        except Exception as e:
+                            failed_rows.append(idx)
+                            error_result = {
+                                "error": f"Failed to process row {idx}: {e}",
+                                "raw_output": content if content else "No content returned"
+                            }
+                            results.append(error_result)
 
 
 
