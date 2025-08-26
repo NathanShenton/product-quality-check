@@ -117,12 +117,15 @@ def _flatten(x):
 # Model Descriptions + UI   #
 #############################
 MODEL_OPTIONS = {
-    "gpt-3.5-turbo": "Cheapest, good for basic tasks with acceptable quality.",
-    "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
-    "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
-    "gpt-4o-mini":   "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o":        "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
-    "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases."
+    "gpt-3.5-turbo": "Cheapest option, good for lightweight tasks and simple text checks.",
+    "gpt-4.1-mini":  "Balanced cost and capability — reliable for most language and data-processing tasks.",
+    "gpt-4.1-nano":  "Ultra-cheap and very fast — best for trivial checks or bulk lightweight processing.",
+    "gpt-4o-mini":   "Affordable, higher quality than 4.1-mini, suitable for structured audits at scale.",
+    "gpt-4o":        "Multimodal GPT-4 (text + images). Fast and accurate for complex text/image tasks.",
+    "gpt-4-turbo":   "Advanced GPT-4 variant — powerful and more expensive. Best for high-value, complex use cases.",
+    "gpt-5":         "Most advanced, highest reasoning power. Use for nuanced compliance or mission-critical tasks.",
+    "gpt-5-mini":    "Great balance of cost and intelligence — strong reasoning at competitive pricing. Ideal for structured audits like allergen checks.",
+    "gpt-5-nano":    "Cheapest GPT-5 tier — ultra-fast and low cost. Best for simple classification or first-pass filtering."
 }
 
 # ---- Main Page Layout ----
