@@ -944,6 +944,26 @@ if uploaded_file and (
                             ))
                             gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
+                            # ✅ Live debug log output
+                            if "rolling_log_dicts" not in st.session_state:
+                                st.session_state.rolling_log_dicts = []
+                            st.session_state.rolling_log_dicts.append(results[-1])
+                            st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
+                            
+                            log_placeholder.empty()
+                            log_placeholder.markdown(
+                                "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
+                                unsafe_allow_html=True
+                            )
+                            num_always_show = 3
+                            always_show = st.session_state.rolling_log_dicts[-num_always_show:]
+                            for entry in always_show:
+                                log_placeholder.json(entry)
+                            for i, entry in enumerate(st.session_state.rolling_log_dicts):
+                                row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
+                                with log_placeholder.expander(f"Row {row_num} output", expanded=True):
+                                    st.json(entry)
+
                             continue  # ⛔ still skip the rest of the loop body
                         
                         if prompt_choice == "Novel Food Checker (EU)":
