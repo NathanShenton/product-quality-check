@@ -615,34 +615,30 @@ if uploaded_file and (
                 # -------------------------------------------------------------
                 # ✅ Progress + Gauge + Debug Log (runs after every row)
                 # -------------------------------------------------------------
-                progress = (idx + 1) / n_rows
+                if (idx + 1) % 5 == 0 or (idx + 1) == n_rows:
                 progress_bar.progress(progress)
                 progress_text.markdown(
                     f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                     unsafe_allow_html=True
                 )
 
-                # Rolling log (last 20 rows)
+                # Rolling log (last 5 rows)
+                # Rolling log (last 5 rows only, inline display)
                 if "rolling_log_dicts" not in st.session_state:
                     st.session_state.rolling_log_dicts = []
                 st.session_state.rolling_log_dicts.append(results[-1])
-                st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
-
+                st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-5:]
+                
                 log_placeholder.empty()
                 log_placeholder.markdown(
-                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
+                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 5)</h4>",
                     unsafe_allow_html=True
                 )
-
-                # Show last 3 always
-                for entry in st.session_state.rolling_log_dicts[-3:]:
+                
+                # Show last 5 rows inline
+                for entry in st.session_state.rolling_log_dicts:
                     log_placeholder.json(entry)
 
-                # Expanders for earlier rows
-                for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
-                    row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
-                    with log_placeholder.expander(f"Row {row_num} output", expanded=False):
-                        st.json(entry)
 
                 # Gauge indicator
                 fig = go.Figure(go.Indicator(
