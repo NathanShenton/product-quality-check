@@ -56,7 +56,10 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         "gpt-4.1-nano":  (0.0001, 0.0004),
         "gpt-4o-mini":   (0.00015, 0.0006),
         "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
-        "gpt-4-turbo":   (0.01,   0.03)
+        "gpt-4-turbo":   (0.01,   0.03),
+        "gpt-5":         (0.00125, 0.01),
+        "gpt-5-mini":    (0.00025, 0.002),
+        "gpt-5-nano":    (0.00005, 0.0004)
     }
 
     # Default fallback costs
@@ -857,58 +860,88 @@ if uploaded_file and (
                                         "explanation": f"No ingredients in '{banned_ing_col}'",
                                         "candidates_debug": []
                                     })
-                                    continue
-                        
-                                # 1) Local fuzzy + exact screen
-                                cands = find_banned_matches(
-                                    ing_text,
-                                    threshold=banned_fuzzy_threshold,
-                                    return_details=True
-                                )
-                        
-                                if not cands:
-                                    results.append({
-                                        "overall": {"banned_present": False, "restricted_present": False},
-                                        "items": [],
-                                        "explanation": "No candidates found via substring/fuzzy screen.",
-                                        "candidates_debug": []
-                                    })
-                                    continue
-                        
-                                # 2) Build strict JSON system prompt for GPT adjudication
-                                system_txt = build_banned_prompt(cands, ing_text)
-                                user_txt   = ""
-                        
-                                # 3) GPT call (expects JSON)
-                                resp = client.chat.completions.create(
-                                    model=model_choice,  # default comes from PROMPT_OPTIONS; can override in UI
-                                    messages=[
-                                        {"role": "system", "content": system_txt},
-                                        {"role": "user",   "content": user_txt}
-                                    ],
-                                    temperature=temperature_val,
-                                    top_p=0
-                                )
-                                content = resp.choices[0].message.content.strip()
+                                else:
+                                    # 1) Local fuzzy + exact screen
+                                    cands = find_banned_matches(
+                                        ing_text,
+                                        threshold=banned_fuzzy_threshold,
+                                        return_details=True
+                                    )
+                            
+                                    if not cands:
+                                        results.append({
+                                            "overall": {"banned_present": False, "restricted_present": False},
+                                            "items": [],
+                                            "explanation": "No candidates found via substring/fuzzy screen.",
+                                            "candidates_debug": []
+                                        })
+                                    else:
+                                        # 2) Build strict JSON system prompt for GPT adjudication
+                                        system_txt = build_banned_prompt(cands, ing_text)
+                                        user_txt   = ""
+                                
+                                        # 3) GPT call (expects JSON)
+                                        resp = client.chat.completions.create(
+                                            model=model_choice,  # default comes from PROMPT_OPTIONS; can override in UI
+                                            messages=[
+                                                {"role": "system", "content": system_txt},
+                                                {"role": "user",   "content": user_txt}
+                                            ],
+                                            temperature=temperature_val,
+                                            top_p=0
+                                        )
+                                        content = resp.choices[0].message.content.strip()
 
-                                # Parse JSON safely
-                                try:
-                                    parsed = json.loads(clean_gpt_json_block(content))
-                                except Exception as e:
-                                    parsed = {
-                                        "error": f"JSON parse failed: {e}",
-                                        "raw_output": content
-                                    }
-                        
-                                # Attach local-screening debug so you can tune the threshold & synonyms
-                                parsed["candidates_debug"] = cands
-                                results.append(parsed)
-                        
+                                        # Parse JSON safely
+                                        try:
+                                            parsed = json.loads(clean_gpt_json_block(content))
+                                        except Exception as e:
+                                            parsed = {
+                                                "error": f"JSON parse failed: {e}",
+                                                "raw_output": content
+                                            }
+                                
+                                        # Attach local-screening debug so you can tune the threshold & synonyms
+                                        parsed["candidates_debug"] = cands
+                                        results.append(parsed)
+                            
                             except Exception as e:
                                 failed_rows.append(idx)
                                 results.append({"error": f"Row {idx} (Banned/Restricted): {e}"})
-                            finally:
-                                continue  # important: skip the rest of the loop for this row
+
+                            # ✅ Progress + Gauge update
+                            progress = (idx + 1) / n_rows
+                            progress_bar.progress(progress)
+                            progress_text.markdown(
+                                f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                                unsafe_allow_html=True
+                            )
+                            fig = go.Figure(go.Indicator(
+                                mode="gauge+number",
+                                value=progress * 100,
+                                number={'font': {'color': '#4A4443'}},
+                                title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                                gauge={
+                                    'axis': {
+                                        'range': [0, 100],
+                                        'tickcolor': '#4A4443',
+                                        'tickfont': {'color': '#4A4443'},
+                                        'tickwidth': 2,
+                                        'ticklen': 8
+                                    },
+                                    'bar': {'color': "#C2EA46"},
+                                    'bgcolor': "#E1FAD1",
+                                    'borderwidth': 1,
+                                    'steps': [
+                                        {'range': [0, 50], 'color': "#E1FAD1"},
+                                        {'range': [50, 100], 'color': "#F2FAF4"}
+                                    ]
+                                },
+                                domain={'x': [0, 1], 'y': [0, 1]}
+                            ))
+                            gauge_placeholder.plotly_chart(fig, use_container_width=True)
+
+                            continue  # ⛔ still skip the rest of the loop body
                         
                         if prompt_choice == "Novel Food Checker (EU)":
                             from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
