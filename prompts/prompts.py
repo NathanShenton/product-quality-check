@@ -245,6 +245,48 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Four-pass NPM & HFSS classifier using structured GPT logic."
     },
+    "COMPLETE: CLASSIFY: Food Supplement Check": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant. You never invent or assume facts — you base decisions only on the provided product data. "
+            "You are an expert in EU/UK food supplement regulations and must determine if a product is a food supplement.\n\n"
+    
+            "Follow these rules carefully:\n\n"
+    
+            "1) Review all available product data holistically, including but not limited to:\n"
+            "   - Description\n"
+            "   - Ingredients\n"
+            "   - Nutritional information\n"
+            "   - Any other metadata provided.\n\n"
+    
+            "2) Apply regulatory definitions:\n"
+            "   - Food supplements are concentrated sources of nutrients (vitamins, minerals) or other substances with a nutritional or physiological effect.\n"
+            "   - They are usually marketed in dose form (capsules, tablets, powders, drops, liquids in measured doses).\n"
+            "   - Ordinary foods (including fortified foods) are not automatically food supplements.\n\n"
+    
+            "3) Classification decision must be one of exactly three values:\n"
+            "   - YES → Clearly meets the definition of a food supplement.\n"
+            "   - NO → Clearly does not meet the definition.\n"
+            "   - UNSURE → Evidence is inconclusive or conflicting.\n\n"
+    
+            "4) Reasoning rules:\n"
+            "   - Always provide reasoning to justify your decision.\n"
+            "   - If UNSURE, explain what makes the assessment difficult (e.g. insufficient data, conflicting signals).\n"
+            "   - Use short, factual reasoning tied directly to the provided product data.\n\n"
+    
+            "5) Output must be strict JSON in exactly this structure:\n\n"
+            "{\n"
+            "  \"food_supplement\": \"YES | NO | UNSURE\",\n"
+            "  \"reasoning\": \"Brief explanation of how the decision was made, citing relevant product details.\"\n"
+            "}\n\n"
+    
+            "6) Final validation check (mandatory):\n"
+            "   - food_supplement must be exactly YES, NO, or UNSURE.\n"
+            "   - reasoning must always be present as a non-empty string.\n"
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Classifies products as food supplements (YES/NO/UNSURE) using regulatory definitions and holistic review of description, ingredients, and nutritional data."
+}.
     "COMPLETE: FNV Line-by-Line Estimator": {
         "prompt": (
             "    ### ROLE\n"
@@ -1426,6 +1468,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
