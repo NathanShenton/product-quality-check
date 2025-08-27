@@ -286,7 +286,7 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Classifies products as food supplements (YES/NO/UNSURE) using regulatory definitions and holistic review of description, ingredients, and nutritional data."
-}.
+},
     "COMPLETE: FNV Line-by-Line Estimator": {
         "prompt": (
             "    ### ROLE\n"
@@ -1468,6 +1468,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
