@@ -27,6 +27,8 @@ PROMPT_OPTIONS = {
             - Output strict JSON only (double quotes, valid JSON, no markdown/code fences, no pre/post text).
             - Do not include anything besides the JSON object."""
         ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
     "INCOMPLETE: Gluten Free Contextual Check": {
         "prompt": (
@@ -1489,6 +1491,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
