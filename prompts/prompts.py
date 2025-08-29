@@ -41,6 +41,45 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-4.1-mini",
         "description": "Check if products are food supplement."
     },
+    "INCOMPLETE: NRV Check": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant focused on UK/EU labelling (NRV per Regulation (EU) No 1169/2011). 
+            
+            Task:
+            Given product data for an item that has ALREADY been classified as a food supplement, determine whether the label provides NRV (or equivalent) percentages for vitamins/minerals. Consider fields such as Title/Name, Ingredients, Nutritional Info (tables or JSON), Directions/Usage, Claims, Label copy, and Metadata. Use supplied evidence only.
+            
+            Detection rules (strict):
+            1) Positive NRV indicators (count as present):
+               • Any vitamins/minerals shown with a percentage, e.g. “Vitamin C 80 mg (100% NRV)”.
+               • Synonyms/variants: “% NRV”, “NRV%”, “of NRV”, “Nutrient Reference Value”, “% RI”, “Reference Intake”, legacy “% RDA”.
+               • Accept US-style ‘% Daily Value’/‘% DV’ ONLY if clearly tied to a vitamin/mineral (still mark present; note it’s non-EU phrasing).
+            
+            2) Link the percentage to a micronutrient:
+               • Count only if the % is associated with a known vitamin/mineral (A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12; Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride).
+               • If % appears but ONLY for macronutrients/energy (Energy, Fat, Saturates, Carbohydrate, Sugars, Fibre, Protein, Salt/Sodium, Polyols, Cholesterol), DO NOT count as NRV present.
+            
+            3) Evidence formats:
+               • If ‘Nutritional Info’ is a JSON array of key/value pairs, parse it first.
+               • Otherwise scan free text. Regex hint (don’t output): 
+                 - percentage:  (?i)\b\d+(?:\.\d+)?\s*%\s*(?:NRV|RI|RDA|DV|daily\s*value)?\b
+                 - micronutrient names: list above (match name near the percentage).
+            
+            4) Ambiguity:
+               • If micronutrients are listed with amounts (mg/µg) but no %NRV/RI/DV appears anywhere, return “No”.
+               • If only macros show %RI, return “No”.
+            
+            Output (strict JSON only):
+            {
+              "has_nrv": "Yes" or "No",
+              "evidence": ["Up to 5 short snippets showing micronutrient + % (if any)"],
+              "reasoning": "≤20 words explaining why NRV is present or absent."
+            }
+            No extra keys, no markdown/code fences, no surrounding text."
+        ),
+        "recommended_model": "gpt-4.1-mini",
+        "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
+    },
     "INCOMPLETE: Gluten Free Contextual Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -1502,6 +1541,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
