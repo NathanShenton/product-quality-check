@@ -9,32 +9,34 @@ PROMPT_OPTIONS = {
     },
     "INCOMPLETE: Food supplement": {
         "prompt": (
-            "SYSTEM MESSAGE:\n" 
-            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
-
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
+            
             Task:
             Review all available product data and decide if the item is a food supplement. Consider any fields provided (e.g., Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
             
-            Decision logic (conservative, but practical):
-            A) LABEL/DOSE-FORM GATE — Output "Yes" ONLY if at least one of the following is present:
-               • Explicit label text: "food supplement" / "dietary supplement"; OR
-               • Pre-portioned dose form: capsules, tablets, pills, gummies, sprays/droppers (with per-drop counts), ampoules, OR single-use sachets/sticks.
-               ⇢ Note: A bulk powder or liquid taken with a household scoop/measure (e.g., “mix 1 scoop…”, pack size in grams with multiple servings) is NOT a dose form.
+            Decision logic (strict, conservative):
             
-            B) Conventional food pattern — If Ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein) AND Nutritional Info is a standard per-100 g panel, AND Directions include mix/shake/prepare with water/milk, classify "No" unless the LABEL/DOSE-FORM GATE in (A) is satisfied.
+            A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if:
+               • Explicit label text includes 'food supplement' / 'dietary supplement'; OR
+               • Presentation is in classic supplement dose form: capsules, tablets, pills, softgels, lozenges, gummies, sprays/droppers with per-drop counts, ampoules, or single-use sachets/sticks.
+               ⇢ Explicitly EXCLUDE: bars, ready-to-drink bottles, bulk powders, tubs/jars with scoops, pouches with multiple servings, or general foods with nutrition panels. These are NOT dose forms.
             
-            C) Non-deterministic signals — The presence of added actives (e.g., carnitine, green tea extract, CLA, probiotics, BCAA totals) or %NRV alone does NOT override (A). Treat these as supportive only.
+            B) Conventional food pattern — If Ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein, sweeteners, chocolate, oils, flour) AND Nutritional Info is in per-100 g format AND Presentation is a bar, shake, drink, or meal-type serving, classify 'No' unless (A) is satisfied.
             
-            D) Medicines/cosmetics — If disease-treatment claims or topical use are indicated, classify "No".
+            C) Added actives — The presence of creatine, carnitine, CLA, green tea, probiotics, BCAA totals, or %NRV vitamins/minerals does NOT override (A). These alone do not make a food into a supplement.
             
-            E) Conflicts/ambiguity — When signals are mixed or weak and (A) is not met, default to "No" and note the limitation briefly.
+            D) Medicines/cosmetics — If disease-treatment claims or topical use are indicated, classify 'No'.
+            
+            E) Ambiguity — If signals are mixed but (A) is not met, default to 'No' and explain briefly.
             
             Output (strict JSON only):
             {
               "food_supplement": "Yes" or "No",
-              "reasoning": "≤20 words; one sentence citing the fields (e.g., Ingredients, Nutritional Info, Directions, Presentation) and the decisive cues."
+              "reasoning": "≤20 words; one sentence citing the decisive cues (e.g., 'Bar format with nutrition panel; no supplement label text')."
             }
-            No extra keys, no markdown/code fences, no surrounding text."""
+            No extra keys, no markdown/code fences, no surrounding text."
+
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Check if products are food supplement."
@@ -1500,6 +1502,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
