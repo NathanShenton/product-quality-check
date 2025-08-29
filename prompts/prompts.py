@@ -10,24 +10,24 @@ PROMPT_OPTIONS = {
     "INCOMPLETE: Food supplement": {
         "prompt": (
             "SYSTEM MESSAGE:\n" 
-            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs). Review ONLY these fields: Description, Ingredients, Nutritional Info.
-
-            Decision logic (strict, conservative):
-            1) HARD GATE — Dose form required: Classify "Yes" ONLY if the product is presented in dose form (e.g., capsules, tablets, pills, gummies, sachets of powder, ampoules, drops, or other liquids/powders designed to be taken in measured small unit quantities). If no explicit dose-form cues appear in the provided fields, output "No".
-            2) Macronutrient-dominant foods: If Ingredients are primarily protein/carbohydrate/fat and Nutritional Info is shown per 100 g with typical food panels, default to "No" unless the text explicitly states it is a "food supplement" AND shows dose-form presentation.
-            3) Non-deterministic signals: The presence of vitamins/minerals (%NRV) or other substances (e.g., probiotics) is supportive but not sufficient without dose form.
-            4) Do not infer from missing data; decide only from the supplied fields.
+            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
+            Task:
+            Review all available product data and decide if the item is a food supplement. Consider any fields provided (e.g., Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
             
-            Output JSON only, exactly:
+            Decision logic (conservative):
+            - Output "Yes" only when evidence shows a concentrated source of nutrients/other substances with a nutritional/physiological effect, presented in dose form (e.g., capsules, tablets, pills, gummies, drops/sprays, ampoules, sticks/sachets, or liquids/powders in measured small-unit portions) and intended to supplement the normal diet. Strong signals include explicit "food supplement"/"dietary supplement" wording; per-portion actives with units (mg/µg/IU/CFU) and/or %NRV; usage directions ("take 1 daily"); typical advisories ("do not exceed the stated dose").
+            - Output "No" when presented as a conventional food/beverage (e.g., bulk tubs/pouches with standard per-100 g panels and no dose-form cues), a cosmetic/topical, or a medicine/medical device (disease-treatment claims/licensing cues).
+            - When signals are limited or mixed, default to "No" unless clear dose-form cues or explicit "food supplement" labeling are present. Decide strictly from the supplied text.
+            
+            Output (strict JSON only):
             {
               "food_supplement": "Yes" or "No",
-              "reasoning": "1–3 concise sentences referencing which of Description, Ingredients, and/or Nutritional Info triggered the decision."
+              "reasoning": "<=25 words. One sentence, citing the fields used (e.g., Description, Ingredients, Nutritional Info, Directions, Claims, Presentation) and the decisive cues."
             }
-            No extra keys, no markdown, no surrounding text."""
-
+            No extra keys, no markdown/code fences, no surrounding text."""
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
+        "description": "Check if products are food supplement."
     },
     "INCOMPLETE: Gluten Free Contextual Check": {
         "prompt": (
@@ -1490,6 +1490,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
