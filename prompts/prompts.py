@@ -11,18 +11,28 @@ PROMPT_OPTIONS = {
         "prompt": (
             "SYSTEM MESSAGE:\n" 
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
+
             Task:
             Review all available product data and decide if the item is a food supplement. Consider any fields provided (e.g., Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
             
-            Decision logic (conservative):
-            - Output "Yes" only when evidence shows a concentrated source of nutrients/other substances with a nutritional/physiological effect, presented in dose form (e.g., capsules, tablets, pills, gummies, drops/sprays, ampoules, sticks/sachets, or liquids/powders in measured small-unit portions) and intended to supplement the normal diet. Strong signals include explicit "food supplement"/"dietary supplement" wording; per-portion actives with units (mg/µg/IU/CFU) and/or %NRV; usage directions ("take 1 daily"); typical advisories ("do not exceed the stated dose").
-            - Output "No" when presented as a conventional food/beverage (e.g., bulk tubs/pouches with standard per-100 g panels and no dose-form cues), a cosmetic/topical, or a medicine/medical device (disease-treatment claims/licensing cues).
-            - When signals are limited or mixed, default to "No" unless clear dose-form cues or explicit "food supplement" labeling are present. Decide strictly from the supplied text.
+            Decision logic (conservative, but practical):
+            A) LABEL/DOSE-FORM GATE — Output "Yes" ONLY if at least one of the following is present:
+               • Explicit label text: "food supplement" / "dietary supplement"; OR
+               • Pre-portioned dose form: capsules, tablets, pills, gummies, sprays/droppers (with per-drop counts), ampoules, OR single-use sachets/sticks.
+               ⇢ Note: A bulk powder or liquid taken with a household scoop/measure (e.g., “mix 1 scoop…”, pack size in grams with multiple servings) is NOT a dose form.
+            
+            B) Conventional food pattern — If Ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein) AND Nutritional Info is a standard per-100 g panel, AND Directions include mix/shake/prepare with water/milk, classify "No" unless the LABEL/DOSE-FORM GATE in (A) is satisfied.
+            
+            C) Non-deterministic signals — The presence of added actives (e.g., carnitine, green tea extract, CLA, probiotics, BCAA totals) or %NRV alone does NOT override (A). Treat these as supportive only.
+            
+            D) Medicines/cosmetics — If disease-treatment claims or topical use are indicated, classify "No".
+            
+            E) Conflicts/ambiguity — When signals are mixed or weak and (A) is not met, default to "No" and note the limitation briefly.
             
             Output (strict JSON only):
             {
               "food_supplement": "Yes" or "No",
-              "reasoning": "<=25 words. One sentence, citing the fields used (e.g., Description, Ingredients, Nutritional Info, Directions, Claims, Presentation) and the decisive cues."
+              "reasoning": "≤20 words; one sentence citing the fields (e.g., Ingredients, Nutritional Info, Directions, Presentation) and the decisive cues."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
         ),
@@ -1490,6 +1500,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
