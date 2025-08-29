@@ -10,7 +10,7 @@ PROMPT_OPTIONS = {
     "INCOMPLETE: Food supplement": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
+            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
             Task:
             Review all available product data and decide if the item is a food supplement. Consider any fields provided (e.g., Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
@@ -35,7 +35,7 @@ PROMPT_OPTIONS = {
               "food_supplement": "Yes" or "No",
               "reasoning": "≤20 words; one sentence citing the decisive cues (e.g., 'Bar format with nutrition panel; no supplement label text')."
             }
-            No extra keys, no markdown/code fences, no surrounding text."
+            No extra keys, no markdown/code fences, no surrounding text."""
 
         ),
         "recommended_model": "gpt-4.1-mini",
@@ -1502,6 +1502,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
