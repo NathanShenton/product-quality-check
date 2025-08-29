@@ -1475,42 +1475,43 @@ PROMPT_OPTIONS = {
             "- Optional: debug=true (if present, include the optional debug object below)\n\n"
     
             "SERVING SIZE (deterministic):\n"
-            "A) If nutritionals explicitly specify a serving (e.g., 'Per Serving (9g)', 'Per Sachet 12.5 g', '1 Stick (7 g)') → serving_size_g = that number.\n"
-            "B) Else if quantity indicates dose-form per-unit mass (sachet/stick/shot/capsule/tablet/lozenge), e.g., 'N x Y g' → serving_size_g = Y.\n"
-            "C) Else if two unlabeled columns exist and pack/per-unit < 100 g → treat the LOWER column as per serving; serving_size_g = per-unit mass if known, else pack mass if single-serve.\n"
-            "D) Else (no reliable inference) → serving_size_g = null and return: exceeds=false, flags=[].\n\n"
+            "A) If nutritionals explicitly specify a serving (e.g., 'Per Serving (9g)', 'Per Sachet 12.5 g', '1 Stick (7 g)') -> serving_size_g = that number.\n"
+            "B) Else if quantity indicates dose-form per-unit mass (sachet/stick/shot/capsule/tablet/lozenge), e.g., 'N x Y g' -> serving_size_g = Y.\n"
+            "C) Else if two unlabeled columns exist and pack/per-unit < 100 g -> treat the LOWER column as per serving; serving_size_g = per-unit mass if known, else pack mass if single-serve.\n"
+            "D) Else (no reliable inference) -> serving_size_g = null and return: exceeds=false, flags=[].\n\n"
     
             "PARSE NUTRIENTS (mass only):\n"
-            "- Extract tokens with a numeric amount. Units: g, mg, µg, mcg, kg. Also accept malformed micro symbols like 'Âµg'. Convert all to grams.\n"
+            "- Extract tokens with a numeric amount. Units: g, mg, ug, mcg, kg. Convert all to grams.\n"
+            "- Also recognize malformed 'ug' that may appear instead of 'mcg/µg'.\n"
             "- If unit is missing for obvious powders/macros, assume grams.\n"
             "- Ignore kcal/kJ and %NRV.\n"
             "- Assign a scope for each token:\n"
-            "  • scope='per_serving' if clearly in a per-serving list/column.\n"
-            "  • scope='per_100g' if clearly from a per 100 g/ml column.\n"
-            "  • scope='derived' if the token includes 'yielding', 'providing', or 'of which active'.\n"
-            "  • scope='unknown' if scope cannot be determined.\n\n"
+            "  - scope='per_serving' if clearly in a per-serving list/column.\n"
+            "  - scope='per_100g' if clearly from a per 100 g/ml column.\n"
+            "  - scope='derived' if the token includes 'yielding', 'providing', or 'of which active'.\n"
+            "  - scope='unknown' if scope cannot be determined.\n\n"
     
-            "COMPARISON RULES (STRICT & EXCLUSIVE):\n"
+            "COMPARISON RULES (STRICT AND EXCLUSIVE):\n"
             "- Only tokens with scope='per_serving' are eligible for flags.\n"
             "- Compute difference_g = amount_g - serving_size_g and ratio_vs_serving = amount_g / serving_size_g.\n"
             "- CREATE A FLAG ONLY IF difference_g > 1e-6 (strictly greater). Otherwise DO NOT flag.\n"
             "- NEVER flag tokens with scope in {'per_100g','derived','unknown'}.\n"
             "- suggested_fix:\n"
-            "  • if ratio_vs_serving > 5000 → 'unit_maybe_ug'\n"
-            "  • else if ratio_vs_serving > 5 → 'unit_maybe_mg'\n"
-            "  • else 'none'.\n"
+            "  - if ratio_vs_serving > 5000 -> 'unit_maybe_ug'\n"
+            "  - else if ratio_vs_serving > 5 -> 'unit_maybe_mg'\n"
+            "  - else 'none'.\n"
             "- confidence:\n"
-            "  • 0.9–1.0 when serving is explicit AND unit is clear\n"
-            "  • 0.5–0.7 when serving was inferred (quantity/two-column heuristic)\n"
-            "  • ≤0.5 if any ambiguity remains.\n\n"
+            "  - 0.9–1.0 when serving is explicit AND unit is clear\n"
+            "  - 0.5–0.7 when serving was inferred (quantity / two-column heuristic)\n"
+            "  - <=0.5 if any ambiguity remains.\n\n"
     
             "ANTI-EXAMPLES (MUST NEVER FLAG):\n"
-            "- 10 g vs serving 12.5 g → do NOT flag.\n"
-            "- 5.6 g vs serving 9 g → do NOT flag.\n"
-            "- 5 g vs serving 9.1 g → do NOT flag.\n"
-            "- 1.143 g vs serving 7 g (e.g., 'Vitamin C 1143 mg') → do NOT flag.\n"
-            "- Any per-100 g value (e.g., '71.4 g per 100 g') → do NOT flag.\n"
-            "- Any 'yielding …' derived amount → do NOT flag.\n\n"
+            "- 10 g vs serving 12.5 g -> do NOT flag.\n"
+            "- 5.6 g vs serving 9 g -> do NOT flag.\n"
+            "- 5 g vs serving 9.1 g -> do NOT flag.\n"
+            "- 1.143 g vs serving 7 g (e.g., 'Vitamin C 1143 mg') -> do NOT flag.\n"
+            "- Any per-100 g value (e.g., '71.4 g per 100 g') -> do NOT flag.\n"
+            "- Any 'yielding ...' derived amount -> do NOT flag.\n\n"
     
             "OUTPUT (minimal unless debug=true):\n"
             "{\n"
@@ -1529,22 +1530,22 @@ PROMPT_OPTIONS = {
             "      \"confidence\": <0-1>\n"
             "    }\n"
             "  ]\n"
-            "  [ ,\"debug\": {\"serving_size_source\":\"nutritionals|quantity|heuristic|none\",\"notes\":[\"...\"]} ]  // include debug only if user passed debug=true\n"
+            "  [ ,\"debug\": {\"serving_size_source\":\"nutritionals|quantity|heuristic|none\",\"notes\":[\"...\"]} ]\n"
             "}\n\n"
     
             "FINAL NUMERIC AUDIT (MANDATORY):\n"
             "- Before returning, RECHECK every flag:\n"
-            "  • If any flag has difference_g ≤ 1e-6, REMOVE it from flags.\n"
-            "  • After removals, set exceeds = (flags.length > 0).\n"
+            "  - If any flag has difference_g <= 1e-6, REMOVE it from flags.\n"
+            "  - After removals, set exceeds = (flags.length > 0).\n"
             "- Debug text MUST NOT contradict flags. If there is a contradiction, CORRECT the flags per the rules above.\n\n"
     
             "VALIDATION:\n"
             "- Output valid JSON; no extra keys; no trailing commas.\n"
             "- Only scope='per_serving' items may appear in flags.\n"
-            "- Do not flag any token where amount_g ≤ serving_size_g.\n"
+            "- Do not flag any token where amount_g <= serving_size_g.\n"
         ),
         "recommended_model": "gpt-4.1-mini",
-        "description": "Lean per-serving mass sanity check. Strict numeric gate + final self-audit. Excludes per-100g and derived amounts. Minimal JSON by default."
+        "description": "ASCII-safe per-serving mass sanity check. Strict numeric gate + final self-audit. Excludes per-100g and derived amounts. Minimal JSON by default."
     },
     "Custom": {
         "prompt": "",
@@ -1552,6 +1553,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
