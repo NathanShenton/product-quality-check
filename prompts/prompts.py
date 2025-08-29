@@ -44,7 +44,7 @@ PROMPT_OPTIONS = {
     "INCOMPLETE: NRV Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant focused on UK/EU labelling (NRV per Regulation (EU) No 1169/2011). 
+            """You are a JSON-producing assistant focused on UK/EU labelling (NRV per Regulation (EU) No 1169/2011). 
             
             Task:
             Given product data for an item that has ALREADY been classified as a food supplement, determine whether the label provides NRV (or equivalent) percentages for vitamins/minerals. Consider fields such as Title/Name, Ingredients, Nutritional Info (tables or JSON), Directions/Usage, Claims, Label copy, and Metadata. Use supplied evidence only.
@@ -75,7 +75,7 @@ PROMPT_OPTIONS = {
               "evidence": ["Up to 5 short snippets showing micronutrient + % (if any)"],
               "reasoning": "≤20 words explaining why NRV is present or absent."
             }
-            No extra keys, no markdown/code fences, no surrounding text."
+            No extra keys, no markdown/code fences, no surrounding text."""
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
@@ -1541,6 +1541,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
