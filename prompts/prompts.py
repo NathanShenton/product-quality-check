@@ -83,52 +83,66 @@ PROMPT_OPTIONS = {
     "INCOMPLETE: Food Supplement/NRV Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement law (Directive 2002/46/EC; retained UK regs) and NRV labelling (Reg. (EU) 1169/2011).
+            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement law (Directive 2002/46/EC; retained UK regs) and NRV/RI labelling (Reg. (EU) 1169/2011).
             
             Task:
-            Review all available product data and decide if the item is a food supplement. Consider any fields provided (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
+            Given product data (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata), do three things, using supplied evidence only:
+            1) Decide if the item is a FOOD SUPPLEMENT.
+            2) If (and only if) it is a food supplement, detect whether percentage values for vitamins/minerals are present.
+            3) Extract any WARNINGS/ADVISORIES text snippets (to populate a ‘Warnings’ column)."
             
-            Decision logic (strict, conservative):
-            
+            Part 1 — Food supplement classification (strict, conservative):
             A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if at least one is true:
-               • Explicit label text includes 'food supplement' or 'dietary supplement' (case-insensitive); OR
+               • Label text explicitly includes 'food supplement' or 'dietary supplement' (case-insensitive) — search all fields, including Warnings/Advisories; OR
                • Presentation is a classic supplement dose form:
                  - Solid oral: capsules, tablets, pills, softgels, lozenges, gummies, effervescents;
                  - Unit liquids: ampoules, oral sprays, or droppers with a clearly specified daily measure (e.g., '6 drops daily' or '1 ml daily'), even if no per-drop value is given;
                  - Single-use sachets/stick packs (one dose per unit).
             
-            B) HARD DISQUALIFIER — Multi-serve powders taken with a household scoop:
-               If the product is a multi-serving powder in a tub/jar/pouch with directions like 'mix 1 scoop', 'heaped scoop', 'shake with water/milk', or similar, and/or shows a standard per-100 g/ml nutrition panel, classify 'No' UNLESS A) first bullet (explicit 'food supplement') is present or the powder is supplied as single-use sachets.
-               Examples of formats typically caught here: pre-workout powders, BCAA powders, mass gainers, general protein powders labeled with 'mix x g with water', pack size in grams (e.g., 375 g) and multiple servings.
+            B) HARD DISQUALIFIER — Multi-serve powders with household scoops:
+               If the product is a multi-serving powder in a tub/jar/pouch with directions like 'mix 1 scoop', 'heaped scoop', 'shake with water/milk', or similar, and/or shows a standard per-100 g/ml nutrition panel, classify 'No' UNLESS (A) first bullet ('food supplement' label text) is explicitly present or the powder is supplied as single-use sachets. Typical formats here: pre-workout powders, BCAA powders, mass gainers, general protein powders.
             
             C) Added actives DO NOT override (A/B):
-               The presence of vitamins/minerals with % values, caffeine, creatine, beta-alanine, amino acids, botanicals, probiotics, or other actives is supportive only and cannot convert a food format into a supplement without passing (A).
+               The presence of vitamins/minerals, caffeine, creatine, beta-alanine, amino acids, botanicals, probiotics, BCAA totals, % values, etc., is supportive only and cannot convert a food format into a supplement without passing (A).
             
             D) Medicines/cosmetics — If disease-treatment/cure claims or non-food/topical use are indicated, classify 'No'.
             
-            E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'.
-               Keep reasoning ≤20 words citing decisive cues (e.g., '375 g tub with scoop; pre-workout powder; no “food supplement” label').
+            E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'. Keep 'supplement_reasoning' ≤20 words citing decisive cues (e.g., '375 g tub with scoop; no “food supplement” label').
             
-            Part 2 — NRV detection (run ONLY if Part 1 = 'Yes'):
-            Detect whether the label provides percentage values for vitamins/minerals (NRV/RI/RDA/DV or percentage alone).
+            Part 2 — NRV/percentage detection (run ONLY if Part 1 = 'Yes'):
+            Detect whether the label provides percentage values for vitamins/minerals (NRV/RI/RDA/DV terminology or percentage alone).
             Rules:
-            1) Count as present if any vitamin/mineral shows a percentage near its amount, e.g., 'Vitamin C 80 mg (100%)' or with terms 'NRV', 'RI', 'RDA', 'DV', 'Daily Value'.
-            2) Link the percentage to a micronutrient from this list:
+            1) Count as present if any vitamin/mineral shows a percentage near its amount, e.g., 'Vitamin C 80 mg (100%)', or with 'NRV', 'RI', 'RDA', 'DV', 'Daily Value'.
+            2) Link the % to a micronutrient from this list:
                Vitamins: A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12.
                Minerals: Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride, Fluoride.
             3) Do NOT count percentages tied only to macros/energy (Energy, Fat, Saturates, Carbohydrate, Sugars, Fibre, Protein, Salt/Sodium, Polyols, Cholesterol).
-            4) Evidence formats:
+            4) Evidence handling:
                • If 'Nutritional Info' is JSON (array of key/value), parse it.
-               • Else scan free text. Capture up to 5 short snippets showing micronutrient + % if found.
-            5) If amounts are shown without percentages anywhere, return 'No'.
+               • Else scan free text. Capture up to 5 short snippets (micronutrient + %).
+            5) If amounts appear without any % anywhere, return 'No'.
+            
+            Part 3 — Warnings/Advisories extraction (always run):
+            Return up to 5 short snippets (verbatim where possible) capturing warning/advisory cues, including but not limited to:
+               • 'Food supplement' / 'Dietary supplement' statements,
+               • 'Do not exceed the stated/recommended dose',
+               • 'Not a substitute for a varied/balanced diet and healthy lifestyle',
+               • 'Keep out of reach of children',
+               • Age/pregnancy cautions (e.g., 'Not recommended for children or pregnant/breast-feeding women'),
+               • High caffeine statements (e.g., 'High caffeine content: X mg per serving'),
+               • Allergen/cross-contamination advisories if presented as warnings,
+               • Any other explicit safety/use restrictions.
+            Normalize whitespace; keep snippets concise.
             
             Output (strict JSON only; no markdown, no extra text):
             {
               "food_supplement": "Yes" or "No",
-              "supplement_reasoning": "≤20 words explaining decisive cues (e.g., 'Capsule dose with dosage; not a bar/RTD').",
+              "supplement_reasoning": "≤20 words explaining decisive cues.",
               "has_nrv": "Yes" or "No" or "Not applicable",
-              "nrv_evidence": ["up to 5 short snippets, empty if none or not applicable"],
-              "nrv_reasoning": "≤20 words why NRV is present/absent or not applicable"
+              "nrv_evidence": ["up to 5 short micronutrient+% snippets; empty if none or not applicable"],
+              "nrv_reasoning": "≤20 words why NRV % present/absent or N/A.",
+              "warnings_present": "Yes" or "No",
+              "warnings_evidence": ["up to 5 short warning/advisory snippets; empty if none"]
             }"""
         ),
         "recommended_model": "gpt-4.1-mini",
@@ -1595,6 +1609,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
