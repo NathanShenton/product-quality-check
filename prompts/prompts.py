@@ -86,24 +86,28 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement law (Directive 2002/46/EC; retained UK regs) and NRV labelling (Reg. (EU) 1169/2011).
             
             Task:
-            Given product data (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings, Category tags, Label copy, Metadata), first decide if the product is a food supplement. If and only if it is a food supplement, check whether NRV percentages for vitamins/minerals are present. Use supplied evidence only; do not assume missing facts.
+            Review all available product data and decide if the item is a food supplement. Consider any fields provided (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
             
-            Part 1 — Food supplement classification (strict, conservative):
+            Decision logic (strict, conservative):
+            
             A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if at least one is true:
-               • Label text explicitly includes 'food supplement' or 'dietary supplement'; OR
+               • Explicit label text includes 'food supplement' or 'dietary supplement' (case-insensitive); OR
                • Presentation is a classic supplement dose form:
                  - Solid oral: capsules, tablets, pills, softgels, lozenges, gummies, effervescents;
-                 - Unit liquids: ampoules, oral sprays, OR droppers with a clearly specified daily measure (e.g., '6 drops daily' or '1 ml daily') even if no per-drop value is given;
+                 - Unit liquids: ampoules, oral sprays, or droppers with a clearly specified daily measure (e.g., '6 drops daily' or '1 ml daily'), even if no per-drop value is given;
                  - Single-use sachets/stick packs (one dose per unit).
-               ⇢ Explicitly NOT dose forms: bars, standard RTD bottles (~250–500 ml), multi-serve tubs/jars/pouches with household scoops, conventional foods (yogurts, cereals, breads, snacks), and general beverages with per-100 g/ml nutrition panels.
             
-            B) Conventional food pattern — If ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein, chocolate/sweeteners/oils/flours) AND the format is a bar/shake/drink/meal-type serving with per-100 g/ml nutrition, classify 'No' unless (A) is satisfied.
+            B) HARD DISQUALIFIER — Multi-serve powders taken with a household scoop:
+               If the product is a multi-serving powder in a tub/jar/pouch with directions like 'mix 1 scoop', 'heaped scoop', 'shake with water/milk', or similar, and/or shows a standard per-100 g/ml nutrition panel, classify 'No' UNLESS A) first bullet (explicit 'food supplement') is present or the powder is supplied as single-use sachets.
+               Examples of formats typically caught here: pre-workout powders, BCAA powders, mass gainers, general protein powders labeled with 'mix x g with water', pack size in grams (e.g., 375 g) and multiple servings.
             
-            C) Added actives — The presence of creatine, carnitine, CLA, botanicals, probiotics, BCAA totals, or %NRV alone does NOT override (A).
+            C) Added actives DO NOT override (A/B):
+               The presence of vitamins/minerals with % values, caffeine, creatine, beta-alanine, amino acids, botanicals, probiotics, or other actives is supportive only and cannot convert a food format into a supplement without passing (A).
             
             D) Medicines/cosmetics — If disease-treatment/cure claims or non-food/topical use are indicated, classify 'No'.
             
-            E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'. Keep the reasoning ≤20 words citing decisive cues.
+            E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'.
+               Keep reasoning ≤20 words citing decisive cues (e.g., '375 g tub with scoop; pre-workout powder; no “food supplement” label').
             
             Part 2 — NRV detection (run ONLY if Part 1 = 'Yes'):
             Detect whether the label provides percentage values for vitamins/minerals (NRV/RI/RDA/DV or percentage alone).
@@ -1591,6 +1595,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
