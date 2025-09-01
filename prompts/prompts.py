@@ -56,7 +56,7 @@ PROMPT_OPTIONS = {
                • Accept US-style ‘% Daily Value’/‘% DV’ ONLY if clearly tied to a vitamin/mineral (still mark present; note it’s non-EU phrasing).
             
             2) Link the percentage to a micronutrient:
-               • Count only if the % is associated with a known vitamin/mineral (A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12; Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride).
+               • Count only if the % is associated with a known vitamin/mineral (A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12; Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride, Fluoride).
                • If % appears but ONLY for macronutrients/energy (Energy, Fat, Saturates, Carbohydrate, Sugars, Fibre, Protein, Salt/Sodium, Polyols, Cholesterol), DO NOT count as NRV present.
             
             3) Evidence formats:
@@ -1541,6 +1541,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
