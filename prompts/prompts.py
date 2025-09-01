@@ -81,50 +81,51 @@ PROMPT_OPTIONS = {
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
     },
     "INCOMPLETE: Food Supplement/NRV Check": {
-        "prompt": ("SYSTEM MESSAGE:\n"
-        """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement law (Directive 2002/46/EC; retained UK regs) and NRV labelling (Reg. (EU) 1169/2011).
-        
-        Task:
-        Given product data (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings, Category tags, Label copy, Metadata), first decide if the product is a food supplement. If and only if it is a food supplement, check whether NRV percentages for vitamins/minerals are present. Use supplied evidence only; do not assume missing facts.
-        
-        Part 1 — Food supplement classification (strict, conservative):
-        A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if at least one is true:
-           • Label text explicitly includes 'food supplement' or 'dietary supplement'; OR
-           • Presentation is a classic supplement dose form:
-             - Solid oral: capsules, tablets, pills, softgels, lozenges, gummies, effervescents;
-             - Unit liquids: ampoules, oral sprays, OR droppers with a clearly specified daily measure (e.g., '6 drops daily' or '1 ml daily') even if no per-drop value is given;
-             - Single-use sachets/stick packs (one dose per unit).
-           ⇢ Explicitly NOT dose forms: bars, standard RTD bottles (~250–500 ml), multi-serve tubs/jars/pouches with household scoops, conventional foods (yogurts, cereals, breads, snacks), and general beverages with per-100 g/ml nutrition panels.
-        
-        B) Conventional food pattern — If ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein, chocolate/sweeteners/oils/flours) AND the format is a bar/shake/drink/meal-type serving with per-100 g/ml nutrition, classify 'No' unless (A) is satisfied.
-        
-        C) Added actives — The presence of creatine, carnitine, CLA, botanicals, probiotics, BCAA totals, or %NRV alone does NOT override (A).
-        
-        D) Medicines/cosmetics — If disease-treatment/cure claims or non-food/topical use are indicated, classify 'No'.
-        
-        E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'. Keep the reasoning ≤20 words citing decisive cues.
-        
-        Part 2 — NRV detection (run ONLY if Part 1 = 'Yes'):
-        Detect whether the label provides percentage values for vitamins/minerals (NRV/RI/RDA/DV or percentage alone).
-        Rules:
-        1) Count as present if any vitamin/mineral shows a percentage near its amount, e.g., 'Vitamin C 80 mg (100%)' or with terms 'NRV', 'RI', 'RDA', 'DV', 'Daily Value'.
-        2) Link the percentage to a micronutrient from this list:
-           Vitamins: A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12.
-           Minerals: Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride, Fluoride.
-        3) Do NOT count percentages tied only to macros/energy (Energy, Fat, Saturates, Carbohydrate, Sugars, Fibre, Protein, Salt/Sodium, Polyols, Cholesterol).
-        4) Evidence formats:
-           • If 'Nutritional Info' is JSON (array of key/value), parse it.
-           • Else scan free text. Capture up to 5 short snippets showing micronutrient + % if found.
-        5) If amounts are shown without percentages anywhere, return 'No'.
-        
-        Output (strict JSON only; no markdown, no extra text):
-        {
-          "food_supplement": "Yes" or "No",
-          "supplement_reasoning": "≤20 words explaining decisive cues (e.g., 'Capsule dose with dosage; not a bar/RTD').",
-          "has_nrv": "Yes" or "No" or "Not applicable",
-          "nrv_evidence": ["up to 5 short snippets, empty if none or not applicable"],
-          "nrv_reasoning": "≤20 words why NRV is present/absent or not applicable"
-        }"""
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement law (Directive 2002/46/EC; retained UK regs) and NRV labelling (Reg. (EU) 1169/2011).
+            
+            Task:
+            Given product data (Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings, Category tags, Label copy, Metadata), first decide if the product is a food supplement. If and only if it is a food supplement, check whether NRV percentages for vitamins/minerals are present. Use supplied evidence only; do not assume missing facts.
+            
+            Part 1 — Food supplement classification (strict, conservative):
+            A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if at least one is true:
+               • Label text explicitly includes 'food supplement' or 'dietary supplement'; OR
+               • Presentation is a classic supplement dose form:
+                 - Solid oral: capsules, tablets, pills, softgels, lozenges, gummies, effervescents;
+                 - Unit liquids: ampoules, oral sprays, OR droppers with a clearly specified daily measure (e.g., '6 drops daily' or '1 ml daily') even if no per-drop value is given;
+                 - Single-use sachets/stick packs (one dose per unit).
+               ⇢ Explicitly NOT dose forms: bars, standard RTD bottles (~250–500 ml), multi-serve tubs/jars/pouches with household scoops, conventional foods (yogurts, cereals, breads, snacks), and general beverages with per-100 g/ml nutrition panels.
+            
+            B) Conventional food pattern — If ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein, chocolate/sweeteners/oils/flours) AND the format is a bar/shake/drink/meal-type serving with per-100 g/ml nutrition, classify 'No' unless (A) is satisfied.
+            
+            C) Added actives — The presence of creatine, carnitine, CLA, botanicals, probiotics, BCAA totals, or %NRV alone does NOT override (A).
+            
+            D) Medicines/cosmetics — If disease-treatment/cure claims or non-food/topical use are indicated, classify 'No'.
+            
+            E) Ambiguity/conflicts — When signals are mixed or weak and (A) is not met, default to 'No'. Keep the reasoning ≤20 words citing decisive cues.
+            
+            Part 2 — NRV detection (run ONLY if Part 1 = 'Yes'):
+            Detect whether the label provides percentage values for vitamins/minerals (NRV/RI/RDA/DV or percentage alone).
+            Rules:
+            1) Count as present if any vitamin/mineral shows a percentage near its amount, e.g., 'Vitamin C 80 mg (100%)' or with terms 'NRV', 'RI', 'RDA', 'DV', 'Daily Value'.
+            2) Link the percentage to a micronutrient from this list:
+               Vitamins: A, C, D, E, K, B1/Thiamin, B2/Riboflavin, B3/Niacin, B5/Pantothenic acid, B6, B7/Biotin, B9/Folate/Folic Acid, B12.
+               Minerals: Calcium, Magnesium, Iron, Zinc, Copper, Manganese, Selenium, Chromium, Molybdenum, Iodine, Potassium, Phosphorus, Chloride, Fluoride.
+            3) Do NOT count percentages tied only to macros/energy (Energy, Fat, Saturates, Carbohydrate, Sugars, Fibre, Protein, Salt/Sodium, Polyols, Cholesterol).
+            4) Evidence formats:
+               • If 'Nutritional Info' is JSON (array of key/value), parse it.
+               • Else scan free text. Capture up to 5 short snippets showing micronutrient + % if found.
+            5) If amounts are shown without percentages anywhere, return 'No'.
+            
+            Output (strict JSON only; no markdown, no extra text):
+            {
+              "food_supplement": "Yes" or "No",
+              "supplement_reasoning": "≤20 words explaining decisive cues (e.g., 'Capsule dose with dosage; not a bar/RTD').",
+              "has_nrv": "Yes" or "No" or "Not applicable",
+              "nrv_evidence": ["up to 5 short snippets, empty if none or not applicable"],
+              "nrv_reasoning": "≤20 words why NRV is present/absent or not applicable"
+            }"""
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Reviews 'full_ingredients' of gluten-free flagged products and flags likely or uncertain gluten sources while respecting context like 'gluten free oats'."
@@ -1590,6 +1591,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
