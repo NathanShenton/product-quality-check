@@ -119,6 +119,9 @@ PROMPT_OPTIONS = {
             Output (strict JSON only; no markdown, no extra text):
             {
               "food_supplement": "Yes" or "No",
+              "supplement_reasoning": "≤20 words explaining decisive cues.",
+              "nrv_evidence": ["up to 5 short micronutrient+% snippets; empty if none or not applicable"],
+              "nrv_reasoning": "≤20 words why NRV % present/absent or N/A.",
               "nrv_required": "Yes" or "No" or "Not applicable"
             }"""
         ),
@@ -1586,6 +1589,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
