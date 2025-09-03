@@ -13,82 +13,80 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
             Task:
-            Review all the data on each product you receive to decide whether the provided product has the serving size smaller than the single nutritional value. You must use data points such as 'nutritional info', 'lexmark pack size', 'quantity string' to make this assessment, but also be flexible and take into account all columns you see in the file. Use supplied evidence only; do not assume missing facts.
+            Review all the data on each product you receive to decide whether the serving size—defined STRICTLY as the value parsed from the "quantity string" attribute—is greater than EVERY nutritional value basis declared in the "nutritional info" attribute (which is JSON). Use supplied evidence only; do not assume missing facts. Consider all other columns for corroboration, but serving size must come from "quantity string" and nutritional bases must come from "nutritional info" (JSON).
             
             Definitions:
-            • Serving size — the declared consumer dose (e.g., "2 capsules", "5 ml", "1 gummy").
-            • Single nutritional value — the quantity basis attached to the primary nutrient declaration (e.g., "per 2 capsules", "per tablet", "per 5 ml", "per 100 g").
+            • Serving size (for this task) — derived solely from the "quantity string" attribute.
+              - Support patterns like:
+                – "<N> sachets/bars/sticks/capsules/tablets/gummies of <X><unit> each" (e.g., "5 sachets of 5g each")
+                – "<N>x<X><unit>" or "<N>×<X><unit>" (e.g., "5x5g")
+                – Single mass/volume (e.g., "25 g", "30 ml")
+                – Count-only (e.g., "60 tablets")
+              - If both a count and per-unit size are present, compute TOTAL = N × X in the stated mass/volume unit (e.g., 5×5 g = 25 g). Use this TOTAL as the serving size for comparisons.
+            • Nutritional value basis — EVERY "per ..." basis found in the "nutritional info" JSON (e.g., "per 5 g", "per 100 g", "per tablet", "per 2 capsules", "per 5 ml"). Extract ALL bases.
             
-            Method (strict, conservative):
-            1) Extract candidate serving-size(s) from fields like 'Serving Size' and 'Directions/Usage'; if absent, consider 'quantity string' and 'lexmark pack size' only when they explicitly state a per-use amount (ignore pack totals such as "60 capsules").
-            2) From 'nutritional info', detect the basis phrase "per X" and its unit/value. If multiple appear (e.g., per serving and per 100 g), select the consumer-facing per-serving basis; prefer discrete dose forms (capsule/tablet/gummy) where available.
-            3) Normalize units (count vs mL vs g) and compare like-with-like only. Convert numeric strings to floats; tolerate punctuation/commas.
-            4) Decision:
-               • If serving-size and nutritional-basis are commensurable and serving-size < basis ⇒ output "Yes".
-               • If serving-size ≥ basis ⇒ output "No".
-               • If units are not comparable or data are insufficient/contradictory ⇒ output "Ambiguous".
-            5) Evidence: Quote exact fields/snippets used for both the serving-size and the basis.
+            Parsing method (strict, conservative):
+            1) Parse "quantity string" to obtain serving size:
+               • If it encodes count × per-unit size (e.g., "5 sachets of 5g each", "5x5g"), compute TOTAL mass/volume and record it.
+               • If it provides a single mass/volume, use that directly.
+               • If it provides only a count (e.g., "60 tablets") with no per-unit mass/volume, serving size is a COUNT value; only comparable to COUNT-based nutrition bases (e.g., "per tablet", "per 2 tablets").
+               • Normalize units: mg→g (÷1000), µg→mg (÷1000)→g, mL synonyms to "ml"; handle decimal commas.
+            2) Parse "nutritional info" (JSON) to detect EVERY basis:
+               • Traverse arrays/objects recursively.
+               • Treat keys or fields such as "per", "per_", "basis", "perServing", "per_100g", "per_5g", "per_tablet", etc., as candidate bases; also parse strings containing "per <number> <unit|dose-form>".
+               • For each basis, extract:
+                   – numeric value (e.g., 5, 100, 2)
+                   – unit or dose-form (g, ml, tablet, capsule, gummy, etc.)
+                   – the raw text and a simple key path (e.g., nutritionals.servings[0].per).
+               • Normalize units/counts after extraction.
+            3) Comparability rules:
+               • Mass/volume serving size (g/ml) compares ONLY to mass/volume bases (g/ml). Compare numbers after unit normalization.
+               • Count serving size (tablets/capsules/etc.) compares ONLY to count bases ("per tablet", "per 2 capsules", etc.).
+               • If units are mixed (e.g., serving in g vs basis in tablets) and no valid conversion is present in the data, mark that basis as not comparable.
+            4) Decision (must hold for ALL comparable bases):
+               • Output "Yes" ONLY if the serving size is strictly greater than EVERY comparable nutritional basis found in "nutritional info".
+               • If ANY comparable basis is ≥ the serving size, output "No".
+               • If NONE of the bases are comparable due to unit/type mismatches or parsing failures, output "Ambiguous".
+            5) Evidence: Quote exact snippets/keys for the parsed "quantity string" and each extracted nutritional basis from "nutritional info" JSON (include simple key paths). Do not invent values.
             
             Edge cases & rules:
-            • If only "per 100 g" is given and serving size is in g/mL, compare numerically; otherwise "Ambiguous".
-            • Do not treat pack totals (e.g., "x60") as serving-size. If multiple serving sizes exist, test each; if any serving-size < its matched basis, return "Yes".
-            • If units conflict (e.g., "per 2 capsules" vs serving "1 tablet") and no clear synonym is evident, return "Ambiguous".
+            • Examples:
+              – "quantity string" = "5 sachets of 5g each" or "5x5g" ⇒ serving size = 25 g; compare 25 g against EVERY mass/volume basis (e.g., per 5 g, per 100 g). 25 g > 5 g (pass) but 25 g > 100 g is false (fail overall ⇒ "No").
+              – "quantity string" = "60 tablets" with nutritionals "per tablet" and "per 2 tablets": 60 > 1 and 60 > 2 ⇒ these pass. If a "per 100 g" basis also appears and serving size is COUNT with no mass/volume, that basis is not comparable.
+            • If multiple serving-size interpretations are possible, choose the most conservative (smallest) total derivable from "quantity string".
+            • Never treat total pack counts (e.g., "x60") as mass/volume unless a per-unit mass/volume is explicitly present.
             • Never hallucinate numbers; if parsing fails, set numeric value null but include the raw text and source field.
             
             Output (strict JSON only):
             {
-              "serving_size_smaller_than_single_nutritional_value": "Yes" | "No" | "Ambiguous",
+              "serving_size_greater_than_all_nutritional_values": "Yes" | "No" | "Ambiguous",
               "serving_size": {
                 "value": number | null,
-                "unit": string,
+                "unit": "g" | "ml" | "count" | string,
                 "text": string,
-                "source_field": string
+                "source_field": "quantity string"
               },
-              "single_nutritional_value_basis": {
-                "value": number | null,
-                "unit": string,
-                "text": string,
-                "source_field": string
-              },
+              "nutritional_bases": [
+                {
+                  "value": number | null,
+                  "unit": "g" | "ml" | "count" | string,
+                  "text": string,
+                  "json_path": string,
+                  "source_field": "nutritional info",
+                  "comparable": true | false
+                }
+              ],
+              "comparisons": [
+                {
+                  "basis_text": string,
+                  "result": "greater" | "not_greater" | "not_comparable",
+                  "explanation": string
+                }
+              ],
               "evidence": [ { "field": string, "snippet": string } ],
-              "reasoning": "≤30 words; one sentence explaining the comparison and the decisive data."
+              "reasoning": "≤30 words; state whether serving-size from quantity string exceeds all comparable nutrition bases and why."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
-
-        ),
-        "recommended_model": "gpt-4.1-mini",
-        "description": "Check if products are food supplement."
-    },
-    "INCOMPLETE: Food supplement": {
-        "prompt": (
-            "SYSTEM MESSAGE:\n"
-            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
-            
-            Task:
-            Review all available product data and decide if the item is a food supplement. Consider any fields provided (e.g., Title/Name, Description, Ingredients, Nutritional Info, Directions/Usage, Claims, Presentation/Format, Serving Size, Pack Size, Warnings/Advisories, Category tags, Label copy, Metadata). Use supplied evidence only; do not assume missing facts.
-            
-            Decision logic (strict, conservative):
-            
-            A) LABEL/DOSE-FORM GATE — Output 'Yes' ONLY if:
-               • Explicit label text includes 'food supplement' / 'dietary supplement'; OR
-               • Presentation is in classic supplement dose form: capsules, tablets, pills, softgels, lozenges, gummies, sprays/droppers with per-drop counts, ampoules, or single-use sachets/sticks.
-               ⇢ Explicitly EXCLUDE: bars, ready-to-drink bottles, bulk powders, tubs/jars with scoops, pouches with multiple servings, or general foods with nutrition panels. These are NOT dose forms.
-            
-            B) Conventional food pattern — If Ingredients are predominantly protein/carbohydrate/fat bases (e.g., whey/pea/soya protein, sweeteners, chocolate, oils, flour) AND Nutritional Info is in per-100 g format AND Presentation is a bar, shake, drink, or meal-type serving, classify 'No' unless (A) is satisfied.
-            
-            C) Added actives — The presence of creatine, carnitine, CLA, green tea, probiotics, BCAA totals, or %NRV vitamins/minerals does NOT override (A). These alone do not make a food into a supplement.
-            
-            D) Medicines/cosmetics — If disease-treatment claims or topical use are indicated, classify 'No'.
-            
-            E) Ambiguity — If signals are mixed but (A) is not met, default to 'No' and explain briefly.
-            
-            Output (strict JSON only):
-            {
-              "food_supplement": "Yes" or "No",
-              "reasoning": "≤20 words; one sentence citing the decisive cues (e.g., 'Bar format with nutrition panel; no supplement label text')."
-            }
-            No extra keys, no markdown/code fences, no surrounding text."""
-
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Check if products are food supplement."
@@ -1641,6 +1639,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
