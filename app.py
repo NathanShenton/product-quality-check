@@ -9,6 +9,7 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
+from prompts.artwork_processing import process_artwork
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
@@ -239,9 +240,14 @@ def fetch_image_as_base64(url: str) -> str:
 
 # 4. Choose a Pre-Written Prompt
 st.subheader("💬 Choose a Prompt")
+
+ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
+
+prompt_names = list(PROMPT_OPTIONS.keys()) + [ARTWORK_AUTO_PROMPT]
+
 prompt_choice = st.selectbox(
     "Select a pre-written prompt or 'Custom':",
-    list(PROMPT_OPTIONS.keys()),
+    prompt_names,
     index=0
 )
 
@@ -266,10 +272,16 @@ if prompt_choice == "Competitor SKU Match":
 
 
 # ─ Extract chosen prompt details ─
-selected = PROMPT_OPTIONS[prompt_choice]
-selected_prompt_text = selected["prompt"]
-recommended_model    = selected["recommended_model"]
-prompt_description   = selected["description"]
+if prompt_choice == ARTWORK_AUTO_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing module"
+    prompt_description   = "Upload PDF/JPG/PNG label artwork. Auto-finds the Ingredients panel, returns exact text + HTML with allergens bolded."
+    recommended_model    = "gpt-4o"  # force correct model for vision OCR
+else:
+    selected = PROMPT_OPTIONS[prompt_choice]
+    selected_prompt_text = selected["prompt"]
+    recommended_model    = selected["recommended_model"]
+    prompt_description   = selected["description"]
+
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
 # ─ Session‐state to reset crops when the prompt changes ─
@@ -346,6 +358,53 @@ user_prompt = st.text_area(
     value=selected_prompt_text,
     height=200
 )
+
+# =========================================
+# NEW: Fully automatic Artwork processing
+# =========================================
+if prompt_choice == ARTWORK_AUTO_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – no manual crop")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_auto")
+
+    # Enforce correct model visually (user can still change later, but we’ll warn)
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    run_auto = st.button("🚀 Extract Ingredients (Auto)")
+    if art_file and run_auto:
+        with st.spinner("Locating INGREDIENTS panel and extracting…"):
+            try:
+                res = process_artwork(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"  # force correct model regardless of UI selection
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error", "Failed"))
+        else:
+            st.success("✅ Extracted INGREDIENTS")
+            st.write(f"**Page:** {res['page_index']}")
+            st.write(f"**BBox (pixels):** {res['bbox_pixels']}")
+            st.code(res["ingredients_text"], language="text")
+            st.code(res["ingredients_html"], language="html")
+            st.json(res["qa"])
+
+            st.download_button(
+                "⬇️ Download JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="ingredients_result.json",
+                mime="application/json"
+            )
+
+    # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
+    # so the rest of the app behaves as before for all other prompts.
+    st.stop()
+
 
 # -------------------------------
 # Image uploader and crop logic
