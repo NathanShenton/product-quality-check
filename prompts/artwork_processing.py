@@ -871,7 +871,7 @@ def _gpt_bbox_locator(client, img: Image.Image, model: str) -> Optional[Tuple[in
     except Exception:
         return None
 
-def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Optional[Tuple[int, int, int, int]]]:
+def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Optional[Tuple[int, int, int, int]]:
     buf = io.BytesIO(); img.save(buf, format="PNG")
     data_url = _encode_data_url(buf.getvalue())
     r = client.chat.completions.create(
@@ -1309,3 +1309,4 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
