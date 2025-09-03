@@ -13,11 +13,7 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
             Task:
-            Review all the data on each product you receive to decide whether the serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml)—is greater than EVERY nutritional value basis that is explicitly present in the "nutritional info" attribute (JSON). Use supplied evidence only; do not assume or infer missing facts. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY explicit mass/volume “per …” bases found in "nutritional info". If no such basis exists, do not infer or derive any basis; still capture the values that are present.
-            
-            Key directives (strict, conservative):
-            • DO NOT infer or default a basis (e.g., do not assume “per 100 g/ml”). No derivation from context, pack size, or common practice.
-            • Use the nutrient VALUES present in "nutritional info" only for reporting if no explicit “per …” basis is present; they must NOT be used for comparisons in that case.
+            Review all the data on each product you receive to decide whether the serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml)—is greater than EVERY numeric nutrient amount present in the "nutritional info" attribute (JSON). Use supplied evidence only; do not assume, infer, or derive missing facts. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis is provided.
             
             Definitions:
             • Serving size (this task) — a single per-unit g/ml value extracted from "quantity string".
@@ -26,31 +22,35 @@ PROMPT_OPTIONS = {
                 • "<N> .* of (<X>)(mg|g|ml) each" ⇒ use X+unit (e.g., "5 sachets of 5g each" ⇒ 5 g)
                 • "(<X>)(mg|g|ml)" (single value) ⇒ use that value (e.g., "30 ml", "25 g")
               – Ignore totals; do NOT multiply N×X. If no g/ml appears (e.g., "60 tablets"), serving size is null.
-              – Normalize units: mg→g (÷1000); µg→g (÷1,000,000); mL→ml; convert decimal commas to dots.
+              – Normalize: mg→g (÷1000); µg→g (÷1,000,000); kg→g (×1000); mL→ml; L→ml (×1000). Convert decimal commas to dots.
             
-            • Explicit nutritional basis — a mass/volume quantity in "nutritional info" that the nutrient figures relate to, expressed as “per <number> <g|ml>” (e.g., "per 5 g", "Typical values per 100 g").
-              – Candidate keys/strings to inspect recursively: "per", "per_", "perServing", "per_100g", "per_100ml", "basis", "typical_values_per", "header", "title", "subtitle", "panelHeader", and any string matching /per\s*\d+(\.\d+)?\s*(g|ml)/i.
+            • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, l/L), regardless of whether a “per …” basis exists.
+              – Parse recursively from JSON fields/strings (e.g., "value", "amount", free-text).
+              – Ignore non-mass/volume units (e.g., kJ, kcal, %NRV, IU, mg/100ml unless you can reduce to a single mass or volume magnitude without introducing derived bases).
+              – For mixed strings, extract each mass/volume token separately (e.g., "1392kJ / 328kcal" ⇒ no comparable tokens; "0.4g" ⇒ comparable).
             
             Parsing method:
             1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple candidates exist, select the smallest per-unit g/ml. If none, set value=null.
-            2) Traverse "nutritional info" (JSON) recursively:
-               • Collect EVERY explicit mass/volume basis (local or header-level): numeric value, unit (g/ml), raw text, and a simple JSON path. Normalize units to g/ml.
-               • Separately, capture ALL nutrient rows “as reported” (key/value pairs) exactly as present, with their simple JSON paths. Do NOT transform or reinterpret these values.
+            2) Traverse "nutritional info" (JSON):
+               • Extract every numeric token with a mass/volume unit; normalize to base units (g or ml).
+               • For each, capture: key/label (if available), numeric value, unit (after normalization), original text token, and a simple JSON path.
+               • Do NOT infer “per …” or create derived bases.
             3) Comparability rules:
-               • Compare ONLY mass/volume pairs (serving size g/ml vs basis g/ml). Ignore dose-count bases (e.g., "per tablet") and unitless items.
-               • If there are zero explicit mass/volume bases, perform no comparisons.
+               • If serving size is in grams, compare ONLY to nutrient amounts normalized to grams (µg/mg/g/kg → g).
+               • If serving size is in millilitres, compare ONLY to nutrient amounts normalized to millilitres (L/ml).
+               • If units are of different dimensions (g vs ml), mark the nutrient value as not comparable.
             
-            Decision (must hold for ALL comparable bases):
-            • Output "Yes" ONLY if the per-unit serving size is strictly greater than EVERY explicit mass/volume basis found.
-            • If ANY explicit basis is ≥ the serving size, output "No".
-            • If there are ZERO explicit mass/volume bases, or serving size is null, output "Ambiguous".
+            Decision (must hold for ALL comparable nutrient values):
+            • Output "Yes" ONLY if the serving size is strictly greater than EVERY comparable nutrient amount present.
+            • If ANY comparable nutrient amount is ≥ the serving size, output "No".
+            • If there are ZERO comparable nutrient amounts, or serving size is null, output "Ambiguous".
             
             Evidence:
-            Quote exact snippets for the parsed "quantity string" per-unit value and each explicit basis from "nutritional info" (include simple JSON paths). Also include the raw nutrient rows you captured “as reported”. Do not invent or infer values.
+            Quote exact snippets for the parsed "quantity string" per-unit and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent values. Do not transform non-comparable tokens except to record them as such.
             
             Edge cases & examples:
-            • "quantity string" = "4x32g" ⇒ serving size = 32 g. If "nutritional info" has explicit "Per 100 g", compare 32 g vs 100 g ⇒ "No". If no explicit basis exists, do not infer; decision = "Ambiguous", but still return all nutrient rows under "as_reported_nutritional_values".
-            • "quantity string" = "5 sachets of 5g each" ⇒ serving size = 5 g; with explicit "per 5 g", 5 > 5 is false ⇒ "No".
+            • quantity string = "4x32g" ⇒ serving size = 32 g. nutritional info includes "Fat 0.4g", "Carbohydrates 76g" ⇒ compare 32 g to each: 32>0.4 = true; 32>76 = false ⇒ decision "No".
+            • quantity string = "30 ml" and nutrition has "Protein 3.8g" (grams) and "Sodium 200mg" (grams) ⇒ both are mass units; serving is volume ⇒ mark as not comparable ⇒ likely "Ambiguous" (if no ml amounts exist).
             
             Output (strict JSON only):
             {
@@ -61,33 +61,26 @@ PROMPT_OPTIONS = {
                 "text": string,
                 "source_field": "quantity string"
               },
-              "nutritional_bases": [
+              "nutritional_values": [
                 {
-                  "value": number,
-                  "unit": "g" | "ml",
-                  "text": string,
+                  "key": string | null,
+                  "value": number | null,
+                  "unit": "g" | "ml" | string,
+                  "original_text": string,
                   "json_path": string,
-                  "source_field": "nutritional info",
-                  "origin": "explicit",
-                  "comparable": true
+                  "comparable": true | false
                 }
               ],
               "comparisons": [
                 {
-                  "basis_text": string,
-                  "result": "greater" | "not_greater",
+                  "key": string | null,
+                  "compared_value": number | null,
+                  "result": "greater" | "not_greater" | "not_comparable",
                   "explanation": string
                 }
               ],
-              "as_reported_nutritional_values": [
-                {
-                  "key": string,
-                  "value": string,
-                  "json_path": string
-                }
-              ],
               "evidence": [ { "field": string, "snippet": string } ],
-              "reasoning": "≤30 words; state whether the per-unit g/ml exceeds all explicit bases or why comparison isn’t possible."
+              "reasoning": "≤30 words; state whether per-unit from quantity string exceeds all comparable nutrient amounts and why."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
         ),
@@ -1642,6 +1635,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
