@@ -27,6 +27,33 @@ except Exception:
 
 HEADER_PAT = re.compile(r"\bingredient[s]?\b", re.IGNORECASE)
 
+# Directions headers & cues
+DIRECTIONS_HEADER_PAT = re.compile(
+    r"\b(directions|directions for use|how to use|usage|preparation|how to prepare|"
+    r"serving suggestion|instructions|method|dosage|dose)\b",
+    re.IGNORECASE
+)
+IMPERATIVE_VERBS = re.compile(
+    r"\b(take|stir|mix|add|pour|dissolve|shake|brew|steep|microwave|heat|boil|simmer|"
+    r"swallow|chew|consume|drink|apply|spray)\b",
+    re.IGNORECASE
+)
+TIME_QTY_TOKENS = re.compile(
+    r"\b(\d+\s*(?:min|mins|minutes|sec|seconds|°c|°f|ml|l|cup|cups|tsp|tbsp|scoop[s]?|"
+    r"capsule[s]?|tablet[s]?|drop[s]?))\b",
+    re.IGNORECASE
+)
+
+# Reuse existing helpers already added earlier:
+# _safe_punct_scrub, _structure_ok, _similarity
+def _structure_ok_directions(s: str) -> bool:
+    base = s.lower()
+    has_header_or_imperative = (DIRECTIONS_HEADER_PAT.search(base) is not None) or (IMPERATIVE_VERBS.search(base) is not None)
+    long_enough = len(s) >= 40
+    has_time_qty = TIME_QTY_TOKENS.search(base) is not None
+    return has_header_or_imperative and long_enough and has_time_qty
+
+
 # ---- QA / Utility helpers ----
 def _safe_punct_scrub(s: str) -> str:
     # Non-semantic clean-ups only
@@ -91,6 +118,66 @@ Rules:
 - If not present, return {"found": false}.
 """.strip()
 
+DIRECTIONS_OCR_SYSTEM = """
+You are an exacting OCR agent. You will be given a crop that contains a DIRECTIONS / USAGE / PREPARATION section.
+Rules:
+- Return the EXACT visible text only from this section. Preserve line breaks, bullets, numbers, punctuation, symbols (°C, %, etc.).
+- Do NOT add or infer missing words.
+- If unreadable or not a directions section, output exactly: IMAGE_UNREADABLE
+- Output plain text only.
+""".strip()
+
+DIRECTIONS_BBOX_FINDER_SYSTEM = """
+You are a vision locator. You will be shown a full label page.
+Return JSON ONLY with a single bounding box for the DIRECTIONS / USAGE / PREPARATION / HOW TO USE section if present:
+{"bbox_pct": {"x": 0-100, "y": 0-100, "w": 0-100, "h": 0-100}, "found": true/false}
+Rules:
+- Coordinates are percentages of the entire image.
+- Prefer the main directions/usage/preparation text panel (often near icons like a cup, spoon, clock, kettle).
+- If not present, return {"found": false}.
+""".strip()
+
+DIRECTIONS_STRUCTURER_SYSTEM = """
+You are a strict parser. You will receive plain text of a product's DIRECTIONS/USAGE/PREPARATION section.
+Extract structured data WITHOUT guessing. If a field is not explicitly present, use null or empty list.
+
+Return JSON ONLY with this schema:
+{
+  "steps": [{"order": 1, "text": "..."}, ...],
+  "timings": [{"value": 2, "unit": "min"|"sec"}],
+  "temperatures": [{"value": 90, "unit": "°C"|"°F"}],
+  "volumes": [{"value": 200, "unit": "ml"|"L"|"cup"|"tsp"|"tbsp"}],
+  "dosage": {"amount": 1, "unit": "capsule|tablet|scoop|ml|g|drops", "frequency_per_day": 1|null, "timing_notes": "with food|morning|...|null"},
+  "serving_suggestion": null|string,
+  "notes": null|string
+}
+Rules:
+- Keep original wording inside step texts.
+- Do NOT infer. Only extract what is explicit.
+""".strip()
+
+PICTOGRAM_TAGGER_SYSTEM = """
+You are a pictogram detector. You will be shown a crop image around the DIRECTIONS area.
+Return JSON ONLY with booleans and any text/numbers contained inside icons:
+{
+  "clock": {"present": true/false, "text": null|string},      // e.g., "2 min"
+  "cup": true/false,
+  "kettle": true/false,
+  "spoon_stir": true/false,
+  "microwave": true/false,
+  "hob_pan": true/false,
+  "oven": true/false,
+  "shaker_bottle": true/false,
+  "capsule_pill": true/false,
+  "thermometer": true/false,
+  "other_text_in_icons": [ "...", "..."]
+}
+Rules:
+- If an icon clearly contains legible numbers/units (e.g., "2 min", "90°C"), put that in the 'text' or 'other_text_in_icons'.
+- Do not guess.
+""".strip()
+
+
 # ---------- Public API ----------
 
 def process_artwork(
@@ -153,6 +240,122 @@ def process_artwork(
         crop_bytes = _crop_to_bytes(img, bbox)
         return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
 
+def process_artwork_directions(
+    client,
+    file_bytes: bytes,
+    filename: str,
+    *,
+    render_dpi: int = 350,
+    model: str = "gpt-4o"
+) -> Dict[str, Any]:
+    """
+    Auto-locate and extract DIRECTIONS/USAGE/PREPARATION, including pictograms.
+    Returns:
+    {
+      "ok": bool,
+      "page_index": int,
+      "bbox_pixels": [x0,y0,x1,y1] | None,
+      "directions_text": str,
+      "steps_html": str,
+      "structured": {...},
+      "pictograms": {...},
+      "qa": {"similarity_to_baseline": int|None, "flags": [...],
+             "structure_pass": bool, "consistency_ok": bool,
+             "consistency_ratio": float, "accepted": bool},
+      "debug": {...}
+    }
+    """
+    is_pdf = filename.lower().endswith(".pdf")
+
+    if is_pdf:
+        if fitz is None:
+            return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
+        pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
+        if not pages:
+            return _fail("PDF contained no pages after rendering.")
+
+        # Vector → OCR → GPT-fallback
+        vec = _pdf_find_directions_block(file_bytes)
+        if vec and 0 <= vec["page_index"] < len(pages):
+            page_idx = vec["page_index"]; bbox = vec["bbox_pixels"]; img = pages[page_idx]
+        else:
+            page_idx = None; bbox = None; img = None
+            for i, page_img in enumerate(pages):
+                bbox = (_find_region_via_ocr_directions(page_img)
+                        or _gpt_bbox_locator_directions(client, page_img, model))
+                if bbox:
+                    page_idx = i; img = page_img; break
+            if page_idx is None or img is None:
+                return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
+
+        crop_bytes = _crop_to_bytes(img, bbox)
+
+    else:
+        try:
+            img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+        except Exception:
+            return _fail("Could not open image.")
+        bbox = (_find_region_via_ocr_directions(img)
+                or _gpt_bbox_locator_directions(client, img, model))
+        if not bbox:
+            return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the image.")
+        crop_bytes = _crop_to_bytes(img, bbox)
+        page_idx = 0
+
+    # --- OCR pass 1
+    raw = _gpt_exact_ocr_directions(client, crop_bytes, model)
+    if raw.upper() == "IMAGE_UNREADABLE":
+        return {
+            "ok": False,
+            "error": "Detected directions crop unreadable.",
+            "page_index": page_idx,
+            "bbox_pixels": list(map(int, bbox)) if bbox else None
+        }
+
+    # --- Structure & consistency
+    structure_pass = _structure_ok_directions(raw)
+    raw2 = _gpt_exact_ocr_directions(client, crop_bytes, model)
+    consist_ratio = _similarity(raw2, raw) or 0.0
+    consistency_ok = (raw2 == raw) or (consist_ratio >= 98.0)
+
+    # --- Clean non-semantic punctuation
+    clean_text = _safe_punct_scrub(raw)
+
+    # --- Structure JSON & pictograms
+    structured = _gpt_structure_directions(client, clean_text, model)
+    pictos = _gpt_pictograms(client, crop_bytes, model)
+
+    # --- Baseline OCR QA
+    qa = _qa_compare_tesseract(crop_bytes, clean_text)
+    qa.update({
+        "structure_pass": structure_pass,
+        "consistency_ok": consistency_ok,
+        "consistency_ratio": consist_ratio,
+    })
+    qa["accepted"] = bool(structure_pass and consistency_ok)
+
+    # --- Steps HTML (ordered list if steps exist)
+    steps_html = ""
+    if isinstance(structured, dict) and structured.get("steps"):
+        items = "".join(f"<li>{s.get('text','').strip()}</li>" for s in structured["steps"])
+        steps_html = f"<ol>{items}</ol>"
+
+    return {
+        "ok": True,
+        "page_index": page_idx,
+        "bbox_pixels": list(map(int, bbox)) if bbox else None,
+        "directions_text": clean_text,
+        "steps_html": steps_html,
+        "structured": structured,
+        "pictograms": pictos,
+        "qa": qa,
+        "debug": {
+            "image_size": img.size if is_pdf or img else None,
+            "tesseract_available": TESS_AVAILABLE
+        }
+    }
+
+
 # ---------- Internals ----------
 
 def _fail(msg: str) -> Dict[str, Any]:
@@ -211,6 +414,72 @@ def _find_region_via_ocr(full_img: Image.Image) -> Optional[Tuple[int,int,int,in
         # Choose the tallest – tends to include full statement
         return max(candidates, key=lambda b: (b[3]-b[1]))
     return None
+
+def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for i, page in enumerate(doc):
+        blocks = page.get_text("blocks")
+        for b in blocks:
+            x0, y0, x1, y1, txt, *_ = b
+            if not txt:
+                continue
+            if DIRECTIONS_HEADER_PAT.search(txt):
+                # Grow region downward to capture bullets/paragraph under header
+                margin = max((y1 - y0) * 0.6, 20)
+                bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 6)
+                return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
+    return None
+
+def _find_region_via_ocr_directions(full_img: Image.Image) -> Optional[Tuple[int, int, int, int]]:
+    data = _ocr_words(full_img)
+    if not data or "text" not in data:
+        return None
+    W, H = full_img.size
+    candidates = []
+    for i, word in enumerate(data["text"]):
+        if not word:
+            continue
+        w_lower = word.lower()
+        if (DIRECTIONS_HEADER_PAT.search(w_lower)
+            or IMPERATIVE_VERBS.search(w_lower)
+            or TIME_QTY_TOKENS.search(w_lower)):
+            x = data["left"][i]; y = data["top"][i]
+            w = data["width"][i]; h = data["height"][i]
+            # Expand to a block likely containing the steps & icons nearby
+            x0 = max(0, x - int(0.07 * W))
+            x1 = min(W, x + w + int(0.07 * W))
+            y0 = max(0, y - int(0.03 * H))
+            y1 = min(H, y + h + int(0.50 * H))
+            candidates.append((x0, y0, x1, y1))
+    if candidates:
+        # Choose the largest area candidate
+        return max(candidates, key=lambda b: (b[2]-b[0]) * (b[3]-b[1]))
+    return None
+
+def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Optional[Tuple[int, int, int, int]]:
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    data_url = _encode_data_url(buf.getvalue())
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": DIRECTIONS_BBOX_FINDER_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Locate Directions/Usage/Preparation area and return JSON only."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ]
+    )
+    try:
+        js = json.loads(r.choices[0].message.content.strip())
+        if not js.get("found"):
+            return None
+        W, H = img.size
+        pct = js["bbox_pct"]
+        x = int(W * pct["x"] / 100.0); y = int(H * pct["y"] / 100.0)
+        w = int(W * pct["w"] / 100.0); h = int(H * pct["h"] / 100.0)
+        return (x, y, x + w, y + h)
+    except Exception:
+        return None
 
 def _encode_data_url(image_bytes: bytes, mime="image/png") -> str:
     return f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
@@ -272,6 +541,59 @@ def _gpt_html_allergen_bold(client, ingredient_text: str, model: str) -> str:
         ]
     )
     return r.choices[0].message.content.strip()
+
+def _gpt_exact_ocr_directions(client, crop_bytes: bytes, model: str) -> str:
+    data_url = _encode_data_url(crop_bytes)
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": DIRECTIONS_OCR_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Extract the exact Directions/Usage/Preparation text only."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ]
+    )
+    return r.choices[0].message.content.strip()
+
+def _gpt_structure_directions(client, raw_text: str, model: str) -> Dict[str, Any]:
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": DIRECTIONS_STRUCTURER_SYSTEM},
+            {"role": "user", "content": raw_text}
+        ]
+    )
+    try:
+        return json.loads(r.choices[0].message.content.strip())
+    except Exception:
+        return {
+            "steps": [],
+            "timings": [],
+            "temperatures": [],
+            "volumes": [],
+            "dosage": {"amount": None, "unit": None, "frequency_per_day": None, "timing_notes": None},
+            "serving_suggestion": None,
+            "notes": None,
+            "error": "STRUCTURE_PARSE_FAILED"
+        }
+
+def _gpt_pictograms(client, crop_bytes: bytes, model: str) -> Dict[str, Any]:
+    data_url = _encode_data_url(crop_bytes)
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": PICTOGRAM_TAGGER_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Detect icons and any numbers/units inside them."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ]
+    )
+    try:
+        return json.loads(r.choices[0].message.content.strip())
+    except Exception:
+        return {"error": "PICTO_PARSE_FAILED"}
 
 def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
     flags = []
@@ -348,4 +670,5 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
             "tesseract_available": TESS_AVAILABLE
         }
     }
+
 
