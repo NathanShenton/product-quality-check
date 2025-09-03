@@ -6,3 +6,7 @@ streamlit-cropper==0.2.0
 Pillow>=9.5.0
 requests>=2.0.0
 rapidfuzz>=3.0.0
+# NEW for artwork_processing.py
+pymupdf>=1.23.8        # PyMuPDF (import fitz) for PDF text & rendering
+pytesseract>=0.3.10    # word-level boxes + baseline OCR (optional but recommended)
+numpy>=1.26            # used by the module and common imaging ops
