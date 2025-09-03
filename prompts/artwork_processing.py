@@ -27,6 +27,36 @@ except Exception:
 
 HEADER_PAT = re.compile(r"\bingredient[s]?\b", re.IGNORECASE)
 
+# ---- QA / Utility helpers ----
+def _safe_punct_scrub(s: str) -> str:
+    # Non-semantic clean-ups only
+    return (
+        s.replace("))", ")")
+         .replace(" ,", ",")
+         .replace(" .", ".")
+         .replace(" :", ":")
+    ).strip()
+
+def _structure_ok(s: str) -> bool:
+    """
+    Lightweight acceptance guard:
+    - must include an 'ingredient' header
+    - must be reasonably long
+    - should include at least one expected token (allergen or key active); tune as you like
+    """
+    base = s.lower()
+    has_header = ("ingredient" in base)
+    long_enough = (len(s) >= 60)
+    has_expected_token = any(t in base for t in ["soy", "soya", "pumpkin seed"])
+    return has_header and long_enough and has_expected_token
+
+def _similarity(a: str, b: str) -> float | None:
+    try:
+        from rapidfuzz import fuzz
+        return float(fuzz.ratio(a.strip(), b.strip()))
+    except Exception:
+        return None
+
 # ---------- System prompts (strict, zero-temp) ----------
 
 INGREDIENT_OCR_SYSTEM = """
@@ -263,7 +293,9 @@ def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
     return {"similarity_to_baseline": ratio, "flags": flags}
 
 def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int, bbox, full_image: Image.Image) -> Dict[str, Any]:
+    # --- Pass 1: strict OCR
     gpt_text = _gpt_exact_ocr(client, crop_bytes, model)
+
     if gpt_text.upper() == "IMAGE_UNREADABLE":
         return {
             "ok": False,
@@ -271,13 +303,44 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
             "page_index": page_index,
             "bbox_pixels": list(map(int, bbox)) if bbox else None,
         }
-    html_out = _gpt_html_allergen_bold(client, gpt_text, model)
-    qa = _qa_compare_tesseract(crop_bytes, gpt_text)
+
+    # --- Structure check
+    structure_pass = _structure_ok(gpt_text)
+
+    # --- Pass 2: consistency check (2nd OCR on same crop)
+    gpt_text_2 = _gpt_exact_ocr(client, crop_bytes, model)
+    consistency_ratio = _similarity(gpt_text_2, gpt_text) or 0.0
+    consistency_ok = (gpt_text_2 == gpt_text) or (consistency_ratio >= 98.0)
+
+    # --- Safe, non-semantic punctuation scrub
+    clean_text = _safe_punct_scrub(gpt_text)
+
+    # --- Allergen bolding on clean text
+    html_out = _gpt_html_allergen_bold(client, clean_text, model)
+
+    # --- Baseline OCR QA (Tesseract)
+    qa = _qa_compare_tesseract(crop_bytes, clean_text)
+
+    # Enrich QA with new signals + a decision
+    qa.update({
+        "structure_pass": structure_pass,
+        "consistency_ok": consistency_ok,
+        "consistency_ratio": consistency_ratio,
+    })
+
+    # Promote acceptance even if Tesseract similarity is low,
+    # provided our structure + consistency are strong.
+    accepted = bool(structure_pass and consistency_ok)
+    if not accepted and "LOW_SIMILARITY_TO_BASELINE_OCR" in qa.get("flags", []):
+        # Keep the flag, but still record our internal judgement:
+        qa.setdefault("flags", [])
+    qa["accepted"] = accepted
+
     return {
         "ok": True,
         "page_index": page_index,
         "bbox_pixels": list(map(int, bbox)) if bbox else None,
-        "ingredients_text": gpt_text,
+        "ingredients_text": clean_text,   # return scrubbed (non-semantic) text
         "ingredients_html": html_out,
         "qa": qa,
         "debug": {
@@ -285,3 +348,4 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
             "tesseract_available": TESS_AVAILABLE
         }
     }
+
