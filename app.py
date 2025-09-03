@@ -9,7 +9,7 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-from prompts.artwork_processing import process_artwork
+from prompts.artwork_processing import process_artwork, process_artwork_directions
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
@@ -242,8 +242,9 @@ def fetch_image_as_base64(url: str) -> str:
 st.subheader("💬 Choose a Prompt")
 
 ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
+ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
 
-prompt_names = list(PROMPT_OPTIONS.keys()) + [ARTWORK_AUTO_PROMPT]
+prompt_names = list(PROMPT_OPTIONS.keys()) + [ARTWORK_AUTO_PROMPT, ARTWORK_DIRECTIONS_PROMPT]
 
 prompt_choice = st.selectbox(
     "Select a pre-written prompt or 'Custom':",
@@ -275,7 +276,11 @@ if prompt_choice == "Competitor SKU Match":
 if prompt_choice == ARTWORK_AUTO_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing module"
     prompt_description   = "Upload PDF/JPG/PNG label artwork. Auto-finds the Ingredients panel, returns exact text + HTML with allergens bolded."
-    recommended_model    = "gpt-4o"  # force correct model for vision OCR
+    recommended_model    = "gpt-4o"  # vision
+elif prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (directions) module"
+    prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-finds Directions/Usage/Preparation, extracts exact text, structures steps/timings/temps/volumes, and tags pictograms."
+    recommended_model    = "gpt-4o"  # vision
 else:
     selected = PROMPT_OPTIONS[prompt_choice]
     selected_prompt_text = selected["prompt"]
@@ -403,6 +408,61 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
 
     # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
     # so the rest of the app behaves as before for all other prompts.
+    st.stop()
+if prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Directions/Usage/Preparation")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_directions_auto")
+
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    run_auto = st.button("🚀 Extract Directions (Auto)")
+    if art_file and run_auto:
+        with st.spinner("Locating DIRECTIONS/USAGE/PREPARATION panel and extracting…"):
+            try:
+                res = process_artwork_directions(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"  # force the correct model regardless of UI selection
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error", "Failed"))
+        else:
+            st.success("✅ Extracted DIRECTIONS/USAGE/PREPARATION")
+            st.write(f"**Page:** {res['page_index']}")
+            st.write(f"**BBox (pixels):** {res['bbox_pixels']}")
+
+            st.markdown("**Raw directions text (exact OCR):**")
+            st.code(res["directions_text"], language="text")
+
+            st.markdown("**Steps (HTML):**")
+            if res.get("steps_html"):
+                st.markdown(res["steps_html"], unsafe_allow_html=True)
+            else:
+                st.info("No ordered steps found.")
+
+            st.markdown("**Structured extraction:**")
+            st.json(res.get("structured", {}))
+
+            st.markdown("**Pictograms (icons):**")
+            st.json(res.get("pictograms", {}))
+
+            st.markdown("**QA signals:**")
+            st.json(res.get("qa", {}))
+
+            st.download_button(
+                "⬇️ Download JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="directions_result.json",
+                mime="application/json"
+            )
+
+    # IMPORTANT: bail out so the rest of the app (cropper/CSV flows) doesn't render for this prompt
     st.stop()
 
 
