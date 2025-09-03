@@ -225,7 +225,9 @@ def process_artwork(
         vec = _pdf_find_ingredient_block(file_bytes)
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
-            bbox = vec["bbox_pixels"]
+            bbox_pt = vec["bbox_pixels"]              # <-- points @ 72 dpi
+            scale   = render_dpi / 72.0
+            bbox = tuple(int(v * scale) for v in bbox_pt)  # <-- pixels @ render_dpi
             crop_bytes = _crop_to_bytes(pages[page_idx], bbox)
             return _final_ocr_and_format(client, crop_bytes, model, page_idx, bbox, pages[page_idx])
         # No vector hit → fallback per page (OCR boxes then GPT bbox)
@@ -289,17 +291,50 @@ def process_artwork_directions(
         # Vector → OCR → GPT-fallback
         vec = _pdf_find_directions_block(file_bytes)
         if vec and 0 <= vec["page_index"] < len(pages):
-            page_idx = vec["page_index"]; bbox = vec["bbox_pixels"]; img = pages[page_idx]
+            page_idx = vec["page_index"]
+            # _pdf_find_directions_block returns 72-dpi page coords → scale to render_dpi pixels
+            bbox_pts = vec["bbox_pixels"]  # actually in points (72 dpi)
+            scale = render_dpi / 72.0
+            bbox = tuple(int(round(v * scale)) for v in bbox_pts)
+        
+            # clamp + pad to avoid out-of-bounds and give GPT a little context
+            bbox = _clamp_pad_bbox(bbox, pages[page_idx].size, pad_frac=0.02)
+            if not bbox:
+                # if scaling/clamping broke it, fall back to OCR/GPT locator
+                img = pages[page_idx]
+                bbox = (_find_region_via_ocr_directions(img)
+                        or _gpt_bbox_locator_directions(client, img, model))
+                if not bbox:
+                    return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
+                # clamp the fallback too
+                bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+                if not bbox:
+                    return _fail("Directions bbox invalid after clamp.")
+            img = pages[page_idx]
+        
         else:
             page_idx = None; bbox = None; img = None
             for i, page_img in enumerate(pages):
-                bbox = (_find_region_via_ocr_directions(page_img)
+                # OCR → GPT locator
+                cand = (_find_region_via_ocr_directions(page_img)
                         or _gpt_bbox_locator_directions(client, page_img, model))
-                if bbox:
-                    page_idx = i; img = page_img; break
-            if page_idx is None or img is None:
+                if cand:
+                    cand = _clamp_pad_bbox(cand, page_img.size, pad_frac=0.02)
+                    if cand:
+                        bbox = cand; page_idx = i; img = page_img; break
+            if page_idx is None or img is None or bbox is None:
                 return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
-
+        
+        # (Optional) sanity: if the bbox is extremely small, re-try GPT locator
+        x0, y0, x1, y1 = bbox
+        W, H = img.size
+        if (x1 - x0) * (y1 - y0) < 0.02 * (W * H):  # <2% of page area is suspiciously small
+            alt = _gpt_bbox_locator_directions(client, img, model)
+            if alt:
+                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                if alt:
+                    bbox = alt
+        
         crop_bytes = _crop_to_bytes(img, bbox)
 
     else:
@@ -414,6 +449,24 @@ def _ocr_words(image: Image.Image):
     except Exception:
         return None
 
+def _clamp_pad_bbox(bbox, img_size, pad_frac=0.02):
+    """Clamp bbox to image and add small padding (fraction of min(W,H))."""
+    x0, y0, x1, y1 = map(int, bbox)
+    W, H = img_size
+    # clamp
+    x0 = max(0, min(x0, W - 1))
+    x1 = max(0, min(x1, W))
+    y0 = max(0, min(y0, H - 1))
+    y1 = max(0, min(y1, H))
+    if x1 <= x0 or y1 <= y0:
+        return None
+
+    # pad (2% by default), then clamp again
+    pad = int(pad_frac * min(W, H))
+    x0 = max(0, x0 - pad); y0 = max(0, y0 - pad)
+    x1 = min(W, x1 + pad); y1 = min(H, y1 + pad)
+    return (x0, y0, x1, y1)
+
 def _find_region_via_ocr(full_img: Image.Image) -> Optional[Tuple[int,int,int,int]]:
     data = _ocr_words(full_img)
     if not data or "text" not in data:
@@ -448,7 +501,7 @@ def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
             if DIRECTIONS_HEADER_PAT.search(txt):
                 # Grow region downward to capture bullets/paragraph under header
                 margin = max((y1 - y0) * 0.6, 20)
-                bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 6)
+                bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 3)  # was *6
                 return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
     return None
 
@@ -737,6 +790,7 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
             "tesseract_available": TESS_AVAILABLE
         }
     }
+
 
 
 
