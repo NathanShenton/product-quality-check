@@ -9,7 +9,11 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-from prompts.artwork_processing import process_artwork, process_artwork_directions
+from prompts.artwork_processing import (
+    process_artwork,
+    process_artwork_directions,
+    process_artwork_packsize,   # ← NEW
+)
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
@@ -243,8 +247,14 @@ st.subheader("💬 Choose a Prompt")
 
 ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
 ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
+ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
 
-prompt_names = list(PROMPT_OPTIONS.keys()) + [ARTWORK_AUTO_PROMPT, ARTWORK_DIRECTIONS_PROMPT]
+
+prompt_names = list(PROMPT_OPTIONS.keys()) + [
+    ARTWORK_AUTO_PROMPT,
+    ARTWORK_DIRECTIONS_PROMPT,
+    ARTWORK_PACKSIZE_PROMPT,    # ← NEW
+]
 
 prompt_choice = st.selectbox(
     "Select a pre-written prompt or 'Custom':",
@@ -276,11 +286,18 @@ if prompt_choice == "Competitor SKU Match":
 if prompt_choice == ARTWORK_AUTO_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing module"
     prompt_description   = "Upload PDF/JPG/PNG label artwork. Auto-finds the Ingredients panel, returns exact text + HTML with allergens bolded."
-    recommended_model    = "gpt-4o"  # vision
+    recommended_model    = "gpt-4o"
 elif prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (directions) module"
     prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-finds Directions/Usage/Preparation, extracts exact text, structures steps/timings/temps/volumes, and tags pictograms."
-    recommended_model    = "gpt-4o"  # vision
+    recommended_model    = "gpt-4o"
+elif prompt_choice == ARTWORK_PACKSIZE_PROMPT:  # ← NEW
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (pack size/weights) module"
+    prompt_description   = (
+        "Upload PDF/JPG/PNG artwork. Auto-finds the main net quantity/pack-size statement, "
+        "parses Number of items, Base quantity, Unit of measure, and extracts Net/Gross/Drained weight + ℮ if present."
+    )
+    recommended_model    = "gpt-4o"
 else:
     selected = PROMPT_OPTIONS[prompt_choice]
     selected_prompt_text = selected["prompt"]
@@ -408,6 +425,78 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
 
     # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
     # so the rest of the app behaves as before for all other prompts.
+    st.stop()
+
+if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Pack Size / Weights")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_packsize_auto")
+
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    run_auto = st.button("🚀 Extract Pack Size / Weights (Auto)")
+    if art_file and run_auto:
+        with st.spinner("Locating PACK SIZE / NET QUANTITY and extracting…"):
+            try:
+                res = process_artwork_packsize(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"  # force the correct model regardless of UI selection
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error", "Failed"))
+        else:
+            st.success("✅ Extracted Pack Size / Weights")
+            st.write(f"**Page:** {res.get('page_index')}")
+            st.write(f"**BBox (pixels):** {res.get('bbox_pixels')}")
+
+            parsed = (res.get("parsed") or {})
+            # Pretty summary card
+            st.markdown("#### 🧾 Parsed Summary")
+            colA, colB, colC = st.columns(3)
+            with colA:
+                st.metric("Number of items", str(parsed.get("number_of_items") or "—"))
+            with colB:
+                st.metric("Base quantity", str(parsed.get("base_quantity") or "—"))
+            with colC:
+                uom = parsed.get("unit_of_measure") or "—"
+                st.metric("Unit of measure", uom)
+
+            # Weights table-style display
+            st.markdown("#### ⚖️ Weights")
+            nw = parsed.get("net_weight") or {}
+            gw = parsed.get("gross_weight") or {}
+            dw = parsed.get("drained_weight") or {}
+            e_flag = parsed.get("e_mark_present")
+            st.write({
+                "Net weight":     f"{nw.get('value')} {nw.get('unit')}" if nw.get("value") is not None else None,
+                "Gross weight":   f"{gw.get('value')} {gw.get('unit')}" if gw.get("value") is not None else None,
+                "Drained weight": f"{dw.get('value')} {dw.get('unit')}" if dw.get("value") is not None else None,
+                "℮ present":      e_flag if e_flag is not None else None
+            })
+
+            st.markdown("#### 🧩 Raw OCR lines considered")
+            st.code("\n".join(parsed.get("raw_candidates") or []), language="text")
+
+            st.markdown("#### 🪵 Raw text (crop OCR)")
+            st.code(res.get("raw_text", ""), language="text")
+
+            st.markdown("#### 🧪 QA signals")
+            st.json(res.get("qa", {}))
+
+            st.download_button(
+                "⬇️ Download JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="packsize_result.json",
+                mime="application/json"
+            )
+
+    # Bail out to keep behaviour consistent with other auto flows
     st.stop()
 if prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Directions/Usage/Preparation")
