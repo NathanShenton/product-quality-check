@@ -84,6 +84,18 @@ def _similarity(a: str, b: str) -> float | None:
     except Exception:
         return None
 
+def _clean_gpt_json_block(text: str) -> str:
+    """Strip ``` fences / prefixes and return the JSON object/string only."""
+    import re
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"```$", "", t.strip(), flags=re.IGNORECASE)
+    i = t.find("{")
+    return t[i:].strip() if i != -1 else t
+
+
+
 # ---------- System prompts (strict, zero-temp) ----------
 
 INGREDIENT_OCR_SYSTEM = """
@@ -323,6 +335,16 @@ def process_artwork_directions(
 
     # --- Structure JSON & pictograms
     structured = _gpt_structure_directions(client, clean_text, model)
+    # Fallback if structurer failed or returned nothing useful
+    if (structured.get("error") == "STRUCTURE_PARSE_FAILED"
+        or (not structured.get("steps") and not structured.get("dosage", {}).get("amount"))):
+        fb = _lightweight_directions_fallback(clean_text)
+        if not structured.get("steps"):
+            structured["steps"] = fb["steps"]
+        if (not structured.get("dosage")
+            or structured["dosage"].get("amount") is None):
+            structured["dosage"] = fb["dosage"]
+
     pictos = _gpt_pictograms(client, crop_bytes, model)
 
     # --- Baseline OCR QA
@@ -564,8 +586,10 @@ def _gpt_structure_directions(client, raw_text: str, model: str) -> Dict[str, An
             {"role": "user", "content": raw_text}
         ]
     )
+    raw = r.choices[0].message.content.strip()
     try:
-        return json.loads(r.choices[0].message.content.strip())
+        cleaned = _clean_gpt_json_block(raw)
+        return json.loads(cleaned)
     except Exception:
         return {
             "steps": [],
@@ -575,8 +599,51 @@ def _gpt_structure_directions(client, raw_text: str, model: str) -> Dict[str, An
             "dosage": {"amount": None, "unit": None, "frequency_per_day": None, "timing_notes": None},
             "serving_suggestion": None,
             "notes": None,
-            "error": "STRUCTURE_PARSE_FAILED"
+            "error": "STRUCTURE_PARSE_FAILED",
+            "raw_model_output": raw  # helpful in Streamlit st.json
         }
+
+_DOSAGE_RE = re.compile(
+    r"\btake\s+(\d+)\s+(capsule|capsules|tablet|tablets|scoop|scoops|drop|drops)\b.*?\b(daily|per day|a day)\b",
+    re.IGNORECASE
+)
+
+def _lightweight_directions_fallback(text: str) -> Dict[str, Any]:
+    out = {
+        "steps": [],
+        "timings": [],
+        "temperatures": [],
+        "volumes": [],
+        "dosage": {"amount": None, "unit": None, "frequency_per_day": None, "timing_notes": None},
+        "serving_suggestion": None,
+        "notes": None
+    }
+
+    # Try to extract dosage
+    m = _DOSAGE_RE.search(text)
+    if m:
+        amount = int(m.group(1))
+        unit = m.group(2).lower().rstrip('s')   # normalize (capsule/capsules → capsule)
+        out["dosage"] = {
+            "amount": amount,
+            "unit": unit,
+            "frequency_per_day": 1,   # "daily" implies once per day
+            "timing_notes": None
+        }
+
+    # Split into sentences and keep instruction-like ones
+    bits = re.split(r"(?<=[\.\!\?])\s+", text.strip())
+    steps = []
+    for b in bits:
+        b2 = b.strip(" \n\r\t•-")
+        if not b2:
+            continue
+        if re.search(r"\b(take|stir|mix|add|pour|dissolve|shake|brew|steep|drink|apply|do not exceed)\b", b2, re.IGNORECASE):
+            steps.append({"order": len(steps)+1, "text": b2})
+    out["steps"] = steps
+
+    return out
+
 
 def _gpt_pictograms(client, crop_bytes: bytes, model: str) -> Dict[str, Any]:
     data_url = _encode_data_url(crop_bytes)
@@ -670,5 +737,6 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
             "tesseract_available": TESS_AVAILABLE
         }
     }
+
 
 
