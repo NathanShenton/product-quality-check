@@ -9,11 +9,7 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-from prompts.artwork_processing import (
-    process_artwork,
-    process_artwork_directions,
-    process_artwork_packsize,   # ← NEW
-)
+from prompts.artwork_processing import (process_artwork, process_artwork_directions, process_artwork_packsize)
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
