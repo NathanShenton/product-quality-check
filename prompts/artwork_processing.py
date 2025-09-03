@@ -1,9 +1,10 @@
 # artwork_processing.py
-# Fully automatic Ingredients extraction from PDF/JPEG/PNG
-# - Locates panel (vector text -> OCR boxes -> GPT bbox)
+# Fully automatic Ingredients & Directions extraction from PDF/JPEG/PNG
+# - Panel location: PDF vector → OCR boxes → GPT bbox (with clamp+pad & tiny-area fallback)
 # - Strict OCR via GPT-4o (temperature=0)
-# - HTML allergen bolding
-# - QA similarity + bbox/page metadata
+# - Ingredients: HTML allergen bolding
+# - Directions: structurer + lightweight deterministic fallback
+# - QA: second-pass consistency, optional Tesseract baseline, bbox/page metadata
 
 from __future__ import annotations
 import io, re, json, base64
@@ -15,9 +16,8 @@ except Exception:
     fitz = None
 
 from PIL import Image
-import numpy as np
 
-# Optional OCR: module works without it (will use GPT bbox fallback), but QA improves if present
+# Optional OCR: improves QA but not required
 try:
     import pytesseract
     TESS_AVAILABLE = True
@@ -25,9 +25,9 @@ except Exception:
     pytesseract = None
     TESS_AVAILABLE = False
 
+# ---------- Regex patterns ----------
 HEADER_PAT = re.compile(r"\bingredient[s]?\b", re.IGNORECASE)
 
-# Directions headers & cues
 DIRECTIONS_HEADER_PAT = re.compile(
     r"\b(directions|directions for use|how to use|usage|preparation|how to prepare|"
     r"serving suggestion|instructions|method|dosage|dose)\b",
@@ -44,17 +44,7 @@ TIME_QTY_TOKENS = re.compile(
     re.IGNORECASE
 )
 
-# Reuse existing helpers already added earlier:
-# _safe_punct_scrub, _structure_ok, _similarity
-def _structure_ok_directions(s: str) -> bool:
-    base = s.lower()
-    has_header_or_imperative = (DIRECTIONS_HEADER_PAT.search(base) is not None) or (IMPERATIVE_VERBS.search(base) is not None)
-    long_enough = len(s) >= 40
-    has_time_qty = TIME_QTY_TOKENS.search(base) is not None
-    return has_header_or_imperative and long_enough and has_time_qty
-
-
-# ---- QA / Utility helpers ----
+# ---------- Utility / QA helpers ----------
 def _safe_punct_scrub(s: str) -> str:
     # Non-semantic clean-ups only
     return (
@@ -66,16 +56,21 @@ def _safe_punct_scrub(s: str) -> str:
 
 def _structure_ok(s: str) -> bool:
     """
-    Lightweight acceptance guard:
+    Lightweight acceptance guard for INGREDIENTS:
     - must include an 'ingredient' header
     - must be reasonably long
-    - should include at least one expected token (allergen or key active); tune as you like
     """
     base = s.lower()
     has_header = ("ingredient" in base)
-    long_enough = (len(s) >= 60)
-    has_expected_token = any(t in base for t in ["soy", "soya", "pumpkin seed"])
-    return has_header and long_enough and has_expected_token
+    long_enough = (len(s) >= 50)
+    return has_header and long_enough
+
+def _structure_ok_directions(s: str) -> bool:
+    base = s.lower()
+    has_header_or_imperative = (DIRECTIONS_HEADER_PAT.search(base) is not None) or (IMPERATIVE_VERBS.search(base) is not None)
+    long_enough = len(s) >= 40
+    has_time_qty = TIME_QTY_TOKENS.search(base) is not None
+    return has_header_or_imperative and long_enough and has_time_qty
 
 def _similarity(a: str, b: str) -> float | None:
     try:
@@ -86,7 +81,6 @@ def _similarity(a: str, b: str) -> float | None:
 
 def _clean_gpt_json_block(text: str) -> str:
     """Strip ``` fences / prefixes and return the JSON object/string only."""
-    import re
     t = text.strip()
     if t.startswith("```"):
         t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.IGNORECASE)
@@ -94,13 +88,14 @@ def _clean_gpt_json_block(text: str) -> str:
     i = t.find("{")
     return t[i:].strip() if i != -1 else t
 
-
+def _area_pct(bbox: Tuple[int,int,int,int], size: Tuple[int,int]) -> float:
+    (x0,y0,x1,y1) = bbox; (W,H) = size
+    if W <= 0 or H <= 0: return 0.0
+    return round(100.0 * max(0, x1-x0) * max(0, y1-y0) / (W*H), 2)
 
 # ---------- System prompts (strict, zero-temp) ----------
-
 INGREDIENT_OCR_SYSTEM = """
 You are an exacting OCR agent. You will be given an image crop that contains a UK/EU food label INGREDIENTS statement.
-
 Rules:
 - Return the EXACT visible text. Preserve punctuation, brackets, symbols (%), capitalization and ordering.
 - Do NOT infer or add text that is not clearly readable.
@@ -152,10 +147,9 @@ Rules:
 DIRECTIONS_STRUCTURER_SYSTEM = """
 You are a strict parser. You will receive plain text of a product's DIRECTIONS/USAGE/PREPARATION section.
 Extract structured data WITHOUT guessing. If a field is not explicitly present, use null or empty list.
-
 Return JSON ONLY with this schema:
 {
-  "steps": [{"order": 1, "text": "..."}, ...],
+  "steps": [{"order": 1, "text": "..."}],
   "timings": [{"value": 2, "unit": "min"|"sec"}],
   "temperatures": [{"value": 90, "unit": "°C"|"°F"}],
   "volumes": [{"value": 200, "unit": "ml"|"L"|"cup"|"tsp"|"tbsp"}],
@@ -172,7 +166,7 @@ PICTOGRAM_TAGGER_SYSTEM = """
 You are a pictogram detector. You will be shown a crop image around the DIRECTIONS area.
 Return JSON ONLY with booleans and any text/numbers contained inside icons:
 {
-  "clock": {"present": true/false, "text": null|string},      // e.g., "2 min"
+  "clock": {"present": true/false, "text": null|string},
   "cup": true/false,
   "kettle": true/false,
   "spoon_stir": true/false,
@@ -189,9 +183,7 @@ Rules:
 - Do not guess.
 """.strip()
 
-
 # ---------- Public API ----------
-
 def process_artwork(
     client,
     file_bytes: bytes,
@@ -201,14 +193,15 @@ def process_artwork(
     model: str = "gpt-4o"
 ) -> Dict[str, Any]:
     """
-    Fully automatic pipeline. Returns dict:
+    Auto INGREDIENTS pipeline (panel locate → strict OCR → allergen HTML → QA).
+    Returns:
     {
       "ok": bool,
       "page_index": int,
-      "bbox_pixels": [x0,y0,x1,y1] or None,
+      "bbox_pixels": [x0,y0,x1,y1] | None,
       "ingredients_text": str,
       "ingredients_html": str,
-      "qa": {"similarity_to_baseline": int|None, "flags": [..]},
+      "qa": {...},
       "debug": {...}
     }
     """
@@ -221,38 +214,65 @@ def process_artwork(
         pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
         if not pages:
             return _fail("PDF contained no pages after rendering.")
-        # Try vector find on page 0 first; if nothing, iterate (rare multi-page packs)
+
+        # Vector (72dpi) → scale to render_dpi → clamp+pad → tiny-area sanity → fallback
         vec = _pdf_find_ingredient_block(file_bytes)
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
-            bbox_pt = vec["bbox_pixels"]              # <-- points @ 72 dpi
-            scale   = render_dpi / 72.0
-            bbox = tuple(int(v * scale) for v in bbox_pt)  # <-- pixels @ render_dpi
-            crop_bytes = _crop_to_bytes(pages[page_idx], bbox)
-            return _final_ocr_and_format(client, crop_bytes, model, page_idx, bbox, pages[page_idx])
-        # No vector hit → fallback per page (OCR boxes then GPT bbox)
-        for page_idx, img in enumerate(pages):
-            bbox = _find_region_via_ocr(img)  # may be None
+            bbox_pts = vec["bbox_pixels"]   # points @ 72 dpi
+            scale = render_dpi / 72.0
+            bbox = tuple(int(round(v * scale)) for v in bbox_pts)
+            bbox = _clamp_pad_bbox(bbox, pages[page_idx].size, pad_frac=0.02)
+
+            img = pages[page_idx]
             if not bbox:
-                bbox = _gpt_bbox_locator(client, img, model)  # may be None
-            if bbox:
-                crop_bytes = _crop_to_bytes(img, bbox)
-                return _final_ocr_and_format(client, crop_bytes, model, page_idx, bbox, img)
-        # No page had a detectable panel
-        return _fail("Could not locate an INGREDIENTS panel in the PDF.")
-    else:
-        # Single image
-        try:
-            img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-        except Exception:
-            return _fail("Could not open image.")
-        bbox = _find_region_via_ocr(img)
-        if not bbox:
-            bbox = _gpt_bbox_locator(client, img, model)
-        if not bbox:
-            return _fail("Could not locate an INGREDIENTS panel in the image.")
+                # fallback to OCR/GPT locator on the same page
+                bbox = (_find_region_via_ocr(img) or _gpt_bbox_locator(client, img, model))
+                if bbox:
+                    bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+            if not bbox:
+                # per-page fallback search
+                page_idx, img, bbox = _scan_pages_for_ingredients(client, pages, model)
+                if page_idx is None:
+                    return _fail("Could not locate an INGREDIENTS panel in the PDF.")
+        else:
+            page_idx, img, bbox = _scan_pages_for_ingredients(client, pages, model)
+            if page_idx is None:
+                return _fail("Could not locate an INGREDIENTS panel in the PDF.")
+
+        # Tiny-area sanity check (<2% of page area) → GPT-locator fallback on the chosen page
+        if _area_pct(bbox, img.size) < 2.0:
+            alt = _gpt_bbox_locator(client, img, model)
+            if alt:
+                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                if alt:
+                    bbox = alt
+
         crop_bytes = _crop_to_bytes(img, bbox)
-        return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
+        return _final_ocr_and_format(client, crop_bytes, model, page_idx, bbox, img)
+
+    # Single image
+    try:
+        img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+    except Exception:
+        return _fail("Could not open image.")
+    bbox = (_find_region_via_ocr(img) or _gpt_bbox_locator(client, img, model))
+    if not bbox:
+        return _fail("Could not locate an INGREDIENTS panel in the image.")
+    bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+    if not bbox:
+        return _fail("Ingredients bbox invalid after clamp.")
+
+    if _area_pct(bbox, img.size) < 2.0:  # microscopic-crop sanity
+        alt = _gpt_bbox_locator(client, img, model)
+        if alt:
+            alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+            if alt:
+                bbox = alt
+
+    crop_bytes = _crop_to_bytes(img, bbox)
+    return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
+
 
 def process_artwork_directions(
     client,
@@ -263,7 +283,7 @@ def process_artwork_directions(
     model: str = "gpt-4o"
 ) -> Dict[str, Any]:
     """
-    Auto-locate and extract DIRECTIONS/USAGE/PREPARATION, including pictograms.
+    Auto DIRECTIONS/USAGE/PREPARATION pipeline (panel locate → strict OCR → structurer+fallback → pictograms → QA).
     Returns:
     {
       "ok": bool,
@@ -273,9 +293,7 @@ def process_artwork_directions(
       "steps_html": str,
       "structured": {...},
       "pictograms": {...},
-      "qa": {"similarity_to_baseline": int|None, "flags": [...],
-             "structure_pass": bool, "consistency_ok": bool,
-             "consistency_ratio": float, "accepted": bool},
+      "qa": {...},
       "debug": {...}
     }
     """
@@ -288,53 +306,33 @@ def process_artwork_directions(
         if not pages:
             return _fail("PDF contained no pages after rendering.")
 
-        # Vector → OCR → GPT-fallback
         vec = _pdf_find_directions_block(file_bytes)
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
-            # _pdf_find_directions_block returns 72-dpi page coords → scale to render_dpi pixels
-            bbox_pts = vec["bbox_pixels"]  # actually in points (72 dpi)
+            bbox_pts = vec["bbox_pixels"]  # points @ 72 dpi
             scale = render_dpi / 72.0
             bbox = tuple(int(round(v * scale)) for v in bbox_pts)
-        
-            # clamp + pad to avoid out-of-bounds and give GPT a little context
             bbox = _clamp_pad_bbox(bbox, pages[page_idx].size, pad_frac=0.02)
-            if not bbox:
-                # if scaling/clamping broke it, fall back to OCR/GPT locator
-                img = pages[page_idx]
-                bbox = (_find_region_via_ocr_directions(img)
-                        or _gpt_bbox_locator_directions(client, img, model))
-                if not bbox:
-                    return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
-                # clamp the fallback too
-                bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
-                if not bbox:
-                    return _fail("Directions bbox invalid after clamp.")
             img = pages[page_idx]
-        
-        else:
-            page_idx = None; bbox = None; img = None
-            for i, page_img in enumerate(pages):
-                # OCR → GPT locator
-                cand = (_find_region_via_ocr_directions(page_img)
-                        or _gpt_bbox_locator_directions(client, page_img, model))
+            if not bbox:
+                # fallback on that page
+                cand = (_find_region_via_ocr_directions(img) or _gpt_bbox_locator_directions(client, img, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, page_img.size, pad_frac=0.02)
-                    if cand:
-                        bbox = cand; page_idx = i; img = page_img; break
-            if page_idx is None or img is None or bbox is None:
-                return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
-        
-        # (Optional) sanity: if the bbox is extremely small, re-try GPT locator
-        x0, y0, x1, y1 = bbox
-        W, H = img.size
-        if (x1 - x0) * (y1 - y0) < 0.02 * (W * H):  # <2% of page area is suspiciously small
+                    bbox = _clamp_pad_bbox(cand, img.size, pad_frac=0.02)
+        else:
+            # per-page scan
+            page_idx, img, bbox = _scan_pages_for_directions(client, pages, model)
+
+        if page_idx is None or img is None or bbox is None:
+            return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
+
+        if _area_pct(bbox, img.size) < 2.0:
             alt = _gpt_bbox_locator_directions(client, img, model)
             if alt:
                 alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
                 if alt:
                     bbox = alt
-        
+
         crop_bytes = _crop_to_bytes(img, bbox)
 
     else:
@@ -342,10 +340,20 @@ def process_artwork_directions(
             img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
-        bbox = (_find_region_via_ocr_directions(img)
-                or _gpt_bbox_locator_directions(client, img, model))
+        bbox = (_find_region_via_ocr_directions(img) or _gpt_bbox_locator_directions(client, img, model))
         if not bbox:
             return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the image.")
+        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+        if not bbox:
+            return _fail("Directions bbox invalid after clamp.")
+
+        if _area_pct(bbox, img.size) < 2.0:
+            alt = _gpt_bbox_locator_directions(client, img, model)
+            if alt:
+                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                if alt:
+                    bbox = alt
+
         crop_bytes = _crop_to_bytes(img, bbox)
         page_idx = 0
 
@@ -370,14 +378,15 @@ def process_artwork_directions(
 
     # --- Structure JSON & pictograms
     structured = _gpt_structure_directions(client, clean_text, model)
-    # Fallback if structurer failed or returned nothing useful
-    if (structured.get("error") == "STRUCTURE_PARSE_FAILED"
-        or (not structured.get("steps") and not structured.get("dosage", {}).get("amount"))):
+    # fallback if structurer returned little
+    if (isinstance(structured, dict) and (
+        structured.get("error") == "STRUCTURE_PARSE_FAILED"
+        or (not structured.get("steps") and not structured.get("dosage", {}).get("amount"))
+    )):
         fb = _lightweight_directions_fallback(clean_text)
         if not structured.get("steps"):
             structured["steps"] = fb["steps"]
-        if (not structured.get("dosage")
-            or structured["dosage"].get("amount") is None):
+        if (not structured.get("dosage") or structured["dosage"].get("amount") is None):
             structured["dosage"] = fb["dosage"]
 
     pictos = _gpt_pictograms(client, crop_bytes, model)
@@ -408,13 +417,12 @@ def process_artwork_directions(
         "qa": qa,
         "debug": {
             "image_size": img.size if is_pdf or img else None,
+            "bbox_area_pct": _area_pct(bbox, img.size),
             "tesseract_available": TESS_AVAILABLE
         }
     }
 
-
 # ---------- Internals ----------
-
 def _fail(msg: str) -> Dict[str, Any]:
     return {"ok": False, "error": msg}
 
@@ -428,16 +436,30 @@ def _pdf_to_page_images(pdf_bytes: bytes, dpi: int = 300) -> List[Image.Image]:
     return imgs
 
 def _pdf_find_ingredient_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    """Return bbox in PDF points (72dpi space) — scale later to render_dpi."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     for i, page in enumerate(doc):
-        # Prefer structure with bboxes
         blocks = page.get_text("blocks")
         for b in blocks:
             x0,y0,x1,y1,txt, *_ = b
             if txt and HEADER_PAT.search(txt):
-                # Grow downward generously to capture the full paragraph under header
                 margin = max((y1 - y0) * 0.6, 20)
                 bbox = (x0, max(0, y0 - margin), x1, y1 + margin*6)
+                return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
+    return None
+
+def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    """Return bbox in PDF points (72dpi space) — scale later to render_dpi."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for i, page in enumerate(doc):
+        blocks = page.get_text("blocks")
+        for b in blocks:
+            x0, y0, x1, y1, txt, *_ = b
+            if not txt:
+                continue
+            if DIRECTIONS_HEADER_PAT.search(txt):
+                margin = max((y1 - y0) * 0.6, 20)
+                bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 3)
                 return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
     return None
 
@@ -453,15 +475,12 @@ def _clamp_pad_bbox(bbox, img_size, pad_frac=0.02):
     """Clamp bbox to image and add small padding (fraction of min(W,H))."""
     x0, y0, x1, y1 = map(int, bbox)
     W, H = img_size
-    # clamp
     x0 = max(0, min(x0, W - 1))
     x1 = max(0, min(x1, W))
     y0 = max(0, min(y0, H - 1))
     y1 = max(0, min(y1, H))
     if x1 <= x0 or y1 <= y0:
         return None
-
-    # pad (2% by default), then clamp again
     pad = int(pad_frac * min(W, H))
     x0 = max(0, x0 - pad); y0 = max(0, y0 - pad)
     x1 = min(W, x1 + pad); y1 = min(H, y1 + pad)
@@ -479,30 +498,13 @@ def _find_region_via_ocr(full_img: Image.Image) -> Optional[Tuple[int,int,int,in
         if HEADER_PAT.search(word):
             x = data["left"][i]; y = data["top"][i]
             w = data["width"][i]; h = data["height"][i]
-            # Expand to a column under the header
             x0 = max(0, x - int(0.05*W))
             x1 = min(W, x + w + int(0.05*W))
             y0 = max(0, y - int(0.02*H))
             y1 = min(H, y + h + int(0.45*H))
             candidates.append((x0,y0,x1,y1))
     if candidates:
-        # Choose the tallest – tends to include full statement
         return max(candidates, key=lambda b: (b[3]-b[1]))
-    return None
-
-def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    for i, page in enumerate(doc):
-        blocks = page.get_text("blocks")
-        for b in blocks:
-            x0, y0, x1, y1, txt, *_ = b
-            if not txt:
-                continue
-            if DIRECTIONS_HEADER_PAT.search(txt):
-                # Grow region downward to capture bullets/paragraph under header
-                margin = max((y1 - y0) * 0.6, 20)
-                bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 3)  # was *6
-                return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
     return None
 
 def _find_region_via_ocr_directions(full_img: Image.Image) -> Optional[Tuple[int, int, int, int]]:
@@ -520,16 +522,39 @@ def _find_region_via_ocr_directions(full_img: Image.Image) -> Optional[Tuple[int
             or TIME_QTY_TOKENS.search(w_lower)):
             x = data["left"][i]; y = data["top"][i]
             w = data["width"][i]; h = data["height"][i]
-            # Expand to a block likely containing the steps & icons nearby
             x0 = max(0, x - int(0.07 * W))
             x1 = min(W, x + w + int(0.07 * W))
             y0 = max(0, y - int(0.03 * H))
             y1 = min(H, y + h + int(0.50 * H))
             candidates.append((x0, y0, x1, y1))
     if candidates:
-        # Choose the largest area candidate
         return max(candidates, key=lambda b: (b[2]-b[0]) * (b[3]-b[1]))
     return None
+
+def _gpt_bbox_locator(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    data_url = _encode_data_url(buf.getvalue())
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": BBOX_FINDER_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Locate the INGREDIENTS panel and return JSON only."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ]
+    )
+    try:
+        js = json.loads(r.choices[0].message.content.strip())
+        if not js.get("found"):
+            return None
+        W, H = img.size
+        pct = js["bbox_pct"]
+        x = int(W * pct["x"] / 100.0); y = int(H * pct["y"] / 100.0)
+        w = int(W * pct["w"] / 100.0); h = int(H * pct["h"] / 100.0)
+        return (x, y, x+w, y+h)
+    except Exception:
+        return None
 
 def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Optional[Tuple[int, int, int, int]]:
     buf = io.BytesIO(); img.save(buf, format="PNG")
@@ -559,43 +584,24 @@ def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Option
 def _encode_data_url(image_bytes: bytes, mime="image/png") -> str:
     return f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
 
-def _gpt_bbox_locator(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
-    buf = io.BytesIO(); img.save(buf, format="PNG")
-    data_url = _encode_data_url(buf.getvalue())
-    r = client.chat.completions.create(
-        model=model,
-        temperature=0, top_p=0,
-        messages=[
-            {"role": "system", "content": BBOX_FINDER_SYSTEM},
-            {"role": "user", "content": [
-                {"type": "text", "text": "Locate the INGREDIENTS panel and return JSON only."},
-                {"type": "image_url", "image_url": {"url": data_url}}
-            ]}
-        ]
-    )
-    try:
-        js = json.loads(r.choices[0].message.content.strip())
-        if not js.get("found"):
-            return None
-        W, H = img.size
-        pct = js["bbox_pct"]
-        x = int(W * pct["x"] / 100.0); y = int(H * pct["y"] / 100.0)
-        w = int(W * pct["w"] / 100.0); h = int(H * pct["h"] / 100.0)
-        return (x, y, x+w, y+h)
-    except Exception:
-        return None
-
 def _crop_to_bytes(img: Image.Image, bbox: Tuple[int,int,int,int]) -> bytes:
     x0,y0,x1,y1 = map(int, bbox)
     crop = img.crop((x0,y0,x1,y1))
     out = io.BytesIO(); crop.save(out, format="PNG")
     return out.getvalue()
 
+def _ocr_words_image_to_string(crop_bytes: bytes) -> str:
+    if not TESS_AVAILABLE:
+        return ""
+    try:
+        return pytesseract.image_to_string(Image.open(io.BytesIO(crop_bytes)))
+    except Exception:
+        return ""
+
 def _gpt_exact_ocr(client, crop_bytes: bytes, model: str) -> str:
     data_url = _encode_data_url(crop_bytes)
     r = client.chat.completions.create(
-        model=model,
-        temperature=0, top_p=0,
+        model=model, temperature=0, top_p=0,
         messages=[
             {"role": "system", "content": INGREDIENT_OCR_SYSTEM},
             {"role": "user", "content": [
@@ -608,8 +614,7 @@ def _gpt_exact_ocr(client, crop_bytes: bytes, model: str) -> str:
 
 def _gpt_html_allergen_bold(client, ingredient_text: str, model: str) -> str:
     r = client.chat.completions.create(
-        model=model,
-        temperature=0, top_p=0,
+        model=model, temperature=0, top_p=0,
         messages=[
             {"role": "system", "content": INGREDIENT_HTML_SYSTEM},
             {"role": "user", "content": ingredient_text}
@@ -653,7 +658,7 @@ def _gpt_structure_directions(client, raw_text: str, model: str) -> Dict[str, An
             "serving_suggestion": None,
             "notes": None,
             "error": "STRUCTURE_PARSE_FAILED",
-            "raw_model_output": raw  # helpful in Streamlit st.json
+            "raw_model_output": raw
         }
 
 _DOSAGE_RE = re.compile(
@@ -671,20 +676,12 @@ def _lightweight_directions_fallback(text: str) -> Dict[str, Any]:
         "serving_suggestion": None,
         "notes": None
     }
-
-    # Try to extract dosage
     m = _DOSAGE_RE.search(text)
     if m:
         amount = int(m.group(1))
-        unit = m.group(2).lower().rstrip('s')   # normalize (capsule/capsules → capsule)
-        out["dosage"] = {
-            "amount": amount,
-            "unit": unit,
-            "frequency_per_day": 1,   # "daily" implies once per day
-            "timing_notes": None
-        }
+        unit = m.group(2).lower().rstrip('s')
+        out["dosage"] = {"amount": amount, "unit": unit, "frequency_per_day": 1, "timing_notes": None}
 
-    # Split into sentences and keep instruction-like ones
     bits = re.split(r"(?<=[\.\!\?])\s+", text.strip())
     steps = []
     for b in bits:
@@ -694,9 +691,7 @@ def _lightweight_directions_fallback(text: str) -> Dict[str, Any]:
         if re.search(r"\b(take|stir|mix|add|pour|dissolve|shake|brew|steep|drink|apply|do not exceed)\b", b2, re.IGNORECASE):
             steps.append({"order": len(steps)+1, "text": b2})
     out["steps"] = steps
-
     return out
-
 
 def _gpt_pictograms(client, crop_bytes: bytes, model: str) -> Dict[str, Any]:
     data_url = _encode_data_url(crop_bytes)
@@ -720,10 +715,10 @@ def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
     ratio = None
     if TESS_AVAILABLE:
         try:
-            baseline = pytesseract.image_to_string(Image.open(io.BytesIO(crop_bytes)))
+            baseline = _ocr_words_image_to_string(crop_bytes)
             try:
                 from rapidfuzz import fuzz
-                ratio = fuzz.ratio(baseline.strip(), gpt_text.strip())
+                ratio = fuzz.ratio(baseline.strip(), gpt_text.strip()) if baseline else None
             except Exception:
                 ratio = None
             if baseline and ratio is not None and ratio < 90:
@@ -734,23 +729,63 @@ def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
         flags.append("IMAGE_UNREADABLE")
     return {"similarity_to_baseline": ratio, "flags": flags}
 
+def _scan_pages_for_ingredients(client, pages, model):
+    for i, page_img in enumerate(pages):
+        cand = (_find_region_via_ocr(page_img) or _gpt_bbox_locator(client, page_img, model))
+        if cand:
+            cand = _clamp_pad_bbox(cand, page_img.size, pad_frac=0.02)
+            if cand:
+                return i, page_img, cand
+    return None, None, None
+
+def _scan_pages_for_directions(client, pages, model):
+    for i, page_img in enumerate(pages):
+        cand = (_find_region_via_ocr_directions(page_img) or _gpt_bbox_locator_directions(client, page_img, model))
+        if cand:
+            cand = _clamp_pad_bbox(cand, page_img.size, pad_frac=0.02)
+            if cand:
+                return i, page_img, cand
+    return None, None, None
+
 def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int, bbox, full_image: Image.Image) -> Dict[str, Any]:
+    """
+    Final stage for INGREDIENTS: exact OCR (+retry widen), consistency, scrub, allergen HTML, QA.
+    Ensures the same crop bytes flow through consistency & QA if we widened the bbox.
+    """
+    crop_bytes_used = crop_bytes
+
     # --- Pass 1: strict OCR
-    gpt_text = _gpt_exact_ocr(client, crop_bytes, model)
-
+    gpt_text = _gpt_exact_ocr(client, crop_bytes_used, model)
     if gpt_text.upper() == "IMAGE_UNREADABLE":
-        return {
-            "ok": False,
-            "error": "Detected panel unreadable.",
-            "page_index": page_index,
-            "bbox_pixels": list(map(int, bbox)) if bbox else None,
-        }
+        # Retry once with a slightly larger crop
+        bigger = _clamp_pad_bbox(bbox, full_image.size, pad_frac=0.05)  # +5%
+        if bigger and bigger != bbox:
+            crop_bytes_retry = _crop_to_bytes(full_image, bigger)
+            gpt_text_retry = _gpt_exact_ocr(client, crop_bytes_retry, model)
+            if gpt_text_retry.upper() != "IMAGE_UNREADABLE":
+                bbox = bigger
+                crop_bytes_used = crop_bytes_retry
+                gpt_text = gpt_text_retry
+            else:
+                return {
+                    "ok": False,
+                    "error": "Detected panel unreadable.",
+                    "page_index": page_index,
+                    "bbox_pixels": list(map(int, bbox)) if bbox else None,
+                }
+        else:
+            return {
+                "ok": False,
+                "error": "Detected panel unreadable.",
+                "page_index": page_index,
+                "bbox_pixels": list(map(int, bbox)) if bbox else None,
+            }
 
-    # --- Structure check
+    # --- Structure check (ingredients)
     structure_pass = _structure_ok(gpt_text)
 
-    # --- Pass 2: consistency check (2nd OCR on same crop)
-    gpt_text_2 = _gpt_exact_ocr(client, crop_bytes, model)
+    # --- Pass 2: consistency check (same crop)
+    gpt_text_2 = _gpt_exact_ocr(client, crop_bytes_used, model)
     consistency_ratio = _similarity(gpt_text_2, gpt_text) or 0.0
     consistency_ok = (gpt_text_2 == gpt_text) or (consistency_ratio >= 98.0)
 
@@ -760,37 +795,25 @@ def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int
     # --- Allergen bolding on clean text
     html_out = _gpt_html_allergen_bold(client, clean_text, model)
 
-    # --- Baseline OCR QA (Tesseract)
-    qa = _qa_compare_tesseract(crop_bytes, clean_text)
-
-    # Enrich QA with new signals + a decision
+    # --- Baseline OCR QA (Tesseract) on the crop actually used
+    qa = _qa_compare_tesseract(crop_bytes_used, clean_text)
     qa.update({
         "structure_pass": structure_pass,
         "consistency_ok": consistency_ok,
         "consistency_ratio": consistency_ratio,
     })
-
-    # Promote acceptance even if Tesseract similarity is low,
-    # provided our structure + consistency are strong.
-    accepted = bool(structure_pass and consistency_ok)
-    if not accepted and "LOW_SIMILARITY_TO_BASELINE_OCR" in qa.get("flags", []):
-        # Keep the flag, but still record our internal judgement:
-        qa.setdefault("flags", [])
-    qa["accepted"] = accepted
+    qa["accepted"] = bool(structure_pass and consistency_ok)
 
     return {
         "ok": True,
         "page_index": page_index,
         "bbox_pixels": list(map(int, bbox)) if bbox else None,
-        "ingredients_text": clean_text,   # return scrubbed (non-semantic) text
+        "ingredients_text": clean_text,
         "ingredients_html": html_out,
         "qa": qa,
         "debug": {
             "image_size": full_image.size,
+            "bbox_area_pct": _area_pct(bbox, full_image.size),
             "tesseract_available": TESS_AVAILABLE
         }
     }
-
-
-
-
