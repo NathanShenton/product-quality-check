@@ -299,39 +299,49 @@ def _fixnum(x):
 
 def _find_region_via_ocr_nutri(full_img: Image.Image) -> Optional[Tuple[int,int,int,int]]:
     """
-    Group words into line bboxes and look for nutrition hints across whole lines.
-    This catches multi-token cues like 'Typical values', 'per 100 g', 'Amount per capsule', '% NRV'.
+    Group OCR into lines and search for nutrition cues on the *line text*,
+    not single words. This catches phrases like 'Typical values', 'per 100g',
+    'Amount per capsule', '% NRV', etc.
     """
     data = _ocr_words(full_img)
     if not data or "text" not in data:
         return None
-    W, H = full_img.size
-    candidates: List[Tuple[int,int,int,int]] = []
 
-    # group by (block, paragraph, line)
+    W, H = full_img.size
+    # group by (block, paragraph, line) like in _find_region_via_ocr_packsize
     rows: Dict[Tuple[int,int,int], List[int]] = {}
     for i in range(len(data["text"])):
         if not data["text"][i]:
             continue
-        key = (data.get("block_num", [0])[i], data.get("par_num", [0])[i], data.get("line_num", [0])[i])
+        key = (
+            data.get("block_num", [0])[i],
+            data.get("par_num",   [0])[i],
+            data.get("line_num",  [0])[i],
+        )
         rows.setdefault(key, []).append(i)
 
+    candidates: List[Tuple[int,int,int,int]] = []
     for idxs in rows.values():
-        txt = " ".join(data["text"][i] for i in idxs if data["text"][i]).strip()
-        if not txt:
+        line_txt = " ".join(data["text"][i] for i in idxs if data["text"][i]).strip()
+        if not line_txt:
             continue
-        if NUTRI_HEADER_PAT.search(txt):
+
+        # header/basis cues
+        if (NUTRI_HEADER_PAT.search(line_txt)
+            or re.search(r"\b(kJ|kcal)\b", line_txt, re.IGNORECASE)
+            or re.search(r"\bper\s*(?:serving|capsule|tablet|100\s*(?:g|ml))\b", line_txt, re.IGNORECASE)
+            or re.search(r"%\s*(?:NRV|RI)\b", line_txt, re.IGNORECASE)):
             xs = [data["left"][i] for i in idxs]; ys = [data["top"][i] for i in idxs]
             ws = [data["width"][i] for i in idxs]; hs = [data["height"][i] for i in idxs]
             x0 = max(0, min(xs) - int(0.03 * W))
             x1 = min(W, max(xs[j] + ws[j] for j in range(len(xs))) + int(0.03 * W))
             y0 = max(0, min(ys) - int(0.02 * H))
-            y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.45 * H))
+            y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.30 * H))  # more downward slack for table
             candidates.append((x0, y0, x1, y1))
 
     if candidates:
-        # Prefer wide, substantial regions (helps catch full tables)
-        return max(candidates, key=lambda b: (b[2]-b[0]) * (1.0 + 0.5*(b[3]-b[1])))
+        # prefer area + width (tables tend to be wide)
+        return max(candidates, key=lambda b: (b[2]-b[0]) * (1.0 + 0.4*(b[3]-b[1])))
     return None
 
 
@@ -700,17 +710,35 @@ def process_artwork_nutrition(
         if not pages:
             return _fail("PDF contained no pages after rendering.")
 
-        page_idx = None; img = None; bbox = None
-        # quick OCR/GPT scan over pages
-        for i, pg in enumerate(pages):
-            cand = (_find_region_via_ocr_nutri(pg) or _gpt_bbox_locator_nutri(client, pg, model))
-            if cand:
-                bbox = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
-                if bbox:
-                    page_idx = i; img = pg; break
+        # 1) Try vector scan first
+        vec = _pdf_find_nutrition_block(file_bytes)
+        if vec and 0 <= vec["page_index"] < len(pages):
+            page_idx = vec["page_index"]
+            scale = render_dpi / 72.0
+            x0,y0,x1,y1 = vec["bbox_pixels"]
+            bbox = (int(round(x0*scale)), int(round(y0*scale)),
+                    int(round(x1*scale)), int(round(y1*scale)))
+            img = pages[page_idx]
+            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+            if not bbox:
+                # fallback to OCR-line or GPT locator on that page
+                cand = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
+                if cand:
+                    bbox = _clamp_pad_bbox(cand, img.size, pad_frac=0.02)
+        else:
+            # 2) Per-page scan with OCR-line → GPT
+            page_idx = None; img = None; bbox = None
+            for i, pg in enumerate(pages):
+                cand = (_find_region_via_ocr_nutri(pg) or _gpt_bbox_locator_nutri(client, pg, model))
+                if cand:
+                    bbox = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    if bbox:
+                        page_idx = i; img = pg; break
+
         if page_idx is None or not bbox:
             return _fail("Could not locate a NUTRITION panel in the PDF.")
     else:
+        # single image
         try:
             img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
@@ -721,14 +749,13 @@ def process_artwork_nutrition(
         bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
         page_idx = 0
 
-    # tiny-area recheck
-    if _area_pct(bbox, img.size) < 2.0:
+    # Tiny-area sanity: nutrition boxes are often small — don’t overreject.
+    if _area_pct(bbox, img.size) < 0.8:
         alt = _gpt_bbox_locator_nutri(client, img, model)
         if alt:
             alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
-            if alt: bbox = alt
-
-    crop_bytes = _crop_to_bytes(img, bbox)
+            if alt:
+                bbox = alt
 
     # --- extract JSON twice for consistency -----------------------------------
     p1 = _gpt_extract_nutri(client, crop_bytes, model)
@@ -1103,6 +1130,37 @@ def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
                 margin = max((y1 - y0) * 0.6, 20)
                 bbox = (x0, max(0, y0 - margin), x1, y1 + margin * 3)
                 return {"page_index": i, "bbox_pixels": tuple(map(int, bbox))}
+    return None
+
+def _pdf_find_nutrition_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    """
+    Heuristic vector scan for nutrition tables in PDFs:
+    look for headings like 'Nutrition', 'Nutritional information', 'Typical values',
+    'per 100g/ml', 'per serving/capsule', '% NRV/% RI', 'kJ', 'kcal'.
+    Returns bbox in PDF points (72 dpi).
+    """
+    if fitz is None:
+        return None
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    header = re.compile(
+        r"(nutrition|nutritional|typical values|per\s*100\s*(?:g|ml)|per\s*(?:serving|capsule|tablet)|%?\s*(?:nrv|ri)|\bkJ\b|\bkcal\b)",
+        re.IGNORECASE
+    )
+    for i, page in enumerate(doc):
+        blocks = page.get_text("blocks")
+        best = None
+        for b in blocks:
+            x0, y0, x1, y1, txt, *_ = b
+            if not txt:
+                continue
+            if header.search(txt):
+                margin = max((y1 - y0) * 0.8, 18)
+                cand = (x0, max(0, y0 - margin), x1, y1 + margin * 2.0)
+                # prefer wide blocks (tables tend to be wider)
+                if not best or (cand[2]-cand[0]) > (best[2]-best[0]):
+                    best = cand
+        if best:
+            return {"page_index": i, "bbox_pixels": tuple(map(int, best))}
     return None
 
 def _pdf_find_packsize_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
@@ -1699,5 +1757,6 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
 
 
