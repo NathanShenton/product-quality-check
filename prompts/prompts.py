@@ -13,19 +13,20 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant highly knowledgeable in UK/EU food supplement regulations. Task: For each product record provided, review all available fields and decide whether the product’s declared serving size is smaller than the “single nutritional value” basis defined in the product’s `nutritional_info` JSON.
             
             Core instruction (apply strictly):
-            • Use `nutritional_info` (a JSON attribute) as the ONLY source for identifying any “per …” nutritional bases (e.g., “per capsule”, “per 2 tablets”, “per 5 ml”, “per sachet”, “per serving” when the serving amount is numerically defined inside `nutritional_info`). Do NOT infer or derive any “per …” bases from other fields. Do NOT convert from per-100 g/ml to per-unit unless `nutritional_info` itself provides an explicit mapping.
+            • `nutritional_info` may or may not include explicit “per …” bases. If they are not present, do NOT infer or derive them; use only the values actually present in `nutritional_info`.
+            • Use `nutritional_info` (a JSON attribute) as the ONLY source for identifying any “per …” nutritional bases (e.g., “per capsule”, “per 2 tablets”, “per 5 ml”, “per sachet”, “per serving” only when the serving amount is numerically defined inside `nutritional_info`). Do NOT convert from per-100 g/ml to per-unit unless `nutritional_info` itself provides an explicit mapping.
             • To extract the serving size amount and unit, you may use any other available columns (e.g., `serving_size`, `directions/usage`, `quantity_string`, `pack_size`, `title`, `description`, label copy). Be flexible and evidence-led.
             • Normalize units and synonyms (capsule/cap, tablet/tab, softgel, gummy, drop, spray, sachet/stick, scoop, ml, g, mg, µg). Compare like with like only (count↔count, volume↔volume, mass↔mass). Do not estimate missing weights/volumes or back-calculate from nutrient amounts.
             • If `nutritional_info` contains multiple per-X entries, select the smallest numeric basis (“single nutritional value basis”) for comparison.
             • Handle decimals and ranges: if directions say “1–2 capsules”, treat min=1 and max=2. Return “Varies” if the min is smaller but the max is not.
-            • If units are incompatible or either the serving size or the per-X basis is missing/ambiguous in the allowed sources, return “Unknown” with a brief explanation.
+            • If units are incompatible OR either the serving size or the per-X basis is missing/ambiguous in the allowed sources, return “Unknown” with a brief explanation.
             • Use only evidence present in the supplied data; do not assume missing facts.
             
             Decision rule:
             • Return “Yes” if serving_size_amount < single_nv_basis_amount (same unit type).
             • Return “No” if serving_size_amount ≥ single_nv_basis_amount (same unit type).
             • Return “Varies” if a serving range straddles the basis.
-            • Return “Unknown” if comparison cannot be made under the constraints above.
+            • Return “Unknown” if comparison cannot be made under the constraints above, including when `nutritional_info` lacks any explicit per-X basis or only provides per-100 g/ml with no explicit mapping.
             
             Output (strict JSON only; no markdown, no extra keys):
             {
@@ -53,13 +54,15 @@ PROMPT_OPTIONS = {
               ],
               "constraints_applied": [
                 "Used nutritional_info only to identify per-X basis",
-                "Did not infer per-values not present in nutritional_info"
+                "Did not infer per-values not present in nutritional_info",
+                "Used only values present in nutritional_info when per-X bases absent"
               ]
             }
             
             Operational guidance (non-output):
             • Prefer explicit numerics from `serving_size`/`directions`; fall back to other columns if necessary, but do not create per-X bases from them.
             • If `nutritional_info` provides only per-100 g/ml and no smaller per-X mapping, return “Unknown”.
+            • If `nutritional_info` says “per serving” without an in-JSON numeric serving amount, treat as no per-X basis and return “Unknown”.
             • Trim whitespace; case-insensitive key matching; tolerate punctuation. Return JSON only."""
         ),
         "recommended_model": "gpt-4.1-mini",
@@ -1613,6 +1616,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
