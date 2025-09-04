@@ -18,44 +18,42 @@ PROMPT_OPTIONS = {
             Definitions:
             • Serving size (this task) — a single per-unit g/ml value extracted from "quantity string".
               – Supported patterns (accept optional spaces, the × symbol, NBSP, and decimal commas):
-                • "<N> x <X><unit>" or "<N>×<X><unit>" or variants without spaces (e.g., "4x32g", "4 × 32 g") ⇒ use the per-unit X<unit> (32 g).
-                • "<N> … of <X><unit> each" (e.g., "5 sachets of 5g each") ⇒ use X<unit> (5 g).
-                • Single value "<X><unit>" (e.g., "30 ml", "25 g") ⇒ use that value.
-              – Ignore totals; do NOT multiply N×X. If no g/ml is present (e.g., "60 tablets"), serving size is null.
+                • "<N>\s*[x×]\s*(<X>)(mg|g|ml)"  ⇒ use X+unit (e.g., "4x32g" ⇒ 32 g; "4 × 32 g" ⇒ 32 g)
+                • "<N> … of (<X>)(mg|g|ml) each" ⇒ use X+unit (e.g., "5 sachets of 5g each" ⇒ 5 g)
+                • "(<X>)(mg|g|ml)" (single value) ⇒ use that value (e.g., "30 ml", "25 g")
+              – Ignore totals; do NOT multiply N×X. If no g/ml appears (e.g., "60 tablets"), serving size is null.
               – Normalize units: µg→g (÷1,000,000); mg→g (÷1,000); kg→g (×1,000); mL→ml; L/l→ml (×1,000). Convert decimal commas to dots.
             
             • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, L/l), regardless of whether a “per …” basis exists.
-              – Parse recursively from the JSON (objects/arrays/strings). For mixed strings, extract EACH mass/volume token separately (e.g., "13g / 6.6g" ⇒ two tokens).
+              – Parse recursively from the JSON (objects/arrays/strings). For mixed strings, extract EACH mass/volume token separately (e.g., "13g / 6.6g" ⇒ two tokens; "3200g / 16g" ⇒ two tokens).
               – Ignore non-mass/volume units (kJ, kcal, %NRV, IU) and ratios (e.g., mg/100ml) — do not transform ratios into single magnitudes.
-              – Use values AS WRITTEN; do not sanitize “implausible” magnitudes (e.g., keep "3200g" as 3200 g).
+              – Use values AS WRITTEN; do not sanitize “implausible” magnitudes and do not relabel them (e.g., keep "3200g" as 3200 g).
             
             Parsing method:
-            1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple per-unit candidates exist, select the smallest per-unit g/ml present. If none, set value=null.
+            1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple per-unit candidates exist, select the smallest per-unit g/ml. If none, set value=null.
             2) Traverse "nutritional info" (JSON):
-               • Extract every numeric token with a mass/volume unit; normalize to base units (g or ml).
+               • Extract every numeric token with a mass/volume unit; normalize each to base units (g or ml).
                • For each token, capture: key/label (if available), numeric value, unit (after normalization), original text token, and a simple JSON path.
                • Do NOT infer “per …” bases or derive totals from context.
+               • Do NOT deduplicate by key: retain all tokens even if keys repeat (e.g., two “Carbohydrates” values).
             
             Comparability rules:
             • If serving size is in grams, compare ONLY to tokens normalized to grams (µg/mg/g/kg → g).
             • If serving size is in millilitres, compare ONLY to tokens normalized to millilitres (L/ml).
-            • If dimensions differ (g vs ml), mark the nutrient token as not comparable.
+            • If dimensions differ (g vs ml), mark the nutrient token as not comparable (do not convert across mass/volume).
             
             Decision (ANY exceedance check, deterministic):
             • Define EXCEEDS ⇢ nutrient_value_normalized ≥ serving_size_normalized.
-            • Output "Yes" if ANY comparable nutrient token EXCEEDS.
-            • Output "No" if there is at least one comparable token and NONE EXCEED.
-            • Output "Ambiguous" if serving size is null OR there are ZERO comparable tokens.
-            
-            Aggregation discipline (avoid inversion bugs):
-            • COMPARABLE = all tokens where comparable=true.
-            • If serving_size is null OR len(COMPARABLE)=0 ⇒ "Ambiguous".
-            • Else if ANY(COMPARABLE.value ≥ serving_size.value) ⇒ "Yes".
-            • Else ⇒ "No".
-            • Interpret "exceeds" as “nutrient amount ≥ serving size.”
+            • Build the full comparisons list first, then set the top-level decision:
+              – COMPARABLE = all tokens where comparable=true.
+              – If serving_size is null OR len(COMPARABLE)=0 ⇒ "Ambiguous".
+              – Else if ANY(COMPARABLE.result == "exceeds") ⇒ "Yes".
+              – Else ⇒ "No".
+            • Populate "exceeding_values" with every token that meets EXCEEDS.
+            • All numeric comparisons must be done on numbers (not strings); assume UTF-8 for symbols (≥, ×).
             
             Evidence:
-            Quote exact snippets for the parsed "quantity string" per-unit value and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent or adjust values.
+            Quote exact snippets for the parsed "quantity string" per-unit value and for each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent or adjust values.
             
             Output (strict JSON only):
             {
@@ -93,7 +91,7 @@ PROMPT_OPTIONS = {
                 }
               ],
               "evidence": [ { "field": string, "snippet": string } ],
-              "reasoning": "≤30 words; state whether any comparable nutrient amount meets/exceeds the serving size and cite the highest offending value."
+              "reasoning": "≤30 words; state whether any comparable nutrient amount meets/exceeds the serving size and cite the highest offending value (e.g., '3200 g ≥ 550 g')."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
         ),
@@ -1648,6 +1646,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
