@@ -19,6 +19,7 @@ from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
 from prompts.bannedingredients import find_banned_matches, build_banned_prompt
+from prompts.artwork_processing_supplier_addresses import process_artwork as process_artwork_suppliers
 
 from prompts.prompts import PROMPT_OPTIONS
 from prompts.competitor_match import (
@@ -250,6 +251,7 @@ ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
 ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
 ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
 ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
+ARTWORK_SUPPLIER_PROMPT = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
 
 
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
@@ -257,6 +259,7 @@ prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_DIRECTIONS_PROMPT,
     ARTWORK_PACKSIZE_PROMPT,
     ARTWORK_NUTRITION_PROMPT,
+    ARTWORK_SUPPLIER_PROMPT,
 ]
 
 prompt_choice = st.selectbox(
@@ -304,6 +307,13 @@ elif prompt_choice == ARTWORK_PACKSIZE_PROMPT:  # ← NEW
 elif prompt_choice == ARTWORK_NUTRITION_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (nutrition) module"
     prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-locates the nutrition panel and returns structured JSON + flat key/value rows."
+    recommended_model    = "gpt-4o"
+elif prompt_choice == ARTWORK_SUPPLIER_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (supplier addresses) module"
+    prompt_description   = (
+        "Upload PDF/JPG/PNG artwork. Auto-finds Supplier/Responsible Person blocks and "
+        "extracts exact text for **UK** and **EU** addresses separately, plus bounding boxes."
+    )
     recommended_model    = "gpt-4o"
 else:
     selected = PROMPT_OPTIONS[prompt_choice]
@@ -432,6 +442,59 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
 
     # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
     # so the rest of the app behaves as before for all other prompts.
+    st.stop()
+
+if prompt_choice == ARTWORK_SUPPLIER_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Supplier/Responsible Person addresses")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_supplier_auto")
+
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    run_auto = st.button("🚀 Extract Supplier Addresses (Auto)")
+    if art_file and run_auto:
+        with st.spinner("Locating supplier/Responsible Person address blocks and extracting…"):
+            try:
+                res = process_artwork_suppliers(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"  # force correct model regardless of UI selection
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error", "Failed"))
+        else:
+            st.success("✅ Extracted Supplier Addresses")
+            st.write(f"**Page:** {res.get('page_index')}")
+            st.markdown("#### 🇬🇧 UK Address")
+            if res.get("uk_address_text"):
+                st.code(res["uk_address_text"], language="text")
+                st.write(f"**UK BBox (pixels):** {res.get('uk_bbox_pixels')}")
+            else:
+                st.info("No UK address detected.")
+
+            st.markdown("#### 🇪🇺 EU Address")
+            if res.get("eu_address_text"):
+                st.code(res["eu_address_text"], language="text")
+                st.write(f"**EU BBox (pixels):** {res.get('eu_bbox_pixels')}")
+            else:
+                st.info("No EU address detected.")
+
+            st.markdown("#### 🧪 QA signals")
+            st.json(res.get("qa", {}))
+
+            st.download_button(
+                "⬇️ Download JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="supplier_addresses_result.json",
+                mime="application/json"
+            )
+
+    # Keep behaviour consistent: stop before crop/CSV flows
     st.stop()
 
 if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
