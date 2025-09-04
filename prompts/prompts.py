@@ -1344,7 +1344,7 @@ PROMPT_OPTIONS = {
             "OUTPUT SCHEMA (return valid JSON only in exactly this shape):\n"
             "{\n"
             "  \"sku_id\": \"string\",\n"
-            "  \"status\": \"ok|no_change|partial|error\",\n"
+            "  \"status\": \"ok|unable_to_remove_not_found|unable_to_remove_breaks_readability|error\",\n"
             "  \"removed_claim_ids\": [\"string\"],\n"
             "  \"removed_claim_texts\": [\"string\"],\n"
             "  \"notes\": \"<=20 words concise rationale\",\n"
@@ -1352,10 +1352,10 @@ PROMPT_OPTIONS = {
             "}\n\n"
     
             "STATUS RULES:\n"
-            "• ok: All matching claim instances were found and removed.\n"
-            "• partial: Some claims were removed, others not found (or only partially matched safely).\n"
-            "• no_change: No claim text matched safely; HTML returned unchanged.\n"
-            "• error: Serious issue prevented processing (e.g., HTML empty or malformed beyond safe edit).\n\n"
+            "• ok: All matching claim instances were found and removed successfully.\n"
+            "• unable_to_remove_not_found: A claim could not be located in the HTML despite normalisation rules.\n"
+            "• unable_to_remove_breaks_readability: A claim was detected, but removing it would corrupt grammar, structure, or readability.\n"
+            "• error: Serious issue prevented processing (e.g., empty/malformed HTML, input error).\n\n"
     
             "DECISION RULES (apply carefully):\n"
             "1. Identify all claims from 'claim_to_remove' and find occurrences in 'Exported Data From Web'.\n"
@@ -1363,12 +1363,14 @@ PROMPT_OPTIONS = {
             "3. Otherwise remove the smallest necessary phrase/sentence inside <p>/<em>/<strong> etc.\n"
             "4. After deletions, clean up artifacts (spacing/punctuation, dangling conjunctions, empty containers).\n"
             "5. Track which claim IDs (by index in 'claim_id') were actually removed at least once.\n"
-            "6. If nothing matches safely, return status = 'no_change' and keep the HTML as-is.\n\n"
+            "6. If a claim is not found, set status = 'unable_to_remove_not_found'.\n"
+            "7. If found but cannot be removed without breaking readability, set status = 'unable_to_remove_breaks_readability'.\n"
+            "8. If multiple statuses might apply, prioritise: error > breaks_readability > not_found > ok.\n\n"
     
             "DEBUG & EDGE CASES:\n"
             "• Claims repeated in multiple places must be removed everywhere.\n"
-            "• If a claim overlaps with factual ingredient lists, remove only the promotional claim phrase; keep neutral facts.\n"
-            "• If removing would break grammar severely, remove the minimal phrase and then repair sentence boundaries.\n"
+            "• If a claim overlaps with factual ingredient lists, remove only the promotional phrase; keep neutral facts.\n"
+            "• If removing would break grammar severely, classify as 'unable_to_remove_breaks_readability'.\n"
             "• Never add new benefits or paraphrase into a new claim.\n\n"
     
             "TOKEN & EVIDENCE CONTROL (strict):\n"
@@ -1381,7 +1383,7 @@ PROMPT_OPTIONS = {
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Removes specified marketing claims from HTML while preserving structure/readability; returns cleaned_html with removal trace."
+        "description": "Removes specified marketing claims from HTML while preserving structure/readability; returns cleaned_html with removal trace and explicit failure reasons."
     },
     "INCOMPLETE: AUDIT: Nutritionals": {
         "prompt": (
@@ -1636,6 +1638,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
