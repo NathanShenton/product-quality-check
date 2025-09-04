@@ -756,7 +756,8 @@ def process_artwork_nutrition(
             alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
             if alt:
                 bbox = alt
-
+    crop_bytes = _crop_to_bytes(img, bbox)
+    
     # --- extract JSON twice for consistency -----------------------------------
     p1 = _gpt_extract_nutri(client, crop_bytes, model)
     p2 = _gpt_extract_nutri(client, crop_bytes, model)
@@ -1757,6 +1758,7 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
 
 
 
