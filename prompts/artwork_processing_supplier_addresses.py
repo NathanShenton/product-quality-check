@@ -95,6 +95,15 @@ def _gpt_fullpage_supplier_json(client, img: Image.Image, model: str) -> Dict[st
     except Exception:
         return {"uk":[],"eu":[]}
 
+def _is_uk_like_line(line: str) -> bool:
+    ln = (line or "").strip()
+    return bool(UK_POSTCODE_PAT.search(ln)) or _mentions_uk(ln)
+
+def _is_eu_like_line(line: str) -> bool:
+    ln = (line or "").lower()
+    return _mentions_eu_country(ln)
+
+
 def _gpt_exact_ocr_address(client, crop_bytes: bytes, model: str) -> str:
     data_url = _encode_data_url(crop_bytes)
     r = client.chat.completions.create(
@@ -191,52 +200,103 @@ def _score_address_quality(text: str, expect: str) -> float:
 
 def _stitch_and_validate(uk_text, eu_text, uk_bbox, eu_bbox):
     """
-    Fix common split errors; return (uk_text, eu_text, uk_bbox, eu_bbox, notes[])
+    Fix common split errors conservatively.
+
+    Strategy:
+    - If EU starts with UK-looking lines and UK looks truncated, move ONLY the UK-looking prefix lines.
+    - If, after stitching, the UK block still ends with EU-looking lines, split that EU-looking tail back to EU.
+    - Score-based swap remains as a final safety net.
     """
     notes = []
     uk_text = _normalize_lines(uk_text or "")
     eu_text = _normalize_lines(eu_text or "")
 
-    # 1) If EU starts with a UK postcode/UK token and UK looks truncated, stitch EU->UK
-    eu_starts_uk = bool(re.match(r'^(?:' + UK_POSTCODE_PAT.pattern + r')\b', eu_text, flags=re.I)) or _mentions_uk(eu_text)
-    if eu_starts_uk and (_ends_like_truncated(uk_text) or not _has_uk_postcode(uk_text)):
-        notes.append("Stitched trailing UK lines from EU block back into UK.")
-        if uk_text and eu_text:
-            uk_text = (uk_text.rstrip(",; ") + "\n" + eu_text).strip()
-        else:
-            uk_text = (uk_text or eu_text).strip()
-        uk_bbox = _union(uk_bbox, eu_bbox)
-        eu_text, eu_bbox = "", None
+    # ---------------------------
+    # 1) Partial stitch from EU->UK (only the leading UK-like lines)
+    # ---------------------------
+    if eu_text and (_ends_like_truncated(uk_text) or not _has_uk_postcode(uk_text)):
+        eu_lines = [ln for ln in eu_text.splitlines() if ln.strip()]
+        # Take only the leading run of UK-like lines (e.g., "EC3V 3QQ, UK.")
+        prefix = []
+        i = 0
+        while i < len(eu_lines) and _is_uk_like_line(eu_lines[i]):
+            prefix.append(eu_lines[i])
+            i += 1
 
-    # 2) If UK contains clear EU country and EU is empty, flip
+        if prefix:
+            # Move the UK-like prefix to UK; keep remaining as EU
+            notes.append("Moved UK-looking prefix lines from EU into UK.")
+            stitched_prefix = "\n".join(prefix)
+            if uk_text:
+                uk_text = (uk_text.rstrip(",; ") + "\n" + stitched_prefix).strip()
+            else:
+                uk_text = stitched_prefix
+            # Remaining EU text
+            eu_tail = "\n".join(eu_lines[i:]).strip()
+            if eu_tail:
+                eu_text = eu_tail
+            else:
+                eu_text = ""
+            # Only union bboxes if we actually consumed the whole EU (rare) — otherwise keep them separate
+            if not eu_text:
+                uk_bbox = _union(uk_bbox, eu_bbox)
+                eu_bbox = None
+
+    # ---------------------------
+    # 2) If UK ends with EU-looking tail, split it back out
+    # ---------------------------
+    if uk_text:
+        lines = [ln for ln in uk_text.splitlines() if ln.strip()]
+        # Walk from bottom while lines are EU-like
+        cut_idx = None
+        for j in range(len(lines) - 1, -1, -1):
+            if _is_eu_like_line(lines[j]) and not _is_uk_like_line(lines[j]):
+                cut_idx = j
+            else:
+                break
+
+        if cut_idx is not None:
+            # Ensure there's clear UK presence in the head (postcode or UK mention)
+            head = "\n".join(lines[:cut_idx]).strip()
+            tail = "\n".join(lines[cut_idx:]).strip()
+            if head and (_has_uk_postcode(head) or _mentions_uk(head)):
+                notes.append("Split EU-looking tail from UK back into EU.")
+                uk_text = head
+                # Merge tail with any existing EU text (tail first keeps the natural visual order)
+                eu_text = (tail + ("\n" + eu_text if eu_text else "")).strip()
+                # We cannot perfectly recompute tail bbox; keep existing EU bbox if present
+                # (If none, leave eu_bbox as-is; at least the text is now in the right bucket.)
+
+    # ---------------------------
+    # 3) If UK contains clear EU country and EU is empty, consider swap
+    # ---------------------------
     if uk_text and not eu_text and _mentions_eu_country(uk_text) and not _mentions_uk(uk_text):
         notes.append("UK block looked EU; swapped to EU.")
         eu_text, eu_bbox = uk_text, uk_bbox
         uk_text, uk_bbox = "", None
 
-    # 3) Score-based swap if misclassified
+    # ---------------------------
+    # 4) Score-based swap if both look misclassified
+    # ---------------------------
     uk_score = _score_address_quality(uk_text, "UK")
     eu_score = _score_address_quality(eu_text, "EU")
     alt_uk_score = _score_address_quality(uk_text, "EU")
     alt_eu_score = _score_address_quality(eu_text, "UK")
 
-    # If each scores better under the other's expectation, swap
     if (alt_uk_score > uk_score + 0.8) and (alt_eu_score > eu_score + 0.8):
         notes.append("Swapped UK/EU blocks based on plausibility scores.")
         uk_text, eu_text = eu_text, uk_text
         uk_bbox, eu_bbox = eu_bbox, uk_bbox
-        uk_score, eu_score = eu_score, uk_score
 
-    # 4) Final hygiene: strip “UK/GB” from EU, strip EU country names from UK tails
+    # ---------------------------
+    # 5) Final hygiene
+    # ---------------------------
     if eu_text and _mentions_uk(eu_text):
         notes.append("Removed stray UK token from EU block.")
         eu_text = re.sub(r'\b(uk|u\.k\.|gb|great britain)\b\.?', '', eu_text, flags=re.I).strip(' ,')
 
-    if uk_text and _mentions_eu_country(uk_text) and not _has_uk_postcode(uk_text) and _has_uk_postcode(eu_text):
-        notes.append("Moved EU country tail out of UK block.")
-        # (we could be smarter here; for now just leave as note)
-
     return uk_text or None, eu_text or None, uk_bbox, eu_bbox, notes
+
 
 
 def _bbox_pct_to_pixels(pct: Dict[str,float], size: Tuple[int,int]) -> Tuple[int,int,int,int]:
