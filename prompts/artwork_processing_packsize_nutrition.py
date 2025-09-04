@@ -15,6 +15,34 @@ from prompts.artwork_processing_common import (
     _num, _norm_unit, _title_if_count
 )
 
+# ---- Extra local regex for pack-size robustness ----
+# Standalone weights (optionally with ℮), no label, e.g. "110 g", "750 g ℮", "1 L"
+STANDALONE_WEIGHT_RE = re.compile(
+    r"\b(\d{1,4}(?:[.,]\d{1,3})?)\s*(mg|g|kg|ml|l|cl)\s*(℮)?\b",
+    re.IGNORECASE
+)
+
+# Very common count units – singular/plural, spacing variants ("tea bags"/"teabags")
+COUNT_UNIT_WORDS = r"(?:sachet|sachets|stick|sticks|tablet|tablets|capsule|capsules|softgel|softgels|gummy|gummies|lozenge|lozenges|tea\s*bag|teabags|bag|bags|bar|bars|piece|pieces|pod|pods|pouch|pouches|serving|servings|portion|portions)"
+COUNT_ONLY_RE = re.compile(
+    rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\b",
+    re.IGNORECASE
+)
+
+# Multipack with count + qty, e.g. "10 x 12 g", "4×250ml", "3x 100 g"
+# (more permissive than the one in common: allows optional space and dot comma decimals)
+FLEX_MULTIPACK_RE = re.compile(
+    r"\b(\d{1,4})\s*[x×]\s*(\d{1,4}(?:[.,]\d{1,3})?)\s*(mg|g|kg|ml|l|cl)\b",
+    re.IGNORECASE
+)
+
+# Count word + per-item qty: "10 sachets x 5 g", "30 tea bags x 2 g"
+COUNT_WORD_MULTIPACK_RE = re.compile(
+    rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\s*[x×]\s*(\d{{1,4}}(?:[.,]\d{{1,3}})?)\s*(mg|g|kg|ml|l|cl)\b",
+    re.IGNORECASE
+)
+
+
 # ---------- Nutrition helpers/constants ----------
 CANON_NUTRIENTS = {
     "Energy", "Fat", "of which saturates", "Carbohydrate", "of which sugars",
@@ -359,7 +387,9 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
         "raw_candidates": []
     }
     t = text
-    m = MULTIPACK_RE.search(t)
+
+    # 1) multipack like "4 x 250 ml" (common)
+    m = MULTIPACK_RE.search(t) or FLEX_MULTIPACK_RE.search(t)
     if m:
         n = int(m.group(1))
         qty = _num(m.group(2))
@@ -368,20 +398,35 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
         out["base_quantity"] = qty
         out["unit_of_measure"] = unit
         out["raw_candidates"].append(m.group(0))
+
+    # 1b) "10 sachets x 5 g", "30 tea bags x 2 g"
     if out["unit_of_measure"] is None:
-        m2 = COUNT_RE.search(t)
+        m_cw = COUNT_WORD_MULTIPACK_RE.search(t)
+        if m_cw:
+            out["number_of_items"] = int(m_cw.group(1))
+            out["base_quantity"] = _num(m_cw.group(2))
+            out["unit_of_measure"] = _norm_unit(m_cw.group(3))
+            out["raw_candidates"].append(m_cw.group(0))
+
+    # 2) counts only: "120 Tablets", "30 Tea Bags", "10 sachets"
+    if out["unit_of_measure"] is None:
+        m2 = COUNT_RE.search(t) or COUNT_ONLY_RE.search(t)
         if m2:
             out["number_of_items"] = 1
             out["base_quantity"] = float(int(m2.group(1)))
             out["unit_of_measure"] = _norm_unit(m2.group(2))
             out["raw_candidates"].append(m2.group(0))
+
+    # 3) single qty: "150g", "750 g", "1 L"
     if out["unit_of_measure"] is None:
-        m3 = SINGLE_QTY_RE.search(t)
+        m3 = SINGLE_QTY_RE.search(t) or STANDALONE_WEIGHT_RE.search(t)
         if m3:
             out["number_of_items"] = 1
             out["base_quantity"] = _num(m3.group(1))
             out["unit_of_measure"] = _norm_unit(m3.group(2))
             out["raw_candidates"].append(m3.group(0))
+
+    # 4) labeled weights: "Net weight: 500 g", "Gross Wt 540 g", "Drained weight 325 g"
     for lab in LABELED_WEIGHT_RE.finditer(t):
         full = lab.group(0)
         val = _num(lab.group(5))
@@ -394,6 +439,8 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
         else:
             out["net_weight"] = {"value": val, "unit": unit}
         out["raw_candidates"].append(full)
+
+    # 5) compact GW/NW like "GW 540 g / NW 500 g"
     for cg in COMPACT_GW_NW_RE.finditer(t):
         kind = cg.group(1).upper()
         val = _num(cg.group(2))
@@ -403,23 +450,7 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
         elif kind == "NW":
             out["net_weight"] = {"value": val, "unit": unit}
         out["raw_candidates"].append(cg.group(0))
-    return out
 
-def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
-    out = dict(primary or {})
-    if not out:
-        return fallback
-    for k in ("number_of_items", "base_quantity", "unit_of_measure", "e_mark_present"):
-        if out.get(k) in (None, "") and fallback.get(k) not in (None, ""):
-            out[k] = fallback[k]
-    for k in ("net_weight", "gross_weight", "drained_weight"):
-        v = out.get(k) or {}; fv = fallback.get(k) or {}
-        if (v.get("value") is None or v.get("unit") is None) and (fv.get("value") is not None or fv.get("unit") is not None):
-            out[k] = {"value": fv.get("value"), "unit": fv.get("unit")}
-    rc = list(out.get("raw_candidates") or [])
-    for s in (fallback.get("raw_candidates") or []):
-        if s not in rc: rc.append(s)
-    out["raw_candidates"] = rc
     return out
 
 # ---------- Public API: PACK SIZE ---------------------------------------------
@@ -569,29 +600,77 @@ def _find_region_via_ocr_packsize(full_img: Image.Image):
     data = _ocr_words(full_img)
     if not data or "text" not in data:
         return None
+
     W, H = full_img.size
-    candidates: List[Tuple[int,int,int,int]] = []
-    unit_or_label = re.compile(rf"({_U_ALL}|{_U_COUNT}|{_NET_LBL}|{_GROSS_LBL}|{_DRAINED_LBL}|{_E_MARK})", re.IGNORECASE)
+    candidates: List[Tuple[int,int,int,int,float]] = []  # include a score
+
+    unit_or_label = re.compile(
+        rf"({_U_ALL}|{_U_COUNT}|{_NET_LBL}|{_GROSS_LBL}|{_DRAINED_LBL}|{_E_MARK})",
+        re.IGNORECASE
+    )
+
     rows: Dict[Tuple[int,int,int], List[int]] = {}
     for i in range(len(data["text"])):
-        if not data["text"][i]: continue
-        key = (data.get("block_num", [0])[i], data.get("par_num", [0])[i], data.get("line_num", [0])[i])
+        if not data["text"][i]:
+            continue
+        key = (
+            data.get("block_num", [0])[i],
+            data.get("par_num",   [0])[i],
+            data.get("line_num",  [0])[i],
+        )
         rows.setdefault(key, []).append(i)
+
     for idxs in rows.values():
-        txt = " ".join(data["text"][i] for i in idxs if data["text"][i])
-        if not txt.strip(): continue
-        if (unit_or_label.search(txt) or MULTIPACK_RE.search(txt) or COUNT_RE.search(txt) or SINGLE_QTY_RE.search(txt)
-            or LABELED_WEIGHT_RE.search(txt) or COMPACT_GW_NW_RE.search(txt)):
-            xs = [data["left"][i] for i in idxs]; ys = [data["top"][i] for i in idxs]
-            ws = [data["width"][i] for i in idxs]; hs = [data["height"][i] for i in idxs]
-            x0 = max(0, min(xs) - int(0.03 * W))
-            x1 = min(W, max(xs[i] + ws[i] for i in range(len(xs))) + int(0.03 * W))
-            y0 = max(0, min(ys) - int(0.02 * H))
-            y1 = min(H, max(ys[i] + hs[i] for i in range(len(ys))) + int(0.06 * H))
-            candidates.append((x0,y0,x1,y1))
-    if candidates:
-        return max(candidates, key=lambda b: (b[2]-b[0]) * (1.0 + 0.5*(b[3]-b[1])))
-    return None
+        txt = " ".join(data["text"][i] for i in idxs if data["text"][i]).strip()
+        if not txt:
+            continue
+
+        # Does this line "look like" pack size?
+        looks_like_pack = (
+            unit_or_label.search(txt)
+            or MULTIPACK_RE.search(txt)
+            or COUNT_RE.search(txt)
+            or SINGLE_QTY_RE.search(txt)
+            or LABELED_WEIGHT_RE.search(txt)
+            or COMPACT_GW_NW_RE.search(txt)
+            or STANDALONE_WEIGHT_RE.search(txt)
+            or COUNT_ONLY_RE.search(txt)
+            or FLEX_MULTIPACK_RE.search(txt)
+            or COUNT_WORD_MULTIPACK_RE.search(txt)
+        )
+        if not looks_like_pack:
+            continue
+
+        xs = [data["left"][i] for i in idxs]
+        ys = [data["top"][i] for i in idxs]
+        ws = [data["width"][i] for i in idxs]
+        hs = [data["height"][i] for i in idxs]
+
+        x0 = max(0, min(xs) - int(0.03 * W))
+        x1 = min(W, max(xs[j] + ws[j] for j in range(len(xs))) + int(0.03 * W))
+        y0 = max(0, min(ys) - int(0.02 * H))
+        y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.10 * H))  # a bit taller
+
+        # base score = area (w*h) with slight preference for taller lines (often larger font)
+        base = (x1 - x0) * (1.0 + 0.6 * (y1 - y0))
+
+        # bottom-of-label bias: boost if median-y is near bottom 35%
+        y_mid = (y0 + y1) / 2.0
+        bottom_bias = 1.0
+        if y_mid >= 0.65 * H:
+            bottom_bias = 1.35  # strong nudge
+        elif y_mid >= 0.55 * H:
+            bottom_bias = 1.15  # mild nudge
+
+        candidates.append((x0, y0, x1, y1, base * bottom_bias))
+
+    if not candidates:
+        return None
+
+    # choose best scored candidate
+    best = max(candidates, key=lambda b: b[4])
+    return (best[0], best[1], best[2], best[3])
+
 
 # ---------- Public API: NUTRITION ---------------------------------------------
 def process_artwork_nutrition(
