@@ -9,7 +9,12 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-from prompts.artwork_processing import (process_artwork, process_artwork_directions, process_artwork_packsize)
+from prompts.artwork_processing import (
+    process_artwork,
+    process_artwork_directions,
+    process_artwork_packsize,
+    process_artwork_nutrition,   # ← add this
+)
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
 from style import inject_css
@@ -250,7 +255,8 @@ ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_AUTO_PROMPT,
     ARTWORK_DIRECTIONS_PROMPT,
-    ARTWORK_PACKSIZE_PROMPT,    # ← NEW
+    ARTWORK_PACKSIZE_PROMPT,
+    ARTWORK_NUTRITION_PROMPT,
 ]
 
 prompt_choice = st.selectbox(
