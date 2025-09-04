@@ -56,9 +56,9 @@ Return **ONLY** minified JSON with this exact schema (no prose):
 Rules:
 - Include up to 2 candidates for each of "uk" and "eu" (best first). Omit a list (or use []) if not present.
 - "Exact visible text" means copy the characters you can read. Do NOT invent missing lines.
-- A supplier address typically includes a company name and multi-line postal address.
 - Classify as UK if it clearly refers to the United Kingdom (UK, GB, England, Scotland, Wales, Northern Ireland) or has a UK postcode.
-- Classify as EU if it clearly refers to an EU Member State address (e.g., Ireland, France, Germany, Netherlands, etc.).
+- Classify as EU if it clearly refers to an EU Member State address (Ireland, France, Germany, Netherlands, Spain, etc.).
+- **Do not split a single address across UK and EU lists.** If a line belongs to the same postal block (e.g., company + street + city + postcode + country), keep all lines together.
 - If the label shows a single combined "UK/EU:" address, put it in BOTH lists.
 - If nothing is readable, return {"uk":[],"eu":[]}.
 """.strip()
@@ -117,6 +117,127 @@ def _country_hint(text: str) -> str:
         return "EU"
     # weak language cue: look for country abbreviations at end of postcode-like tokens, else unknown
     return "UNK"
+
+def _normalize_lines(text: str) -> str:
+    if not text: return text
+    # collapse multiple spaces, normalise commas/spaces, trim each line
+    lines = [re.sub(r'\s+', ' ', ln).strip(' ,') for ln in text.splitlines()]
+    # drop empty lines
+    lines = [ln for ln in lines if ln]
+    return "\n".join(lines).strip()
+
+def _has_uk_postcode(text: str) -> bool:
+    return bool(UK_POSTCODE_PAT.search(text or ""))
+
+def _mentions_uk(text: str) -> bool:
+    t = (text or "").lower()
+    return any(k in t for k in UK_CUES) or " gb" in t or t.endswith(" gb")
+
+def _mentions_eu_country(text: str) -> bool:
+    t = (text or "").lower()
+    return any(c in t for c in EU_MEMBER_COUNTRIES)
+
+def _ends_like_truncated(text: str) -> bool:
+    if not text: return False
+    t = text.strip()
+    return t.endswith(",") or t.endswith(";") or len(t.splitlines()[-1].split()) <= 2
+
+def _union(b1, b2):
+    if not b1: return b2
+    if not b2: return b1
+    x0 = min(b1[0], b2[0]); y0 = min(b1[1], b2[1])
+    x1 = max(b1[2], b2[2]); y1 = max(b1[3], b2[3])
+    return (x0, y0, x1, y1)
+
+def _score_address_quality(text: str, expect: str) -> float:
+    """
+    Crude plausibility scorer. Higher is better.
+    expect ∈ {"UK","EU"} controls some expectations (postcode/country cues).
+    """
+    if not text: return 0.0
+    t = text.lower()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    score = 0.0
+
+    # multi-line boosts
+    score += min(len(lines), 5) * 0.8
+
+    # street-like cues
+    if re.search(r'\b(street|str\.?|road|rd\.?|avenue|ave\.?|way|close|park|industrial|estate|unit|suite|po box|postbus)\b', t):
+        score += 1.2
+
+    # company cues
+    if re.search(r'\b(ltd\.?|limited|plc|gmbh|s\.?r\.?l\.?|s\.?a\.?|b\.?v\.?|slu|s\.?l\.?)\b', t):
+        score += 0.8
+
+    # postcode / country signals
+    ukpc = _has_uk_postcode(text)
+    ukm  = _mentions_uk(text)
+    eum  = _mentions_eu_country(text)
+
+    if expect == "UK":
+        if ukpc: score += 2.0
+        if ukm:  score += 1.0
+        if eum:  score -= 1.0
+    else:  # expect EU
+        if eum:  score += 1.5
+        if ukpc: score -= 1.5
+        if ukm:  score -= 0.8
+
+    # penalise obvious truncation
+    if _ends_like_truncated(text): score -= 0.6
+
+    return score
+
+def _stitch_and_validate(uk_text, eu_text, uk_bbox, eu_bbox):
+    """
+    Fix common split errors; return (uk_text, eu_text, uk_bbox, eu_bbox, notes[])
+    """
+    notes = []
+    uk_text = _normalize_lines(uk_text or "")
+    eu_text = _normalize_lines(eu_text or "")
+
+    # 1) If EU starts with a UK postcode/UK token and UK looks truncated, stitch EU->UK
+    eu_starts_uk = bool(re.match(r'^(?:' + UK_POSTCODE_PAT.pattern + r')\b', eu_text, flags=re.I)) or _mentions_uk(eu_text)
+    if eu_starts_uk and (_ends_like_truncated(uk_text) or not _has_uk_postcode(uk_text)):
+        notes.append("Stitched trailing UK lines from EU block back into UK.")
+        if uk_text and eu_text:
+            uk_text = (uk_text.rstrip(",; ") + "\n" + eu_text).strip()
+        else:
+            uk_text = (uk_text or eu_text).strip()
+        uk_bbox = _union(uk_bbox, eu_bbox)
+        eu_text, eu_bbox = "", None
+
+    # 2) If UK contains clear EU country and EU is empty, flip
+    if uk_text and not eu_text and _mentions_eu_country(uk_text) and not _mentions_uk(uk_text):
+        notes.append("UK block looked EU; swapped to EU.")
+        eu_text, eu_bbox = uk_text, uk_bbox
+        uk_text, uk_bbox = "", None
+
+    # 3) Score-based swap if misclassified
+    uk_score = _score_address_quality(uk_text, "UK")
+    eu_score = _score_address_quality(eu_text, "EU")
+    alt_uk_score = _score_address_quality(uk_text, "EU")
+    alt_eu_score = _score_address_quality(eu_text, "UK")
+
+    # If each scores better under the other's expectation, swap
+    if (alt_uk_score > uk_score + 0.8) and (alt_eu_score > eu_score + 0.8):
+        notes.append("Swapped UK/EU blocks based on plausibility scores.")
+        uk_text, eu_text = eu_text, uk_text
+        uk_bbox, eu_bbox = eu_bbox, uk_bbox
+        uk_score, eu_score = eu_score, uk_score
+
+    # 4) Final hygiene: strip “UK/GB” from EU, strip EU country names from UK tails
+    if eu_text and _mentions_uk(eu_text):
+        notes.append("Removed stray UK token from EU block.")
+        eu_text = re.sub(r'\b(uk|u\.k\.|gb|great britain)\b\.?', '', eu_text, flags=re.I).strip(' ,')
+
+    if uk_text and _mentions_eu_country(uk_text) and not _has_uk_postcode(uk_text) and _has_uk_postcode(eu_text):
+        notes.append("Moved EU country tail out of UK block.")
+        # (we could be smarter here; for now just leave as note)
+
+    return uk_text or None, eu_text or None, uk_bbox, eu_bbox, notes
+
 
 def _bbox_pct_to_pixels(pct: Dict[str,float], size: Tuple[int,int]) -> Tuple[int,int,int,int]:
     W,H = size
@@ -313,11 +434,14 @@ def process_artwork(
             eu_text = eu_text_gpt
 
         # Final classification sanity (in case GPT mis-labelled)
-        if uk_text:
-            if _country_hint(uk_text) == "EU" and _country_hint(eu_text or "") != "EU":
-                # swap if looks wrong
-                uk_text, eu_text = eu_text, uk_text
-                uk_bbox_use, eu_bbox_use = eu_bbox_use, uk_bbox_use
+        # Validate, stitch, and possibly swap
+        uk_text, eu_text, uk_bbox_use, eu_bbox_use, val_notes = _stitch_and_validate(
+            uk_text, eu_text, uk_bbox_use, eu_bbox_use
+        )
+
+        if not (uk_text or eu_text):
+            continue
+
 
         # If both empty, try next page
         if not (uk_text or eu_text):
@@ -350,6 +474,7 @@ def process_artwork(
             "eu_address_text": eu_text or None,
             "eu_bbox_pixels": list(map(int, eu_bbox_use)) if eu_bbox_use else None,
             "qa": qa,
+            "validation_notes": val_notes,
             "debug": {
                 "image_size": img.size,
                 "tesseract_available": TESS_AVAILABLE,
