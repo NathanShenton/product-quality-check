@@ -10,60 +10,83 @@ PROMPT_OPTIONS = {
     "INCOMPLETE: Serving Size": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            """You are a JSON-producing assistant highly knowledgeable in UK/EU food supplement regulations. Task: For each product record provided, review all available fields and decide whether the product’s declared serving size is smaller than the “single nutritional value” basis defined in the product’s `nutritional_info` JSON.
+            """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
-            Core instruction (apply strictly):
-            • `nutritional_info` may or may not include explicit “per …” bases. If they are not present, do NOT infer or derive them; use only the values actually present in `nutritional_info`.
-            • Use `nutritional_info` (a JSON attribute) as the ONLY source for identifying any “per …” nutritional bases (e.g., “per capsule”, “per 2 tablets”, “per 5 ml”, “per sachet”, “per serving” only when the serving amount is numerically defined inside `nutritional_info`). Do NOT convert from per-100 g/ml to per-unit unless `nutritional_info` itself provides an explicit mapping.
-            • To extract the serving size amount and unit, you may use any other available columns (e.g., `serving_size`, `directions/usage`, `quantity_string`, `pack_size`, `title`, `description`, label copy). Be flexible and evidence-led.
-            • Normalize units and synonyms (capsule/cap, tablet/tab, softgel, gummy, drop, spray, sachet/stick, scoop, ml, g, mg, µg). Compare like with like only (count↔count, volume↔volume, mass↔mass). Do not estimate missing weights/volumes or back-calculate from nutrient amounts.
-            • If `nutritional_info` contains multiple per-X entries, select the smallest numeric basis (“single nutritional value basis”) for comparison.
-            • Handle decimals and ranges: if directions say “1–2 capsules”, treat min=1 and max=2. Return “Varies” if the min is smaller but the max is not.
-            • If units are incompatible OR either the serving size or the per-X basis is missing/ambiguous in the allowed sources, return “Unknown” with a brief explanation.
-            • Use only evidence present in the supplied data; do not assume missing facts.
+            Task:
+            Review all the data on each product you receive to decide whether the serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml)—is greater than EVERY numeric nutrient amount present in the "nutritional info" attribute (JSON). Use supplied evidence only; do not assume, infer, derive, or convert between mass and volume without explicit values. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis exists.
             
-            Decision rule:
-            • Return “Yes” if serving_size_amount < single_nv_basis_amount (same unit type).
-            • Return “No” if serving_size_amount ≥ single_nv_basis_amount (same unit type).
-            • Return “Varies” if a serving range straddles the basis.
-            • Return “Unknown” if comparison cannot be made under the constraints above, including when `nutritional_info` lacks any explicit per-X basis or only provides per-100 g/ml with no explicit mapping.
+            Definitions:
+            • Serving size (this task) — a single per-unit g/ml value extracted from "quantity string".
+              – Supported patterns (accept optional spaces, × symbol, NBSP, decimal commas):
+                • "<N>\s*[x×]\s*(<X>)(mg|g|ml)"  ⇒ use X+unit (e.g., "4x32g" ⇒ 32 g; "4 × 32 g" ⇒ 32 g)
+                • "<N> .* of (<X>)(mg|g|ml) each" ⇒ use X+unit (e.g., "5 sachets of 5g each" ⇒ 5 g)
+                • "(<X>)(mg|g|ml)" (single value) ⇒ use that value (e.g., "30 ml", "25 g")
+              – Ignore totals; do NOT multiply N×X. If no g/ml appears (e.g., "60 tablets"), serving size is null.
+              – Normalize: mg→g (÷1000); µg→g (÷1,000,000); kg→g (×1000); mL→ml; L→ml (×1000). Convert decimal commas to dots.
             
-            Output (strict JSON only; no markdown, no extra keys):
+            • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, l/L), regardless of whether a “per …” basis exists.
+              – Parse recursively from the JSON (e.g., objects with keys like "key", "value", or free-text strings).
+              – For mixed strings, extract each mass/volume token separately (e.g., "1392kJ / 328kcal" ⇒ none comparable; "0.4g" ⇒ comparable).
+              – Ignore non-mass/volume units (kJ, kcal, %NRV, IU) and ratios (e.g., mg/100ml) unless they already provide a single mass or volume magnitude without deriving a basis.
+            
+            Parsing method:
+            1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple candidates exist, select the smallest per-unit g/ml. If none, set value=null.
+            2) Traverse "nutritional info" (JSON):
+               • Extract every numeric token with a mass/volume unit; normalize to base units (g or ml).
+               • For each token, capture: key/label (if available), numeric value, unit (after normalization), original text token, and a simple JSON path.
+               • Do NOT infer “per …” or create derived bases.
+            
+            Comparability rules:
+            • If serving size is in grams, compare ONLY to nutrient amounts normalized to grams (µg/mg/g/kg → g).
+            • If serving size is in millilitres, compare ONLY to nutrient amounts normalized to millilitres (L/ml).
+            • If dimensions differ (g vs ml), mark the nutrient value as not comparable.
+            
+            Decision (applies to ALL comparable nutrient amounts):
+            • Output "Yes" ONLY if the serving size is strictly greater than EVERY comparable nutrient amount present.
+            • If ANY comparable nutrient amount is ≥ the serving size, output "No".
+            • If there are ZERO comparable nutrient amounts, or serving size is null, output "Ambiguous".
+            
+            Aggregation discipline (avoid inversion bugs):
+            • Let COMPARABLE = all items where comparable=true.
+            • If serving_size is null OR len(COMPARABLE)=0 ⇒ "Ambiguous".
+            • Else if ANY(COMPARABLE.result == "not_greater") ⇒ "No".
+            • Else ⇒ "Yes".
+            • Interpret "greater" as “serving size > nutrient amount”.
+            
+            Evidence:
+            Quote exact snippets for the parsed "quantity string" per-unit and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent values.
+            
+            Output (strict JSON only):
             {
-              "serving_smaller_than_single_nv": "Yes" | "No" | "Varies" | "Unknown",
-              "reasoning": "≤30 words; cite concrete amounts/units and which fields were used.",
-              "evidence": {
-                "serving_size": {
-                  "amount_min": number|null,
-                  "amount_max": number|null,
-                  "unit": string|null,
-                  "source_field": string|null,
-                  "raw": string|null
-                },
-                "single_nv_basis": {
-                  "amount": number|null,
-                  "unit": string|null,
-                  "label_in_nutritional_info": string|null,
-                  "raw": string|null
-                },
-                "unit_compatibility": true|false,
-                "comparison": "e.g., 1 capsule < 2 capsules" | null
+              "serving_size_greater_than_all_nutritional_values": "Yes" | "No" | "Ambiguous",
+              "serving_size": {
+                "value": number | null,
+                "unit": "g" | "ml" | null,
+                "text": string,
+                "source_field": "quantity string"
               },
-              "parsing_notes": [
-                "Concise bullet(s) on assumptions/edge handling, e.g., 'used minimum of range', 'units incompatible', 'no per-X in nutritional_info'."
+              "nutritional_values": [
+                {
+                  "key": string | null,
+                  "value": number | null,
+                  "unit": "g" | "ml" | string,
+                  "original_text": string,
+                  "json_path": string,
+                  "comparable": true | false
+                }
               ],
-              "constraints_applied": [
-                "Used nutritional_info only to identify per-X basis",
-                "Did not infer per-values not present in nutritional_info",
-                "Used only values present in nutritional_info when per-X bases absent"
-              ]
+              "comparisons": [
+                {
+                  "key": string | null,
+                  "compared_value": number | null,
+                  "result": "greater" | "not_greater" | "not_comparable",
+                  "explanation": string
+                }
+              ],
+              "evidence": [ { "field": string, "snippet": string } ],
+              "reasoning": "≤30 words; state whether per-unit from quantity string exceeds ALL comparable nutrient amounts and why (e.g., ‘122 g > max 50 g’)."
             }
-            
-            Operational guidance (non-output):
-            • Prefer explicit numerics from `serving_size`/`directions`; fall back to other columns if necessary, but do not create per-X bases from them.
-            • If `nutritional_info` provides only per-100 g/ml and no smaller per-X mapping, return “Unknown”.
-            • If `nutritional_info` says “per serving” without an in-JSON numeric serving amount, treat as no per-X basis and return “Unknown”.
-            • Trim whitespace; case-insensitive key matching; tolerate punctuation. Return JSON only."""
+            No extra keys, no markdown/code fences, no surrounding text."""
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Check if products are food supplement."
@@ -1616,6 +1639,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
