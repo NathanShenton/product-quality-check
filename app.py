@@ -252,6 +252,8 @@ ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
 ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
 ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
 ARTWORK_SUPPLIER_PROMPT = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
+ARTWORK_RUN_ALL_PROMPT = "Artwork: Run ALL Packaging Pipelines (PDF/JPEG)"
+
 
 
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
@@ -260,6 +262,7 @@ prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_PACKSIZE_PROMPT,
     ARTWORK_NUTRITION_PROMPT,
     ARTWORK_SUPPLIER_PROMPT,
+    ARTWORK_RUN_ALL_PROMPT,
 ]
 
 prompt_choice = st.selectbox(
@@ -313,6 +316,13 @@ elif prompt_choice == ARTWORK_SUPPLIER_PROMPT:
     prompt_description   = (
         "Upload PDF/JPG/PNG artwork. Auto-finds Supplier/Responsible Person blocks and "
         "extracts exact text for **UK** and **EU** addresses separately, plus bounding boxes."
+    )
+    recommended_model    = "gpt-4o"
+elif prompt_choice == ARTWORK_RUN_ALL_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by run-all packaging pipelines module"
+    prompt_description   = (
+        "Upload PDF/JPG/PNG artwork. Runs Ingredients → Directions → Pack Size → "
+        "Nutrition → Supplier in sequence. Choose a single combined JSON or a ZIP with five JSONs."
     )
     recommended_model    = "gpt-4o"
 else:
@@ -443,6 +453,109 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
     # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
     # so the rest of the app behaves as before for all other prompts.
     st.stop()
+
+if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – run **all** packaging pipelines in sequence")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_run_all")
+
+    # This flow requires vision
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    output_mode = st.radio(
+        "Output format",
+        options=["Single JSON (everything together)", "Five JSONs (zipped)"],
+        index=0
+    )
+
+    run_all = st.button("🚀 Run ALL Pipelines (Ingredients → Directions → Pack Size → Nutrition → Supplier)")
+    if art_file and run_all:
+        file_bytes = art_file.read()
+        filename   = art_file.name
+
+        # Small helper to wrap each call with consistent error handling
+        def run_step(fn, label):
+            try:
+                with st.spinner(f"Running {label}…"):
+                    res = fn(
+                        client=client,
+                        file_bytes=file_bytes,
+                        filename=filename,
+                        render_dpi=350,
+                        model="gpt-4o"
+                    )
+                ok = bool(res.get("ok", True))  # some of your funcs set ok; default True if absent
+                if ok:
+                    st.success(f"✅ {label} complete")
+                else:
+                    st.error(f"❌ {label} failed: {res.get('error','Unknown error')}")
+                return res
+            except Exception as e:
+                err = {"ok": False, "error": f"{label} exception: {e}"}
+                st.error(f"❌ {label} crashed: {e}")
+                return err
+
+        # Run in your preferred order
+        ingredients_res = run_step(process_artwork,               "Ingredients")
+        directions_res  = run_step(process_artwork_directions,    "Directions")
+        packsize_res    = run_step(process_artwork_packsize,      "Pack Size / Weights")
+        nutrition_res   = run_step(process_artwork_nutrition,     "Nutrition")
+        supplier_res    = run_step(process_artwork_suppliers,     "Supplier Addresses")
+
+        # Build combined payload
+        combined = {
+            "source_file": filename,
+            "model": "gpt-4o",
+            "pipelines": {
+                "ingredients": ingredients_res,
+                "directions":  directions_res,
+                "packsize":    packsize_res,
+                "nutrition":   nutrition_res,
+                "suppliers":   supplier_res
+            }
+        }
+
+        # Preview a minimal summary
+        st.markdown("#### 🧭 Run summary")
+        st.json({
+            "ingredients_ok": bool(ingredients_res.get("ok", True)),
+            "directions_ok":  bool(directions_res.get("ok", True)),
+            "packsize_ok":    bool(packsize_res.get("ok", True)),
+            "nutrition_ok":   bool(nutrition_res.get("ok", True)),
+            "suppliers_ok":   bool(supplier_res.get("ok", True)),
+        })
+
+        # Downloads
+        if output_mode.startswith("Single"):
+            data = json.dumps(combined, ensure_ascii=False, indent=2).encode("utf-8")
+            st.download_button(
+                "⬇️ Download Combined JSON",
+                data=data,
+                file_name="packaging_pipelines_all.json",
+                mime="application/json"
+            )
+        else:
+            import io, zipfile
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("ingredients_result.json", json.dumps(ingredients_res, ensure_ascii=False, indent=2))
+                zf.writestr("directions_result.json",  json.dumps(directions_res,  ensure_ascii=False, indent=2))
+                zf.writestr("packsize_result.json",    json.dumps(packsize_res,    ensure_ascii=False, indent=2))
+                zf.writestr("nutrition_result.json",   json.dumps(nutrition_res,   ensure_ascii=False, indent=2))
+                zf.writestr("supplier_addresses_result.json", json.dumps(supplier_res, ensure_ascii=False, indent=2))
+                # Optional: also include the combined
+                zf.writestr("packaging_pipelines_all.json", json.dumps(combined, ensure_ascii=False, indent=2))
+            buf.seek(0)
+            st.download_button(
+                "⬇️ Download ZIP (5 JSONs + combined)",
+                data=buf.getvalue(),
+                file_name="packaging_pipelines_all.zip",
+                mime="application/zip"
+            )
+
+    # Keep behaviour consistent with your other auto flows
+    st.stop()
+
 
 if prompt_choice == ARTWORK_SUPPLIER_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Supplier/Responsible Person addresses")
