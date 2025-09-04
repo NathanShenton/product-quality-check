@@ -72,6 +72,31 @@ Rules:
 - Do not guess.
 """.strip()
 
+FULLPAGE_DIR_SYSTEM = """
+You will receive a full label image. Extract the exact DIRECTIONS / USAGE / PREPARATION text only.
+Rules:
+- Copy visible characters exactly (preserve bullets, numbers, °C/°F, %, punctuation and line breaks).
+- Start after a header like “Directions”, “How to use”, “Preparation”, “Usage”, “Dosage”.
+- Stop before the next distinct section heading (Nutrition, Ingredients, Storage, Warnings, etc.).
+- If no directions exist, output IMAGE_UNREADABLE.
+Return plain text only.
+""".strip()
+
+def _gpt_fullpage_directions_text(client, img: Image.Image, model: str) -> str:
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role":"system","content": FULLPAGE_DIR_SYSTEM},
+            {"role":"user","content":[
+                {"type":"text","text":"Return plain text only."},
+                {"type":"image_url","image_url":{"url": _encode_data_url(buf.getvalue())}}
+            ]}
+        ]
+    )
+    return r.choices[0].message.content.strip()
+
+
 # ---------- Locators / OCR ----------
 def _find_region_via_ocr_directions(full_img: Image.Image):
     data = _ocr_words(full_img)
@@ -217,7 +242,7 @@ def process_artwork_directions(
     file_bytes: bytes,
     filename: str,
     *,
-    render_dpi: int = 350,
+    render_dpi: int = 400,
     model: str = "gpt-4o"
 ) -> Dict[str, Any]:
     is_pdf = filename.lower().endswith(".pdf")
@@ -240,14 +265,14 @@ def process_artwork_directions(
             scale = render_dpi / 72.0
             bbox = tuple(int(round(v * scale)) for v in bbox_pts)
             img = pages[page_idx]
-            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03)
 
         # (2) OCR/GPT per-page fallback
         if bbox is None:
             for i, pg in enumerate(pages):
                 cand = (_find_region_via_ocr_directions(pg) or _gpt_bbox_locator_directions(client, pg, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
                     if cand:
                         page_idx, img, bbox = i, pg, cand
                         break
@@ -256,7 +281,7 @@ def process_artwork_directions(
         if bbox is None:
             for i, pg in enumerate(pages):
                 for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.02)
+                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.03)
                     if g:
                         page_idx, img, bbox = i, pg, g
                         break
@@ -266,10 +291,10 @@ def process_artwork_directions(
         if page_idx is None or img is None or bbox is None:
             return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the PDF.")
 
-        if _area_pct(bbox, img.size) < 2.0:
+        if _area_pct(bbox, img.size) < 1.2:
             alt = _gpt_bbox_locator_directions(client, img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
@@ -281,12 +306,12 @@ def process_artwork_directions(
         except Exception:
             return _fail("Could not open image.")
         bbox = (_find_region_via_ocr_directions(img) or _gpt_bbox_locator_directions(client, img, model))
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02) if bbox else None
+        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03) if bbox else None
 
         # NEW heuristic fallbacks
         if bbox is None:
             for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.02)
+                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.03)
                 if g:
                     bbox = g
                     break
@@ -294,10 +319,10 @@ def process_artwork_directions(
         if not bbox:
             return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the image.")
 
-        if _area_pct(bbox, img.size) < 2.0:
+        if _area_pct(bbox, img.size) < 1.2:
             alt = _gpt_bbox_locator_directions(client, img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
@@ -307,12 +332,58 @@ def process_artwork_directions(
     # --- OCR pass 1
     raw = _gpt_exact_ocr_directions(client, crop_bytes, model)
     if raw.upper() == "IMAGE_UNREADABLE":
-        return {
-            "ok": False,
-            "error": "Detected directions crop unreadable.",
-            "page_index": page_idx,
-            "bbox_pixels": list(map(int, bbox)) if bbox else None
-        }
+        # 1) Retry with wider crop (+12%)
+        bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12)
+        if bigger1 and bigger1 != bbox:
+            crop_bytes1 = _crop_to_bytes(img, bigger1)
+            raw1 = _gpt_exact_ocr_directions(client, crop_bytes1, model)
+            if raw1.upper() != "IMAGE_UNREADABLE":
+                bbox, crop_bytes, raw = bigger1, crop_bytes1, raw1
+            else:
+                # 2) Retry even wider (+20%)
+                bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
+                if bigger2 and bigger2 != bigger1:
+                    crop_bytes2 = _crop_to_bytes(img, bigger2)
+                    raw2 = _gpt_exact_ocr_directions(client, crop_bytes2, model)
+                    if raw2.upper() != "IMAGE_UNREADABLE":
+                        bbox, crop_bytes, raw = bigger2, crop_bytes2, raw2
+                    else:
+                        # 3) Full-page extraction as last resort
+                        full_raw = _gpt_fullpage_directions_text(client, img, model)
+                        if full_raw.upper() != "IMAGE_UNREADABLE":
+                            # we keep bbox for pictograms if we had one; text comes from full page
+                            raw = full_raw
+                        else:
+                            return {
+                                "ok": False,
+                                "error": "Detected directions crop unreadable.",
+                                "page_index": page_idx,
+                                "bbox_pixels": list(map(int, bbox)) if bbox else None
+                            }
+                else:
+                    # 3) Full-page extraction as last resort
+                    full_raw = _gpt_fullpage_directions_text(client, img, model)
+                    if full_raw.upper() != "IMAGE_UNREADABLE":
+                        raw = full_raw
+                    else:
+                        return {
+                            "ok": False,
+                            "error": "Detected directions crop unreadable.",
+                            "page_index": page_idx,
+                            "bbox_pixels": list(map(int, bbox)) if bbox else None
+                        }
+        else:
+            # 3) Full-page extraction as last resort
+            full_raw = _gpt_fullpage_directions_text(client, img, model)
+            if full_raw.upper() != "IMAGE_UNREADABLE":
+                raw = full_raw
+            else:
+                return {
+                    "ok": False,
+                    "error": "Detected directions crop unreadable.",
+                    "page_index": page_idx,
+                    "bbox_pixels": list(map(int, bbox)) if bbox else None
+                }
 
     # --- Structure & consistency
     structure_pass = _structure_ok_directions(raw)
