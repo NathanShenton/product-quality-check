@@ -4,7 +4,7 @@ import io, json
 from typing import Optional, Tuple, Dict, Any, List
 from PIL import Image
 
-from artwork_processing_common import (
+from prompts.artwork_processing_common import (
     fitz, Image as PILImage, TESS_AVAILABLE,
     HEADER_PAT,
     _fail, _pdf_to_page_images, _safe_punct_scrub, _structure_ok_ingredients, _similarity,
