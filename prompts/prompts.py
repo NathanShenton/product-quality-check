@@ -13,7 +13,7 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
             Task:
-            Review all the data on each product you receive to decide whether the serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml)—is greater than EVERY numeric nutrient amount present in the "nutritional info" attribute (JSON). Use supplied evidence only; do not assume, infer, derive, or convert between mass and volume without explicit values. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis exists.
+            Review all the data on each product you receive to decide whether ANY numeric nutrient amount present in the "nutritional info" attribute (JSON) is strictly greater than the single serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml). Use supplied evidence only; do not assume, infer, or derive missing facts. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis exists.
             
             Definitions:
             • Serving size (this task) — a single per-unit g/ml value extracted from "quantity string".
@@ -25,7 +25,7 @@ PROMPT_OPTIONS = {
               – Normalize: mg→g (÷1000); µg→g (÷1,000,000); kg→g (×1000); mL→ml; L→ml (×1000). Convert decimal commas to dots.
             
             • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, l/L), regardless of whether a “per …” basis exists.
-              – Parse recursively from the JSON (e.g., objects with keys like "key", "value", or free-text strings).
+              – Parse recursively from the JSON (objects/arrays/strings).
               – For mixed strings, extract each mass/volume token separately (e.g., "1392kJ / 328kcal" ⇒ none comparable; "0.4g" ⇒ comparable).
               – Ignore non-mass/volume units (kJ, kcal, %NRV, IU) and ratios (e.g., mg/100ml) unless they already provide a single mass or volume magnitude without deriving a basis.
             
@@ -41,24 +41,28 @@ PROMPT_OPTIONS = {
             • If serving size is in millilitres, compare ONLY to nutrient amounts normalized to millilitres (L/ml).
             • If dimensions differ (g vs ml), mark the nutrient value as not comparable.
             
-            Decision (applies to ALL comparable nutrient amounts):
-            • Output "Yes" ONLY if the serving size is strictly greater than EVERY comparable nutrient amount present.
-            • If ANY comparable nutrient amount is ≥ the serving size, output "No".
-            • If there are ZERO comparable nutrient amounts, or serving size is null, output "Ambiguous".
+            Decision (ANY exceedance check):
+            • Output "Yes" if at least one comparable nutrient amount is ≥ the serving size (i.e., any value equal to or greater than the serving size counts as exceeding).
+            • Output "No" if there is at least one comparable nutrient amount and none are ≥ the serving size.
+            • Output "Ambiguous" if serving size is null or there are ZERO comparable nutrient amounts.
             
             Aggregation discipline (avoid inversion bugs):
-            • Let COMPARABLE = all items where comparable=true.
+            • COMPARABLE = all items where comparable=true.
             • If serving_size is null OR len(COMPARABLE)=0 ⇒ "Ambiguous".
-            • Else if ANY(COMPARABLE.result == "not_greater") ⇒ "No".
-            • Else ⇒ "Yes".
-            • Interpret "greater" as “serving size > nutrient amount”.
+            • Else if ANY(COMPARABLE.value_normalized ≥ serving_size.value_normalized) ⇒ "Yes".
+            • Else ⇒ "No".
             
             Evidence:
             Quote exact snippets for the parsed "quantity string" per-unit and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent values.
             
+            Edge cases & examples:
+            • quantity string = "4x32g" ⇒ serving size = 32 g. nutritional info includes "Fat 0.4g", "Carbohydrates 76g" ⇒ 76 g ≥ 32 g ⇒ decision "Yes"; list "Carbohydrates 76 g" as exceeding.
+            • quantity string = "30 ml"; nutrition has only grams ⇒ all not comparable ⇒ "Ambiguous".
+            • quantity string missing per-unit g/ml ⇒ "Ambiguous".
+            
             Output (strict JSON only):
             {
-              "serving_size_greater_than_all_nutritional_values": "Yes" | "No" | "Ambiguous",
+              "any_nutritional_value_greater_or_equal_to_serving": "Yes" | "No" | "Ambiguous",
               "serving_size": {
                 "value": number | null,
                 "unit": "g" | "ml" | null,
@@ -79,12 +83,20 @@ PROMPT_OPTIONS = {
                 {
                   "key": string | null,
                   "compared_value": number | null,
-                  "result": "greater" | "not_greater" | "not_comparable",
+                  "result": "exceeds" | "does_not_exceed" | "not_comparable",
                   "explanation": string
                 }
               ],
+              "exceeding_values": [
+                {
+                  "key": string | null,
+                  "value": number,
+                  "unit": "g" | "ml",
+                  "json_path": string
+                }
+              ],
               "evidence": [ { "field": string, "snippet": string } ],
-              "reasoning": "≤30 words; state whether per-unit from quantity string exceeds ALL comparable nutrient amounts and why (e.g., ‘122 g > max 50 g’)."
+              "reasoning": "≤30 words; indicate whether any comparable nutrient amount meets/exceeds the serving size and cite the highest offending value."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
         ),
@@ -1639,6 +1651,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
