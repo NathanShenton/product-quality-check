@@ -680,6 +680,29 @@ def process_artwork(
     crop_bytes = _crop_to_bytes(img, bbox)
     return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
 
+# ---- Heuristic panel guesses (add once, near your other helpers) -------------
+def _fallback_left_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
+    W, H = img.size
+    # Common 3-column layout: left column ~38% width, with vertical margins
+    left = int(0.07 * W); right = int(0.45 * W)
+    top = int(0.10 * H);  bottom = int(0.90 * H)
+    return (left, top, right, bottom)
+
+def _fallback_right_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
+    W, H = img.size
+    # Mirror of left column on the right
+    left = int(0.55 * W); right = int(0.93 * W)
+    top = int(0.10 * H);  bottom = int(0.90 * H)
+    return (left, top, right, bottom)
+
+def _fallback_center_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
+    W, H = img.size
+    # Center column guess
+    left = int(0.30 * W); right = int(0.70 * W)
+    top = int(0.12 * H);  bottom = int(0.88 * H)
+    return (left, top, right, bottom)
+
+
 def process_artwork_nutrition(
     client,
     file_bytes: bytes,
@@ -690,19 +713,14 @@ def process_artwork_nutrition(
 ) -> Dict[str, Any]:
     """
     Auto NUTRITION pipeline (locate → strict JSON OCR+parse → normalise → QA).
-    Returns:
-    {
-      "ok": bool,
-      "page_index": int,
-      "bbox_pixels": [x0,y0,x1,y1] | None,
-      "parsed": {...},         # structured per schema
-      "flat": [ ... ],         # easy key/value export
-      "qa": {...}
-    }
     """
     is_pdf = filename.lower().endswith(".pdf")
 
-    # --- locate panel ----------------------------------------------------------
+    # --- LOCATE PANEL ----------------------------------------------------------
+    page_idx: Optional[int] = None
+    img: Optional[Image.Image] = None
+    bbox: Optional[Tuple[int,int,int,int]] = None
+
     if is_pdf:
         if fitz is None:
             return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
@@ -710,72 +728,99 @@ def process_artwork_nutrition(
         if not pages:
             return _fail("PDF contained no pages after rendering.")
 
-        # 1) Try vector scan first
+        # (1) Vector scan
         vec = _pdf_find_nutrition_block(file_bytes)
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
-            scale = render_dpi / 72.0
-            x0,y0,x1,y1 = vec["bbox_pixels"]
-            bbox = (int(round(x0*scale)), int(round(y0*scale)),
-                    int(round(x1*scale)), int(round(y1*scale)))
             img = pages[page_idx]
+            scale = render_dpi / 72.0
+            x0, y0, x1, y1 = vec["bbox_pixels"]
+            bbox = (
+                int(round(x0 * scale)), int(round(y0 * scale)),
+                int(round(x1 * scale)), int(round(y1 * scale))
+            )
             bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
-            if not bbox:
-                # fallback to OCR-line or GPT locator on that page
-                cand = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
-                if cand:
-                    bbox = _clamp_pad_bbox(cand, img.size, pad_frac=0.02)
-        else:
-            # 2) Per-page scan with OCR-line → GPT
-            page_idx = None; img = None; bbox = None
+
+        # (2) OCR-line / GPT locator per page (if needed)
+        if bbox is None:
             for i, pg in enumerate(pages):
                 cand = (_find_region_via_ocr_nutri(pg) or _gpt_bbox_locator_nutri(client, pg, model))
                 if cand:
-                    bbox = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
-                    if bbox:
-                        page_idx = i; img = pg; break
+                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    if cand:
+                        page_idx, img, bbox = i, pg, cand
+                        break
 
-        if page_idx is None or not bbox:
+        # (3) Heuristic guesses: LEFT → RIGHT → CENTER (if still nothing)
+        if bbox is None:
+            for i, pg in enumerate(pages):
+                for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
+                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.02)
+                    if g:
+                        page_idx, img, bbox = i, pg, g
+                        break
+                if bbox is not None:
+                    break
+
+        if page_idx is None or bbox is None:
             return _fail("Could not locate a NUTRITION panel in the PDF.")
+
     else:
-        # single image
+        # Single IMAGE input
         try:
             img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
-        bbox = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
-        if not bbox:
-            return _fail("Could not locate a NUTRITION panel in the image.")
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
         page_idx = 0
 
-    # Tiny-area sanity: nutrition boxes are often small — don’t overreject.
+        # (1) OCR-line / GPT locator
+        bbox = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
+        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02) if bbox else None
+
+        # (2) Heuristic guesses if needed
+        if bbox is None:
+            for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
+                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.02)
+                if g:
+                    bbox = g
+                    break
+
+        if bbox is None:
+            return _fail("Could not locate a NUTRITION panel in the image.")
+
+    # --- tiny-area sanity: nutrition tables can be small; try GPT re-locate ----
     if _area_pct(bbox, img.size) < 0.8:
         alt = _gpt_bbox_locator_nutri(client, img, model)
         if alt:
             alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
             if alt:
                 bbox = alt
+
+    # Prepare crop for extraction
     crop_bytes = _crop_to_bytes(img, bbox)
-    
-    # --- extract JSON twice for consistency -----------------------------------
+
+    # --- EXTRACT (double pass for consistency) ---------------------------------
     p1 = _gpt_extract_nutri(client, crop_bytes, model)
     p2 = _gpt_extract_nutri(client, crop_bytes, model)
     sim = _similarity(json.dumps(p1, sort_keys=True), json.dumps(p2, sort_keys=True)) or 0.0
     parsed = p1 if sim >= 98.0 else p2
 
     if isinstance(parsed, dict) and parsed.get("error") == "NUTRITION_PARSE_FAILED":
-        return {"ok": False, "error": "Nutrition parse failed", "page_index": page_idx,
-                "bbox_pixels": list(map(int, bbox))}
+        return {
+            "ok": False,
+            "error": "Nutrition parse failed",
+            "page_index": page_idx,
+            "bbox_pixels": list(map(int, bbox))
+        }
 
     normalized = _normalize_nutri(parsed)
 
-    # --- flat view for CSV export ---------------------------------------------
-    flat=[]
+    # --- FLAT VIEW -------------------------------------------------------------
+    flat: List[Dict[str, Any]] = []
     for panel in normalized.get("panels", []):
         basis = panel.get("basis") or "unknown"
         for row in panel.get("rows", []):
-            nm = _canon_nutrient_name(row.get("name",""))
+            nm = _canon_nutrient_name(row.get("name", ""))
             nrv = row.get("nrv_pct")
             for a in row.get("amounts", []):
                 flat.append({
@@ -785,7 +830,7 @@ def process_artwork_nutrition(
                     "nrv_pct": nrv
                 })
 
-    # --- OCR QA vs Tesseract ---------------------------------------------------
+    # --- QA (compare to baseline OCR if available) -----------------------------
     qa = _qa_compare_tesseract(crop_bytes, json.dumps(normalized, ensure_ascii=False))
     qa.update({"consistency_ratio": sim, "consistency_ok": bool(sim >= 98.0)})
     qa["accepted"] = bool(flat) and qa["consistency_ok"]
@@ -1295,30 +1340,43 @@ def _find_region_via_ocr_packsize(full_img: Image.Image) -> Optional[Tuple[int, 
         return max(candidates, key=lambda b: (b[2]-b[0]) * (1.0 + 0.5*(b[3]-b[1])))
     return None
 
-def _gpt_bbox_locator(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
+def _gpt_bbox_locator_nutri(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
     buf = io.BytesIO(); img.save(buf, format="PNG")
-    data_url = _encode_data_url(buf.getvalue())
-    r = client.chat.completions.create(
-        model=model, temperature=0, top_p=0,
-        messages=[
-            {"role": "system", "content": BBOX_FINDER_SYSTEM},
-            {"role": "user", "content": [
-                {"type": "text", "text": "Locate the INGREDIENTS panel and return JSON only."},
-                {"type": "image_url", "image_url": {"url": data_url}}
-            ]}
-        ]
-    )
     try:
-        js = json.loads(r.choices[0].message.content.strip())
+        r = client.chat.completions.create(
+            model=model, temperature=0, top_p=0,
+            messages=[
+                {"role": "system", "content": NUTRI_BBOX_FINDER_SYSTEM},
+                {"role": "user", "content": [
+                    {"type":"text","text":"Locate the nutrition panel and return JSON only."},
+                    {"type":"image_url","image_url":{"url": _encode_data_url(buf.getvalue())}}
+                ]}
+            ]
+        )
+        raw = r.choices[0].message.content.strip()
+        js = json.loads(raw)
         if not js.get("found"):
             return None
         W, H = img.size
         pct = js["bbox_pct"]
-        x = int(W * pct["x"] / 100.0); y = int(H * pct["y"] / 100.0)
-        w = int(W * pct["w"] / 100.0); h = int(H * pct["h"] / 100.0)
+        x = int(W * float(pct["x"]) / 100.0)
+        y = int(H * float(pct["y"]) / 100.0)
+        w = int(W * float(pct["w"]) / 100.0)
+        h = int(H * float(pct["h"]) / 100.0)
         return (x, y, x+w, y+h)
-    except Exception:
+    except Exception as e:
+        # surface a hint for debugging
+        print("[nutrition] GPT locator error:", repr(e))
         return None
+
+def _fallback_left_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
+    W, H = img.size
+    # assume three-column label; take left 38% with some vertical margin
+    left = int(0.07 * W)
+    right = int(0.45 * W)
+    top = int(0.10 * H)
+    bottom = int(0.90 * H)
+    return (left, top, right, bottom)
 
 def _gpt_bbox_locator_directions(client, img: Image.Image, model: str) -> Optional[Tuple[int, int, int, int]]:
     buf = io.BytesIO(); img.save(buf, format="PNG")
@@ -1758,6 +1816,7 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
 
 
 
