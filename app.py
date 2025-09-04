@@ -9,14 +9,9 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-# Ingredients
-from artwork_processing_ingredients import process_artwork
-
-# Directions
-from artwork_processing_directions import process_artwork_directions
-
-# Pack size & Nutrition (both live together in this module now)
-from artwork_processing_packsize_nutrition import (
+from prompts.artwork_processing_ingredients import process_artwork
+from prompts.artwork_processing_directions import process_artwork_directions
+from prompts.artwork_processing_packsize_nutrition import (
     process_artwork_packsize,
     process_artwork_nutrition,
 )
