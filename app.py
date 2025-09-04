@@ -244,6 +244,7 @@ st.subheader("💬 Choose a Prompt")
 ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
 ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
 ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
+ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
 
 
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
@@ -293,6 +294,10 @@ elif prompt_choice == ARTWORK_PACKSIZE_PROMPT:  # ← NEW
         "Upload PDF/JPG/PNG artwork. Auto-finds the main net quantity/pack-size statement, "
         "parses Number of items, Base quantity, Unit of measure, and extracts Net/Gross/Drained weight + ℮ if present."
     )
+    recommended_model    = "gpt-4o"
+elif prompt_choice == ARTWORK_NUTRITION_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (nutrition) module"
+    prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-locates the nutrition panel and returns structured JSON + flat key/value rows."
     recommended_model    = "gpt-4o"
 else:
     selected = PROMPT_OPTIONS[prompt_choice]
@@ -491,9 +496,48 @@ if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
                 file_name="packsize_result.json",
                 mime="application/json"
             )
-
+    
     # Bail out to keep behaviour consistent with other auto flows
     st.stop()
+
+if prompt_choice == ARTWORK_NUTRITION_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Nutrition panel")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_nutrition_auto")
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o**.")
+    if art_file and st.button("🚀 Extract Nutrition (Auto)"):
+        with st.spinner("Finding nutrition table and extracting…"):
+            try:
+                res = process_artwork_nutrition(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error","Failed"))
+        else:
+            st.success("✅ Nutrition extracted")
+            st.write(f"**Page:** {res['page_index']}")
+            st.write(f"**BBox (pixels):** {res['bbox_pixels']}")
+            st.markdown("#### Flat rows (easy export)")
+            st.dataframe(pd.DataFrame(res.get("flat", [])))
+            st.markdown("#### Structured JSON")
+            st.json(res.get("parsed", {}))
+            st.markdown("#### QA")
+            st.json(res.get("qa", {}))
+            st.download_button(
+                "⬇️ Download Nutrition JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="nutrition_result.json",
+                mime="application/json"
+            )
+    st.stop()
+
 if prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Directions/Usage/Preparation")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_directions_auto")
