@@ -367,6 +367,37 @@ def _gpt_bbox_locator_nutri(client, img: Image.Image, model: str) -> Optional[Tu
     except Exception:
         return None
 
+def _gpt_bbox_locator(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
+    """
+    GPT-based locator for the INGREDIENTS panel.
+    Returns (x0,y0,x1,y1) in pixels or None on failure.
+    """
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    data_url = _encode_data_url(buf.getvalue())
+    try:
+        r = client.chat.completions.create(
+            model=model, temperature=0, top_p=0,
+            messages=[
+                {"role": "system", "content": BBOX_FINDER_SYSTEM},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Locate the INGREDIENTS panel and return JSON only."},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]}
+            ]
+        )
+        js = json.loads(r.choices[0].message.content.strip())
+        if not js.get("found"):
+            return None
+        W, H = img.size
+        pct = js["bbox_pct"]
+        x = int(W * float(pct["x"]) / 100.0)
+        y = int(H * float(pct["y"]) / 100.0)
+        w = int(W * float(pct["w"]) / 100.0)
+        h = int(H * float(pct["h"]) / 100.0)
+        return (x, y, x + w, y + h)
+    except Exception:
+        return None
+
 def _gpt_extract_nutri(client, crop_bytes: bytes, model: str) -> Dict[str,Any]:
     r = client.chat.completions.create(
         model=model, temperature=0, top_p=0,
@@ -1816,6 +1847,7 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
 
 
 
