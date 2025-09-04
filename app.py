@@ -9,11 +9,16 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
-from prompts.artwork_processing import (
-    process_artwork,
-    process_artwork_directions,
+# Ingredients
+from artwork_processing_ingredients import process_artwork
+
+# Directions
+from artwork_processing_directions import process_artwork_directions
+
+# Pack size & Nutrition (both live together in this module now)
+from artwork_processing_packsize_nutrition import (
     process_artwork_packsize,
-    process_artwork_nutrition,   # ← add this
+    process_artwork_nutrition,
 )
 from rapidfuzz import fuzz
 from sidebar import render_sidebar
