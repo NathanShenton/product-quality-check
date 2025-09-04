@@ -23,7 +23,7 @@ STANDALONE_WEIGHT_RE = re.compile(
 )
 
 # Very common count units – singular/plural, spacing variants ("tea bags"/"teabags")
-COUNT_UNIT_WORDS = r"(?:sachet|sachets|stick|sticks|tablet|tablets|capsule|capsules|softgel|softgels|gummy|gummies|lozenge|lozenges|tea\s*bag|teabags|bag|bags|bar|bars|piece|pieces|pod|pods|pouch|pouches|serving|servings|portion|portions)"
+COUNT_UNIT_WORDS = r"(?:sachet|sachets|stick|sticks|tablet|tablets|capsule|capsules|softgel|softgels|gummy|gummies|lozenge|lozenges|tea\s*bag|teabags|bag|bags|bar|bars|piece|pieces|pod|pods|pouch|pouches)"
 COUNT_ONLY_RE = re.compile(
     rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\b",
     re.IGNORECASE
