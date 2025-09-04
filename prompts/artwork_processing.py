@@ -45,6 +45,90 @@ TIME_QTY_TOKENS = re.compile(
     re.IGNORECASE
 )
 
+# --- NEW: place near the other global constants (top of file) -----------------
+# Canonical nutrient keys we’ll try to map to (useful for QA & analytics)
+CANON_NUTRIENTS = {
+    # macronutrients & energy
+    "Energy", "Fat", "of which saturates", "Carbohydrate", "of which sugars",
+    "Fibre", "Protein", "Salt", "Sodium",
+    # fatty acids (optional to keep canonical)
+    "Omega-3", "EPA", "DHA",
+    # vitamins
+    "Vitamin A", "Vitamin D", "Vitamin E", "Vitamin K",
+    "Vitamin C", "Thiamin (B1)", "Riboflavin (B2)", "Niacin (B3)",
+    "Pantothenic acid (B5)", "Vitamin B6", "Biotin (B7)", "Folate (B9)",
+    "Vitamin B12",
+    # minerals
+    "Calcium", "Phosphorus", "Magnesium", "Iron", "Zinc", "Copper",
+    "Manganese", "Selenium", "Iodine", "Chromium", "Molybdenum",
+    "Potassium", "Chloride", "Fluoride"
+}
+
+# Synonyms/aliases → canonical label (lowercased keys).
+# Tip: keep keys short and lowercased; we lookup after basic cleanup.
+NUTRIENT_SYNONYMS = {
+    # Energy & macros
+    "energy": "Energy", "kcal": "Energy", "kilocalories": "Energy", "kj": "Energy", "kilojoules": "Energy",
+    "fat": "Fat", "total fat": "Fat", "fats": "Fat",
+    "saturates": "of which saturates", "saturated fat": "of which saturates",
+    "sat fat": "of which saturates", "saturates (of which)": "of which saturates",
+    "carbohydrate": "Carbohydrate", "carbs": "Carbohydrate", "carbohydrates": "Carbohydrate",
+    "sugars": "of which sugars", "of which sugars": "of which sugars", "sugar": "of which sugars",
+    "fibre": "Fibre", "fiber": "Fibre", "dietary fibre": "Fibre", "dietary fiber": "Fibre",
+    "protein": "Protein",
+    "salt": "Salt",
+    "sodium": "Sodium",  # we do NOT automatically convert to Salt (depends on jurisdiction)
+    # fatty acids / omegas (common on supplements)
+    "omega 3": "Omega-3", "omega-3": "Omega-3",
+    "epa": "EPA", "eicosapentaenoic acid": "EPA",
+    "dha": "DHA", "docosahexaenoic acid": "DHA",
+
+    # Fat breakdown
+    "monounsaturates": "Monounsaturates",
+    "mono-unsaturates": "Monounsaturates",
+    "polyunsaturates": "Polyunsaturates",
+    "poly-unsaturates": "Polyunsaturates",
+    "trans fat": "Trans fat",
+    "trans": "Trans fat",
+    "cholesterol": "Cholesterol",
+
+    # Carbs breakdown
+    "starch": "Starch",
+    "polyols": "Polyols",
+    "added sugars": "Added sugars",
+    "free sugars": "Free sugars",
+
+    # Energy sometimes printed this way
+    "energy (kj)": "Energy",
+    "energy (kcal)": "Energy",
+    
+    # Vitamins
+    "vitamin a": "Vitamin A", "retinol": "Vitamin A", "retinyl": "Vitamin A", "beta-carotene": "Vitamin A",
+    "vitamin d": "Vitamin D", "vitamin d3": "Vitamin D", "cholecalciferol": "Vitamin D", "vit d": "Vitamin D",
+    "vitamin e": "Vitamin E", "alpha-tocopherol": "Vitamin E", "dl-alpha tocopheryl": "Vitamin E", "vit e": "Vitamin E",
+    "vitamin k": "Vitamin K", "vitamin k1": "Vitamin K", "phylloquinone": "Vitamin K", "vit k": "Vitamin K",
+    "vitamin c": "Vitamin C", "ascorbic acid": "Vitamin C", "l-ascorbic": "Vitamin C", "vit c": "Vitamin C",
+
+    "thiamin": "Thiamin (B1)", "thiamine": "Thiamin (B1)", "vitamin b1": "Thiamin (B1)", "b1": "Thiamin (B1)",
+    "riboflavin": "Riboflavin (B2)", "vitamin b2": "Riboflavin (B2)", "b2": "Riboflavin (B2)",
+    "niacin": "Niacin (B3)", "nicotinamide": "Niacin (B3)", "niacinamide": "Niacin (B3)", "vitamin b3": "Niacin (B3)", "b3": "Niacin (B3)",
+    "pantothenic acid": "Pantothenic acid (B5)", "pantothenate": "Pantothenic acid (B5)", "calcium pantothenate": "Pantothenic acid (B5)", "vitamin b5": "Pantothenic acid (B5)", "b5": "Pantothenic acid (B5)",
+    "vitamin b6": "Vitamin B6", "pyridoxine": "Vitamin B6", "pyridoxal": "Vitamin B6", "pyridoxamine": "Vitamin B6", "b6": "Vitamin B6",
+    "biotin": "Biotin (B7)", "vitamin b7": "Biotin (B7)", "b7": "Biotin (B7)",
+    "folate": "Folate (B9)", "folic acid": "Folate (B9)", "vitamin b9": "Folate (B9)", "b9": "Folate (B9)",
+    "vitamin b12": "Vitamin B12", "cyanocobalamin": "Vitamin B12", "methylcobalamin": "Vitamin B12", "b12": "Vitamin B12",
+
+    # Minerals
+    "calcium": "Calcium", "phosphorus": "Phosphorus", "phosphate": "Phosphorus",
+    "magnesium": "Magnesium", "iron": "Iron", "ferric": "Iron", "ferrous": "Iron",
+    "zinc": "Zinc", "copper": "Copper", "manganese": "Manganese",
+    "selenium": "Selenium", "iodine": "Iodine", "chromium": "Chromium", "molybdenum": "Molybdenum",
+    "potassium": "Potassium", "chloride": "Chloride", "fluoride": "Fluoride",
+
+    # Common supplement actives encountered in “amount per capsule” tables (keep as-is but we’ll still normalise spelling)
+    "isoflavones": "Isoflavones",  # not a vitamin/mineral, but appears as a row label
+}
+
 # --- Pack size / weights tokens ---
 # Units for mass & volume; include common typography/spacing variants
 _U_MASS = r"(?:mg|g|kg|oz|lb)"
@@ -78,6 +162,68 @@ LABELED_WEIGHT_RE = re.compile(
 COMPACT_GW_NW_RE = re.compile(
     r"\b(NW|GW)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g|kg|oz|lb)\b", re.IGNORECASE
 )
+
+# === ADD HERE (after PACKSIZE_* systems): Nutrition systems & patterns ==========
+
+# Locator looks for "Nutrition", "Typical values", "% NRV/RI", etc.
+NUTRI_BBOX_FINDER_SYSTEM = """
+You are a vision locator. You will be shown a full label page.
+Return JSON ONLY for the main nutrition information/table if present:
+{"bbox_pct":{"x":0-100,"y":0-100,"w":0-100,"h":0-100},"found":true|false}
+Guidance:
+- Look for headings like "Nutrition", "Nutritional information", "Typical values",
+  or columns like "per 100g", "per 100ml", "per serving", "Amount per capsule", "% NRV" or "% RI".
+- Choose the largest table-like region representing nutrition values.
+- If not present, return {"found":false}.
+""".strip()
+
+NUTRI_EXTRACTOR_SYSTEM = """
+You are an exact table OCR+parser for packaged food/supplement nutrition panels.
+INPUT: an image crop containing a nutrition table or list.
+OUTPUT: JSON ONLY with this schema (do not add fields):
+
+{
+  "panels": [
+    {
+      "basis": "per_100g" | "per_100ml" | "per_serving" | "per_capsule" | "unknown",
+      "serving_size": {"value": 45.0, "unit": "g"} | null,
+      "rows": [
+        {
+          "name": "Energy" | "Fat" | "of which saturates" | "Carbohydrate" | "of which sugars" | "Fibre" | "Protein" | "Salt" | "Sodium" | "Vitamin C" | "...",
+          "amounts": [
+            {"value": 1944.0, "unit": "kJ"},
+            {"value": 465.0, "unit": "kcal"}
+          ],
+          "nrv_pct": 12.0 | null,
+          "notes": null | "Isoflavones (40%)"
+        }
+      ]
+    }
+  ],
+  "footnotes": {
+    "nrv_not_established": true|false,
+    "symbols_seen": ["†"],
+    "raw_notes": ["NRV: Nutrient Reference Value not established"]
+  }
+}
+
+Rules:
+- Read visible text only; do not invent values.
+- Convert decimal commas to decimal points (e.g., "236,3mg" → 236.3 mg).
+- Keep Energy as two entries if both kJ and kcal are shown.
+- If a %NRV/%RI column exists, populate nrv_pct with the numeric percent (strip "%").
+- If the panel shows both per 100 and per serving/capsule, produce two objects in "panels".
+- For “Amount per capsule/tablet/scoop”, set basis="per_capsule". Serving size is null unless printed.
+- If legibility is too poor, omit that row rather than guessing.
+""".strip()
+
+# Heuristic tokens that strongly suggest a nutrition table
+NUTRI_HEADER_PAT = re.compile(
+    r"\bnutrition(?:al)?\b|typical values|per\s*100\s*(?:g|ml)\b|per\s*serving\b|"
+    r"amount per capsule|%?\s*(?:nrv|ri)\b",
+    re.IGNORECASE
+)
+
 
 # ---------- Utility / QA helpers ----------
 def _safe_punct_scrub(s: str) -> str:
@@ -130,6 +276,150 @@ def _area_pct(bbox: Tuple[int,int,int,int], size: Tuple[int,int]) -> float:
 
 def _num(s: str) -> float:
     return float(s.replace(",", ".").strip())
+
+# === ADD HERE: name + unit normalisation for nutrition ==========================
+def _norm_unit_nutri(u: str) -> str:
+    if not u: return ""
+    u = u.strip().replace("µ", "u").lower()
+    MAP = {"mcg":"mcg","ug":"mcg","μg":"mcg","mg":"mg","g":"g","kg":"kg",
+    "kj":"kJ","kcal":"kcal","cal":"kcal","kjoule":"kJ","kjoules":"kJ",
+    "litre":"l","litres":"l","l":"l","ml":"ml",
+    "iu":"IU"
+}
+    return MAP.get(u, u)
+
+def _fixnum(x):
+    if x is None: return None
+    if isinstance(x,(int,float)): return float(x)
+    if isinstance(x,str):
+        s = x.strip().replace(",", ".")
+        m = re.search(r"-?\d+(?:\.\d+)?", s)
+        return float(m.group(0)) if m else None
+    return None
+
+def _find_region_via_ocr_nutri(full_img: Image.Image) -> Optional[Tuple[int,int,int,int]]:
+    """
+    Group words into line bboxes and look for nutrition hints across whole lines.
+    This catches multi-token cues like 'Typical values', 'per 100 g', 'Amount per capsule', '% NRV'.
+    """
+    data = _ocr_words(full_img)
+    if not data or "text" not in data:
+        return None
+    W, H = full_img.size
+    candidates: List[Tuple[int,int,int,int]] = []
+
+    # group by (block, paragraph, line)
+    rows: Dict[Tuple[int,int,int], List[int]] = {}
+    for i in range(len(data["text"])):
+        if not data["text"][i]:
+            continue
+        key = (data.get("block_num", [0])[i], data.get("par_num", [0])[i], data.get("line_num", [0])[i])
+        rows.setdefault(key, []).append(i)
+
+    for idxs in rows.values():
+        txt = " ".join(data["text"][i] for i in idxs if data["text"][i]).strip()
+        if not txt:
+            continue
+        if NUTRI_HEADER_PAT.search(txt):
+            xs = [data["left"][i] for i in idxs]; ys = [data["top"][i] for i in idxs]
+            ws = [data["width"][i] for i in idxs]; hs = [data["height"][i] for i in idxs]
+            x0 = max(0, min(xs) - int(0.03 * W))
+            x1 = min(W, max(xs[j] + ws[j] for j in range(len(xs))) + int(0.03 * W))
+            y0 = max(0, min(ys) - int(0.02 * H))
+            y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.45 * H))
+            candidates.append((x0, y0, x1, y1))
+
+    if candidates:
+        # Prefer wide, substantial regions (helps catch full tables)
+        return max(candidates, key=lambda b: (b[2]-b[0]) * (1.0 + 0.5*(b[3]-b[1])))
+    return None
+
+
+def _gpt_bbox_locator_nutri(client, img: Image.Image, model: str) -> Optional[Tuple[int,int,int,int]]:
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": NUTRI_BBOX_FINDER_SYSTEM},
+            {"role": "user", "content": [
+                {"type":"text","text":"Locate the nutrition panel and return JSON only."},
+                {"type":"image_url","image_url":{"url": _encode_data_url(buf.getvalue())}}
+            ]}
+        ]
+    )
+    try:
+        js = json.loads(r.choices[0].message.content.strip())
+        if not js.get("found"): return None
+        W,H = img.size; pct = js["bbox_pct"]
+        x=int(W*pct["x"]/100); y=int(H*pct["y"]/100)
+        w=int(W*pct["w"]/100); h=int(H*pct["h"]/100)
+        return (x,y,x+w,y+h)
+    except Exception:
+        return None
+
+def _gpt_extract_nutri(client, crop_bytes: bytes, model: str) -> Dict[str,Any]:
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role":"system","content": NUTRI_EXTRACTOR_SYSTEM},
+            {"role":"user","content":[
+                {"type":"text","text":"Return JSON only."},
+                {"type":"image_url","image_url":{"url": _encode_data_url(crop_bytes)}}
+            ]}
+        ]
+    )
+    raw = r.choices[0].message.content.strip()
+    try:
+        return json.loads(_clean_gpt_json_block(raw))
+    except Exception:
+        return {"error":"NUTRITION_PARSE_FAILED","raw_model_output": raw}
+
+def _normalize_nutri(parsed: Dict[str,Any]) -> Dict[str,Any]:
+    """Decimal-comma fix, unit and name normalisation, NRV coercion."""
+    if not isinstance(parsed, dict): return {"panels": [], "footnotes": {}, "raw": parsed}
+
+    for p in parsed.get("panels", []):
+        # basis
+        b=(p.get("basis") or "").lower().replace(" ", "_")
+        if b in {"per_100","per_100_g"}: p["basis"]="per_100g"
+        elif b in {"per_100ml","per_100_ml"}: p["basis"]="per_100ml"
+        elif b not in {"per_100g","per_100ml","per_serving","per_capsule"}:
+            p["basis"]="unknown"
+
+        # serving size
+        ss=p.get("serving_size")
+        if isinstance(ss, dict):
+            ss["value"]=_fixnum(ss.get("value"))
+            if ss.get("unit"): ss["unit"]=_norm_unit_nutri(str(ss["unit"]))
+
+        # rows
+        for r in p.get("rows", []):
+            r["name"]=_canon_nutrient_name(r.get("name",""))
+            # amounts
+            fixed=[]
+            for a in r.get("amounts", []):
+                if not isinstance(a, dict): continue
+                v=_fixnum(a.get("value")); u=_norm_unit_nutri(str(a.get("unit","")))
+                if v is not None and u: fixed.append({"value": v, "unit": u})
+            r["amounts"]=fixed
+            # nrv
+            if r.get("nrv_pct") is not None:
+                r["nrv_pct"]=_fixnum(r.get("nrv_pct"))
+    return parsed
+
+def _canon_nutrient_name(raw: str) -> str:
+    """Normalise a row label using synonyms; keep unknowns as-is."""
+    if not raw: return raw
+    base = re.sub(r"\s+", " ", raw).strip()
+    key = base.lower()
+    # Drop trailing ":" and surrounding whitespace for lookup
+    key = key.rstrip(": ")
+    # Common 'of which' forms
+    key = key.replace("of which saturated", "saturates").replace("of which saturates", "saturates")
+    key = key.replace("of which sugars", "sugars")
+    # Lookup
+    return NUTRIENT_SYNONYMS.get(key, base)
+
 
 def _norm_unit(u: str) -> str:
     u = u.strip().lower().replace(" ", "")
@@ -380,6 +670,106 @@ def process_artwork(
     crop_bytes = _crop_to_bytes(img, bbox)
     return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
 
+def process_artwork_nutrition(
+    client,
+    file_bytes: bytes,
+    filename: str,
+    *,
+    render_dpi: int = 350,
+    model: str = "gpt-4o"
+) -> Dict[str, Any]:
+    """
+    Auto NUTRITION pipeline (locate → strict JSON OCR+parse → normalise → QA).
+    Returns:
+    {
+      "ok": bool,
+      "page_index": int,
+      "bbox_pixels": [x0,y0,x1,y1] | None,
+      "parsed": {...},         # structured per schema
+      "flat": [ ... ],         # easy key/value export
+      "qa": {...}
+    }
+    """
+    is_pdf = filename.lower().endswith(".pdf")
+
+    # --- locate panel ----------------------------------------------------------
+    if is_pdf:
+        if fitz is None:
+            return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
+        pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
+        if not pages:
+            return _fail("PDF contained no pages after rendering.")
+
+        page_idx = None; img = None; bbox = None
+        # quick OCR/GPT scan over pages
+        for i, pg in enumerate(pages):
+            cand = (_find_region_via_ocr_nutri(pg) or _gpt_bbox_locator_nutri(client, pg, model))
+            if cand:
+                bbox = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                if bbox:
+                    page_idx = i; img = pg; break
+        if page_idx is None or not bbox:
+            return _fail("Could not locate a NUTRITION panel in the PDF.")
+    else:
+        try:
+            img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+        except Exception:
+            return _fail("Could not open image.")
+        bbox = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
+        if not bbox:
+            return _fail("Could not locate a NUTRITION panel in the image.")
+        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+        page_idx = 0
+
+    # tiny-area recheck
+    if _area_pct(bbox, img.size) < 2.0:
+        alt = _gpt_bbox_locator_nutri(client, img, model)
+        if alt:
+            alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+            if alt: bbox = alt
+
+    crop_bytes = _crop_to_bytes(img, bbox)
+
+    # --- extract JSON twice for consistency -----------------------------------
+    p1 = _gpt_extract_nutri(client, crop_bytes, model)
+    p2 = _gpt_extract_nutri(client, crop_bytes, model)
+    sim = _similarity(json.dumps(p1, sort_keys=True), json.dumps(p2, sort_keys=True)) or 0.0
+    parsed = p1 if sim >= 98.0 else p2
+
+    if isinstance(parsed, dict) and parsed.get("error") == "NUTRITION_PARSE_FAILED":
+        return {"ok": False, "error": "Nutrition parse failed", "page_index": page_idx,
+                "bbox_pixels": list(map(int, bbox))}
+
+    normalized = _normalize_nutri(parsed)
+
+    # --- flat view for CSV export ---------------------------------------------
+    flat=[]
+    for panel in normalized.get("panels", []):
+        basis = panel.get("basis") or "unknown"
+        for row in panel.get("rows", []):
+            nm = _canon_nutrient_name(row.get("name",""))
+            nrv = row.get("nrv_pct")
+            for a in row.get("amounts", []):
+                flat.append({
+                    "nutrient": nm,
+                    "amount": f"{a.get('value')} {a.get('unit')}".strip(),
+                    "basis": basis,
+                    "nrv_pct": nrv
+                })
+
+    # --- OCR QA vs Tesseract ---------------------------------------------------
+    qa = _qa_compare_tesseract(crop_bytes, json.dumps(normalized, ensure_ascii=False))
+    qa.update({"consistency_ratio": sim, "consistency_ok": bool(sim >= 98.0)})
+    qa["accepted"] = bool(flat) and qa["consistency_ok"]
+
+    return {
+        "ok": True,
+        "page_index": page_idx,
+        "bbox_pixels": list(map(int, bbox)),
+        "parsed": normalized,
+        "flat": flat,
+        "qa": qa
+    }
 
 def process_artwork_directions(
     client,
@@ -1309,4 +1699,5 @@ def _merge_packsize(primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[s
             rc.append(s)
     out["raw_candidates"] = rc
     return out
+
 
