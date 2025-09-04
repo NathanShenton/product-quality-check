@@ -13,52 +13,49 @@ PROMPT_OPTIONS = {
             """You are a JSON-producing assistant with expert knowledge of UK/EU food supplement rules (Directive 2002/46/EC and UK implementing regs).
             
             Task:
-            Review all the data on each product you receive to decide whether ANY numeric nutrient amount present in the "nutritional info" attribute (JSON) is strictly greater than the single serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml). Use supplied evidence only; do not assume, infer, or derive missing facts. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis exists.
+            Review all the data on each product you receive to decide whether ANY numeric nutrient amount present in the "nutritional info" attribute (JSON) is greater than or equal to the single serving size—defined STRICTLY as the per-unit mass/volume parsed from the "quantity string" attribute in grams (g) or millilitres (ml). Use supplied evidence only; do not assume, infer, or derive missing facts. Serving size must come from "quantity string" (per-unit g/ml only). Comparisons must use ONLY numeric values actually present in "nutritional info" (e.g., “0.4g”, “76g”), even when no “per …” basis exists.
             
             Definitions:
             • Serving size (this task) — a single per-unit g/ml value extracted from "quantity string".
-              – Supported patterns (accept optional spaces, × symbol, NBSP, decimal commas):
-                • "<N>\s*[x×]\s*(<X>)(mg|g|ml)"  ⇒ use X+unit (e.g., "4x32g" ⇒ 32 g; "4 × 32 g" ⇒ 32 g)
-                • "<N> .* of (<X>)(mg|g|ml) each" ⇒ use X+unit (e.g., "5 sachets of 5g each" ⇒ 5 g)
-                • "(<X>)(mg|g|ml)" (single value) ⇒ use that value (e.g., "30 ml", "25 g")
-              – Ignore totals; do NOT multiply N×X. If no g/ml appears (e.g., "60 tablets"), serving size is null.
-              – Normalize: mg→g (÷1000); µg→g (÷1,000,000); kg→g (×1000); mL→ml; L→ml (×1000). Convert decimal commas to dots.
+              – Supported patterns (accept optional spaces, the × symbol, NBSP, and decimal commas):
+                • "<N> x <X><unit>" or "<N>×<X><unit>" or variants without spaces (e.g., "4x32g", "4 × 32 g") ⇒ use the per-unit X<unit> (32 g).
+                • "<N> … of <X><unit> each" (e.g., "5 sachets of 5g each") ⇒ use X<unit> (5 g).
+                • Single value "<X><unit>" (e.g., "30 ml", "25 g") ⇒ use that value.
+              – Ignore totals; do NOT multiply N×X. If no g/ml is present (e.g., "60 tablets"), serving size is null.
+              – Normalize units: µg→g (÷1,000,000); mg→g (÷1,000); kg→g (×1,000); mL→ml; L/l→ml (×1,000). Convert decimal commas to dots.
             
-            • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, l/L), regardless of whether a “per …” basis exists.
-              – Parse recursively from the JSON (objects/arrays/strings).
-              – For mixed strings, extract each mass/volume token separately (e.g., "1392kJ / 328kcal" ⇒ none comparable; "0.4g" ⇒ comparable).
-              – Ignore non-mass/volume units (kJ, kcal, %NRV, IU) and ratios (e.g., mg/100ml) unless they already provide a single mass or volume magnitude without deriving a basis.
+            • Comparable nutritional values — ANY numeric amounts in "nutritional info" that carry a mass/volume unit (µg, mg, g, kg, ml, L/l), regardless of whether a “per …” basis exists.
+              – Parse recursively from the JSON (objects/arrays/strings). For mixed strings, extract EACH mass/volume token separately (e.g., "13g / 6.6g" ⇒ two tokens).
+              – Ignore non-mass/volume units (kJ, kcal, %NRV, IU) and ratios (e.g., mg/100ml) — do not transform ratios into single magnitudes.
+              – Use values AS WRITTEN; do not sanitize “implausible” magnitudes (e.g., keep "3200g" as 3200 g).
             
             Parsing method:
-            1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple candidates exist, select the smallest per-unit g/ml. If none, set value=null.
+            1) Extract ONE per-unit g/ml serving size from "quantity string". If multiple per-unit candidates exist, select the smallest per-unit g/ml present. If none, set value=null.
             2) Traverse "nutritional info" (JSON):
                • Extract every numeric token with a mass/volume unit; normalize to base units (g or ml).
                • For each token, capture: key/label (if available), numeric value, unit (after normalization), original text token, and a simple JSON path.
-               • Do NOT infer “per …” or create derived bases.
+               • Do NOT infer “per …” bases or derive totals from context.
             
             Comparability rules:
-            • If serving size is in grams, compare ONLY to nutrient amounts normalized to grams (µg/mg/g/kg → g).
-            • If serving size is in millilitres, compare ONLY to nutrient amounts normalized to millilitres (L/ml).
-            • If dimensions differ (g vs ml), mark the nutrient value as not comparable.
+            • If serving size is in grams, compare ONLY to tokens normalized to grams (µg/mg/g/kg → g).
+            • If serving size is in millilitres, compare ONLY to tokens normalized to millilitres (L/ml).
+            • If dimensions differ (g vs ml), mark the nutrient token as not comparable.
             
-            Decision (ANY exceedance check):
-            • Output "Yes" if at least one comparable nutrient amount is ≥ the serving size (i.e., any value equal to or greater than the serving size counts as exceeding).
-            • Output "No" if there is at least one comparable nutrient amount and none are ≥ the serving size.
-            • Output "Ambiguous" if serving size is null or there are ZERO comparable nutrient amounts.
+            Decision (ANY exceedance check, deterministic):
+            • Define EXCEEDS ⇢ nutrient_value_normalized ≥ serving_size_normalized.
+            • Output "Yes" if ANY comparable nutrient token EXCEEDS.
+            • Output "No" if there is at least one comparable token and NONE EXCEED.
+            • Output "Ambiguous" if serving size is null OR there are ZERO comparable tokens.
             
             Aggregation discipline (avoid inversion bugs):
-            • COMPARABLE = all items where comparable=true.
+            • COMPARABLE = all tokens where comparable=true.
             • If serving_size is null OR len(COMPARABLE)=0 ⇒ "Ambiguous".
-            • Else if ANY(COMPARABLE.value_normalized ≥ serving_size.value_normalized) ⇒ "Yes".
+            • Else if ANY(COMPARABLE.value ≥ serving_size.value) ⇒ "Yes".
             • Else ⇒ "No".
+            • Interpret "exceeds" as “nutrient amount ≥ serving size.”
             
             Evidence:
-            Quote exact snippets for the parsed "quantity string" per-unit and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent values.
-            
-            Edge cases & examples:
-            • quantity string = "4x32g" ⇒ serving size = 32 g. nutritional info includes "Fat 0.4g", "Carbohydrates 76g" ⇒ 76 g ≥ 32 g ⇒ decision "Yes"; list "Carbohydrates 76 g" as exceeding.
-            • quantity string = "30 ml"; nutrition has only grams ⇒ all not comparable ⇒ "Ambiguous".
-            • quantity string missing per-unit g/ml ⇒ "Ambiguous".
+            Quote exact snippets for the parsed "quantity string" per-unit value and each comparable nutrient token from "nutritional info" (with simple JSON paths). Do not invent or adjust values.
             
             Output (strict JSON only):
             {
@@ -96,7 +93,7 @@ PROMPT_OPTIONS = {
                 }
               ],
               "evidence": [ { "field": string, "snippet": string } ],
-              "reasoning": "≤30 words; indicate whether any comparable nutrient amount meets/exceeds the serving size and cite the highest offending value."
+              "reasoning": "≤30 words; state whether any comparable nutrient amount meets/exceeds the serving size and cite the highest offending value."
             }
             No extra keys, no markdown/code fences, no surrounding text."""
         ),
@@ -1651,6 +1648,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
