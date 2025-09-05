@@ -6,7 +6,8 @@ from PIL import Image
 
 from prompts.artwork_processing_common import (
     fitz, Image as PILImage, TESS_AVAILABLE,
-    _fail, _pdf_to_page_images, _encode_data_url, _crop_to_bytes, _ocr_words,
+    _fail, _pdf_to_page_images, _pdf_to_page_images_adaptive, _rerender_single_page,
+    _encode_data_url, _crop_to_bytes, _ocr_words,
     _qa_compare_tesseract, _clamp_pad_bbox, _fallback_left_panel_bbox,
     _fallback_right_panel_bbox, _fallback_center_panel_bbox, _area_pct, _similarity,
     _safe_punct_scrub, _gpt_normalize_flatpack_page
@@ -283,7 +284,11 @@ def process_artwork_warnings_advisory(
     if is_pdf:
         if fitz is None:
             return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
-        pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
+        # Adaptive render helps tiny vector text
+        try:
+            pages, _, _, _ = _pdf_to_page_images_adaptive(file_bytes, dpi_primary=render_dpi, dpi_fallback=max(550, render_dpi+150))
+        except Exception:
+            pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
         if not pages:
             return _fail("PDF contained no pages after rendering.")
 
@@ -336,32 +341,54 @@ def process_artwork_warnings_advisory(
     # ============== 2) OCR every box + 1 full-page sweep ======================
     raw_blocks: List[str] = []
 
-    def _ocr_with_retries_for_box(bbox):
-        if not bbox: return None
+    def _ocr_with_retries_for_box(bbox, *, allow_hidpi_pdf: bool = True):
+        if not bbox: return None, None
         crop = _crop_to_bytes(img, bbox)
         txt = _gpt_exact_ocr_warnadv(client, crop, model).strip()
         if txt.upper() != "IMAGE_UNREADABLE":
-            return txt
+            return txt, crop
+
         # widen +12%, then +20%
         bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12)
         if bigger1 and bigger1 != bbox:
             crop1 = _crop_to_bytes(img, bigger1)
             txt1 = _gpt_exact_ocr_warnadv(client, crop1, model).strip()
             if txt1.upper() != "IMAGE_UNREADABLE":
-                return txt1
+                return txt1, crop1
             bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
             if bigger2 and bigger2 != bigger1:
                 crop2 = _crop_to_bytes(img, bigger2)
                 txt2 = _gpt_exact_ocr_warnadv(client, crop2, model).strip()
                 if txt2.upper() != "IMAGE_UNREADABLE":
-                    return txt2
-        return None
+                    return txt2, crop2
 
+        # Optional hi-DPI re-render for PDFs
+        if is_pdf and allow_hidpi_pdf:
+            hi_img = _rerender_single_page(file_bytes, page_idx, dpi=max(550, render_dpi+150))
+            if hi_img is not None:
+                ow, oh = img.size
+                nw, nh = hi_img.size
+                sx, sy = (nw / max(1, ow), nh / max(1, oh))
+                scaled = (int(bbox[0]*sx), int(bbox[1]*sy), int(bbox[2]*sx), int(bbox[3]*sy))
+                scaled = _clamp_pad_bbox(scaled, hi_img.size, pad_frac=0.03)
+                if scaled:
+                    crop3 = _crop_to_bytes(hi_img, scaled)
+                    txt3 = _gpt_exact_ocr_warnadv(client, crop3, model).strip()
+                    if txt3.upper() != "IMAGE_UNREADABLE":
+                        # swap working canvas for QA target
+                        return txt3, crop3
+
+        return None, crop
+
+    qa_img_bytes = None
     for b in boxes:
-        txt = _ocr_with_retries_for_box(b)
+        txt, crop_used = _ocr_with_retries_for_box(b)
         if txt:
             raw_blocks.append(txt)
+            if qa_img_bytes is None and crop_used is not None:
+                qa_img_bytes = crop_used
 
+    # Full-page sweep (always)
     full_raw = _gpt_fullpage_warnadv_text(client, img, model).strip()
     if full_raw.upper() != "IMAGE_UNREADABLE":
         raw_blocks.append(full_raw)
@@ -395,18 +422,19 @@ def process_artwork_warnings_advisory(
                 advisory_info.append(s)
 
     # ============== 5) QA & acceptance =======================================
-    qa_img_bytes = None
-    if boxes:
-        biggest = max(boxes, key=lambda r: (r[2]-r[0])*(r[3]-r[1]))
-        qa_img_bytes = _crop_to_bytes(img, biggest)
-    else:
-        qa_img_bytes = _crop_to_bytes(img, (0, 0, img.size[0], img.size[1]))
+    if qa_img_bytes is None:
+        # Use biggest region or the whole page if no crop succeeded
+        if boxes:
+            biggest = max(boxes, key=lambda r: (r[2]-r[0])*(r[3]-r[1]))
+            qa_img_bytes = _crop_to_bytes(img, biggest)
+        else:
+            qa_img_bytes = _crop_to_bytes(img, (0, 0, img.size[0], img.size[1]))
 
     qa = _qa_compare_tesseract(qa_img_bytes, "\n".join(statements) if statements else clean_text)
 
     consistency_ok = True
     consist_ratio = 100.0
-    if boxes:
+    if qa_img_bytes:
         again_txt = _gpt_exact_ocr_warnadv(client, qa_img_bytes, model)
         target = "\n".join(statements) if statements else clean_text
         consist_ratio = _similarity(again_txt, target) or 0.0
