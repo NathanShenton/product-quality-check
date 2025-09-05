@@ -9,39 +9,27 @@ from prompts.artwork_processing_common import (
     _fail, _pdf_to_page_images, _safe_punct_scrub, _similarity, _clean_gpt_json_block,
     _area_pct, _encode_data_url, _crop_to_bytes, _ocr_words, _qa_compare_tesseract,
     _clamp_pad_bbox, _fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox,
-    _pdf_find_packsize_block, _pdf_find_nutrition_block,
+    _pdf_find_packsize_block, _pdf_find_nutrition_block, _gpt_normalize_flatpack_page,
     _U_ALL, _U_COUNT, _NET_LBL, _GROSS_LBL, _DRAINED_LBL, _E_MARK,
     MULTIPACK_RE, COUNT_RE, SINGLE_QTY_RE, LABELED_WEIGHT_RE, COMPACT_GW_NW_RE,
     _num, _norm_unit, _title_if_count
 )
 
 # ---- Extra local regex for pack-size robustness ----
-# Standalone weights (optionally with ℮), no label, e.g. "110 g", "750 g ℮", "1 L"
 STANDALONE_WEIGHT_RE = re.compile(
     r"\b(\d{1,4}(?:[.,]\d{1,3})?)\s*(mg|g|kg|ml|l|cl)\s*(℮)?\b",
     re.IGNORECASE
 )
-
-# Very common count units – singular/plural, spacing variants ("tea bags"/"teabags")
-COUNT_UNIT_WORDS = r"(?:sachet|sachets|stick|sticks|tablet|tablets|capsule|capsules|softgel|softgels|gummy|gummies|lozenge|lozenges|tea\s*bag|teabags|bag|bags|bar|bars|piece|pieces|pod|pods|pouch|pouches)"
-COUNT_ONLY_RE = re.compile(
-    rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\b",
-    re.IGNORECASE
-)
-
-# Multipack with count + qty, e.g. "10 x 12 g", "4×250ml", "3x 100 g"
-# (more permissive than the one in common: allows optional space and dot comma decimals)
+COUNT_UNIT_WORDS = r"(?:sachet|sachets|stick|sticks|tablet|tablets|capsule|capsules|softgel|softgels|gummy|gummies|lozenge|lozenges|tea\s*bag|teabags|bag|bags|bar|bars|piece|pieces|pod|pods|pouch|pouches|serving|servings|portion|portions)"
+COUNT_ONLY_RE = re.compile(rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\b", re.IGNORECASE)
 FLEX_MULTIPACK_RE = re.compile(
     r"\b(\d{1,4})\s*[x×]\s*(\d{1,4}(?:[.,]\d{1,3})?)\s*(mg|g|kg|ml|l|cl)\b",
     re.IGNORECASE
 )
-
-# Count word + per-item qty: "10 sachets x 5 g", "30 tea bags x 2 g"
 COUNT_WORD_MULTIPACK_RE = re.compile(
     rf"\b(\d{{1,4}})\s*{COUNT_UNIT_WORDS}\s*[x×]\s*(\d{{1,4}}(?:[.,]\d{{1,3}})?)\s*(mg|g|kg|ml|l|cl)\b",
     re.IGNORECASE
 )
-
 
 # ---------- Nutrition helpers/constants ----------
 CANON_NUTRIENTS = {
@@ -59,13 +47,12 @@ NUTRIENT_SYNONYMS = {
     "saturates": "of which saturates", "saturated fat": "of which saturates", "sat fat": "of which saturates",
     "carbohydrate": "Carbohydrate", "carbs": "Carbohydrate", "carbohydrates": "Carbohydrate",
     "sugars": "of which sugars", "of which sugars": "of which sugars", "sugar": "of which sugars",
-    "fibre": "Fibre", "fiber": "Fibre", "dietary fibre": "Fibre", "dietary fiber": "Fibre",
+    "fibre": "Fibre", "fiber": "Fibre",
     "protein": "Protein", "salt": "Salt", "sodium": "Sodium",
     "omega 3": "Omega-3", "omega-3": "Omega-3",
     "epa": "EPA", "eicosapentaenoic acid": "EPA", "dha": "DHA", "docosahexaenoic acid": "DHA",
-    "monounsaturates": "Monounsaturates", "mono-unsaturates": "Monounsaturates",
-    "polyunsaturates": "Polyunsaturates", "poly-unsaturates": "Polyunsaturates",
-    "trans fat": "Trans fat", "trans": "Trans fat", "cholesterol": "Cholesterol",
+    "monounsaturates": "Monounsaturates", "polyunsaturates": "Polyunsaturates",
+    "trans fat": "Trans fat", "cholesterol": "Cholesterol",
     "starch": "Starch", "polyols": "Polyols", "added sugars": "Added sugars", "free sugars": "Free sugars",
     "energy (kj)": "Energy", "energy (kcal)": "Energy",
     "vitamin a": "Vitamin A", "retinol": "Vitamin A", "retinyl": "Vitamin A", "beta-carotene": "Vitamin A",
@@ -77,13 +64,11 @@ NUTRIENT_SYNONYMS = {
     "riboflavin": "Riboflavin (B2)", "vitamin b2": "Riboflavin (B2)", "b2": "Riboflavin (B2)",
     "niacin": "Niacin (B3)", "nicotinamide": "Niacin (B3)", "niacinamide": "Niacin (B3)", "vitamin b3": "Niacin (B3)", "b3": "Niacin (B3)",
     "pantothenic acid": "Pantothenic acid (B5)", "pantothenate": "Pantothenic acid (B5)", "calcium pantothenate": "Pantothenic acid (B5)", "vitamin b5": "Pantothenic acid (B5)", "b5": "Pantothenic acid (B5)",
-    "vitamin b6": "Vitamin B6", "pyridoxine": "Vitamin B6", "pyridoxal": "Vitamin B6", "pyridoxamine": "Vitamin B6", "b6": "Vitamin B6",
-    "biotin": "Biotin (B7)", "vitamin b7": "Biotin (B7)", "b7": "Biotin (B7)",
+    "vitamin b6": "Vitamin B6", "pyridoxine": "Vitamin B6", "vitamin b7": "Biotin (B7)", "biotin": "Biotin (B7)",
     "folate": "Folate (B9)", "folic acid": "Folate (B9)", "vitamin b9": "Folate (B9)", "b9": "Folate (B9)",
     "vitamin b12": "Vitamin B12", "cyanocobalamin": "Vitamin B12", "methylcobalamin": "Vitamin B12", "b12": "Vitamin B12",
     "calcium": "Calcium", "phosphorus": "Phosphorus", "phosphate": "Phosphorus",
-    "magnesium": "Magnesium", "iron": "Iron", "ferric": "Iron", "ferrous": "Iron",
-    "zinc": "Zinc", "copper": "Copper", "manganese": "Manganese",
+    "magnesium": "Magnesium", "iron": "Iron", "zinc": "Zinc", "copper": "Copper", "manganese": "Manganese",
     "selenium": "Selenium", "iodine": "Iodine", "chromium": "Chromium", "molybdenum": "Molybdenum",
     "potassium": "Potassium", "chloride": "Chloride", "fluoride": "Fluoride",
     "isoflavones": "Isoflavones",
@@ -100,7 +85,6 @@ def _fixnum(x):
     if x is None: return None
     if isinstance(x,(int,float)): return float(x)
     if isinstance(x,str):
-        import re
         s = x.strip().replace(",", ".")
         m = re.search(r"-?\d+(?:\.\d+)?", s)
         return float(m.group(0)) if m else None
@@ -171,7 +155,7 @@ def _find_region_via_ocr_nutri(full_img: Image.Image):
     rows: Dict[Tuple[int,int,int], List[int]] = {}
     for i in range(len(data["text"])):
         if not data["text"][i]: continue
-        key = (data.get("block_num", [0])[i], data.get("par_num",   [0])[i], data.get("line_num",  [0])[i])
+        key = (data.get("block_num",[0])[i], data.get("par_num",[0])[i], data.get("line_num",[0])[i])
         rows.setdefault(key, []).append(i)
     candidates: List[Tuple[int,int,int,int]] = []
     for idxs in rows.values():
@@ -303,6 +287,16 @@ Rules:
 - Use null for anything not explicitly present.
 """.strip()
 
+FULLPAGE_PACKSIZE_SYSTEM = """
+You will receive a full label image. Extract ONLY the consumer-facing net quantity / pack-size lines.
+Rules:
+- Copy visible characters exactly (preserve ℮, ×, punctuation and line breaks).
+- Include things like “4 x 250 ml”, “750 g”, “120 capsules”, “Net weight 500 g”.
+- Exclude brand names, flavour, storage/warnings, and nutrition values.
+- If none present or illegible, output IMAGE_UNREADABLE.
+Return plain text only.
+""".strip()
+
 def _gpt_bbox_locator_packsize(client, img: Image.Image, model: str):
     buf = io.BytesIO(); img.save(buf, format="PNG")
     data_url = _encode_data_url(buf.getvalue())
@@ -343,7 +337,7 @@ def _gpt_exact_ocr_packsize(client, crop_bytes: bytes, model: str) -> str:
     return r.choices[0].message.content.strip()
 
 def _gpt_structure_packsize(client, raw_text: str, model: str) -> Dict[str, Any]:
-    r = client.chat_completions.create(
+    r = client.chat.completions.create(
         model=model, temperature=0, top_p=0,
         messages=[
             {"role": "system", "content": PACKSIZE_STRUCTURER_SYSTEM},
@@ -374,6 +368,20 @@ def _gpt_structure_packsize(client, raw_text: str, model: str) -> Dict[str, Any]
             "raw_model_output": raw
         }
 
+def _gpt_fullpage_packsize_text(client, img: Image.Image, model: str) -> str:
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role":"system","content": FULLPAGE_PACKSIZE_SYSTEM},
+            {"role":"user","content":[
+                {"type":"text","text":"Return plain text only."},
+                {"type":"image_url","image_url":{"url": _encode_data_url(buf.getvalue())}}
+            ]}
+        ]
+    )
+    return r.choices[0].message.content.strip()
+
 # Deterministic regex fallback/augment
 def _regex_parse_packsize(text: str) -> Dict[str, Any]:
     out = {
@@ -388,18 +396,13 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
     }
     t = text
 
-    # 1) multipack like "4 x 250 ml" (common)
     m = MULTIPACK_RE.search(t) or FLEX_MULTIPACK_RE.search(t)
     if m:
-        n = int(m.group(1))
-        qty = _num(m.group(2))
-        unit = _norm_unit(m.group(3))
-        out["number_of_items"] = n
-        out["base_quantity"] = qty
-        out["unit_of_measure"] = unit
+        out["number_of_items"] = int(m.group(1))
+        out["base_quantity"] = _num(m.group(2))
+        out["unit_of_measure"] = _norm_unit(m.group(3))
         out["raw_candidates"].append(m.group(0))
 
-    # 1b) "10 sachets x 5 g", "30 tea bags x 2 g"
     if out["unit_of_measure"] is None:
         m_cw = COUNT_WORD_MULTIPACK_RE.search(t)
         if m_cw:
@@ -408,7 +411,6 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
             out["unit_of_measure"] = _norm_unit(m_cw.group(3))
             out["raw_candidates"].append(m_cw.group(0))
 
-    # 2) counts only: "120 Tablets", "30 Tea Bags", "10 sachets"
     if out["unit_of_measure"] is None:
         m2 = COUNT_RE.search(t) or COUNT_ONLY_RE.search(t)
         if m2:
@@ -417,7 +419,6 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
             out["unit_of_measure"] = _norm_unit(m2.group(2))
             out["raw_candidates"].append(m2.group(0))
 
-    # 3) single qty: "150g", "750 g", "1 L"
     if out["unit_of_measure"] is None:
         m3 = SINGLE_QTY_RE.search(t) or STANDALONE_WEIGHT_RE.search(t)
         if m3:
@@ -426,7 +427,6 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
             out["unit_of_measure"] = _norm_unit(m3.group(2))
             out["raw_candidates"].append(m3.group(0))
 
-    # 4) labeled weights: "Net weight: 500 g", "Gross Wt 540 g", "Drained weight 325 g"
     for lab in LABELED_WEIGHT_RE.finditer(t):
         full = lab.group(0)
         val = _num(lab.group(5))
@@ -440,7 +440,6 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
             out["net_weight"] = {"value": val, "unit": unit}
         out["raw_candidates"].append(full)
 
-    # 5) compact GW/NW like "GW 540 g / NW 500 g"
     for cg in COMPACT_GW_NW_RE.finditer(t):
         kind = cg.group(1).upper()
         val = _num(cg.group(2))
@@ -453,13 +452,31 @@ def _regex_parse_packsize(text: str) -> Dict[str, Any]:
 
     return out
 
+def _merge_packsize(model_parsed: Dict[str, Any], regex_parsed: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(model_parsed, dict): return regex_parsed
+    out = dict(model_parsed)
+    for k, v in regex_parsed.items():
+        if k in {"raw_candidates"}:
+            out.setdefault(k, [])
+            out[k] = list({*(out[k] or []), *(v or [])})
+            continue
+        if isinstance(v, dict):
+            out.setdefault(k, {})
+            for sk, sv in v.items():
+                if out[k].get(sk) in (None, "", []):
+                    out[k][sk] = sv
+        else:
+            if out.get(k) in (None, "", []):
+                out[k] = v
+    return out
+
 # ---------- Public API: PACK SIZE ---------------------------------------------
 def process_artwork_packsize(
     client,
     file_bytes: bytes,
     filename: str,
     *,
-    render_dpi: int = 350,
+    render_dpi: int = 400,
     model: str = "gpt-4o"
 ) -> Dict[str, Any]:
     is_pdf = filename.lower().endswith(".pdf")
@@ -473,62 +490,64 @@ def process_artwork_packsize(
 
         vec = _pdf_find_packsize_block(file_bytes)
         page_idx: Optional[int] = None
-        img = None
+        page_img = None
         bbox = None
 
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
-            bbox_pts = vec["bbox_pixels"]  # points @ 72 dpi
+            bbox_pts = vec["bbox_pixels"]
             scale = render_dpi / 72.0
             bbox = tuple(int(round(v * scale)) for v in bbox_pts)
-            img = pages[page_idx]
-            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+            page_img = pages[page_idx]
+            bbox = _clamp_pad_bbox(bbox, page_img.size, pad_frac=0.03)
 
-        # (2) OCR/GPT per-page fallback
         if bbox is None:
             for i, pg in enumerate(pages):
                 cand = (_find_region_via_ocr_packsize(pg) or _gpt_bbox_locator_packsize(client, pg, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
                     if cand:
-                        page_idx, img, bbox = i, pg, cand
+                        page_idx, page_img, bbox = i, pg, cand
                         break
 
-        # (3) NEW heuristic guesses: LEFT → RIGHT → CENTER
         if bbox is None:
             for i, pg in enumerate(pages):
                 for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.02)
+                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.03)
                     if g:
-                        page_idx, img, bbox = i, pg, g
+                        page_idx, page_img, bbox = i, pg, g
                         break
                 if bbox is not None:
                     break
 
-        if page_idx is None or img is None or bbox is None:
+        if page_idx is None or page_img is None or bbox is None:
             return _fail("Could not locate a PACK SIZE/NET QUANTITY area in the PDF.")
 
-        if _area_pct(bbox, img.size) < 1.0:
-            alt = _gpt_bbox_locator_packsize(client, img, model)
+        if _area_pct(bbox, page_img.size) < 1.0:
+            alt = _gpt_bbox_locator_packsize(client, page_img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                alt = _clamp_pad_bbox(alt, page_img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
-        crop_bytes = _crop_to_bytes(img, bbox)
+        crop_bytes = _crop_to_bytes(page_img, bbox)
+        work_for_fullpage = page_img  # keep PDF page as fallback canvas
 
     else:
         try:
-            img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
+            base_img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
-        bbox = (_find_region_via_ocr_packsize(img) or _gpt_bbox_locator_packsize(client, img, model))
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02) if bbox else None
+        # normalize orientation + main panel crop
+        norm_img, _, _ = _gpt_normalize_flatpack_page(client, base_img, model)
+        work_img = norm_img or base_img
 
-        # NEW heuristic fallbacks
+        bbox = (_find_region_via_ocr_packsize(work_img) or _gpt_bbox_locator_packsize(client, work_img, model))
+        bbox = _clamp_pad_bbox(bbox, work_img.size, pad_frac=0.03) if bbox else None
+
         if bbox is None:
             for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.02)
+                g = _clamp_pad_bbox(guess_fn(work_img), work_img.size, pad_frac=0.03)
                 if g:
                     bbox = g
                     break
@@ -536,41 +555,76 @@ def process_artwork_packsize(
         if not bbox:
             return _fail("Could not locate a PACK SIZE/NET QUANTITY area in the image.")
 
-        if _area_pct(bbox, img.size) < 1.0:
-            alt = _gpt_bbox_locator_packsize(client, img, model)
+        if _area_pct(bbox, work_img.size) < 1.0:
+            alt = _gpt_bbox_locator_packsize(client, work_img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                alt = _clamp_pad_bbox(alt, work_img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
-        crop_bytes = _crop_to_bytes(img, bbox)
+        crop_bytes = _crop_to_bytes(work_img, bbox)
+        work_for_fullpage = work_img
         page_idx = 0
 
-    # OCR + consistency
+    # OCR + escalation
     raw = _gpt_exact_ocr_packsize(client, crop_bytes, model)
     if raw.upper() == "IMAGE_UNREADABLE":
-        return {"ok": False, "error": "Detected pack size crop unreadable.",
-                "page_index": page_idx, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+        # widen 12%
+        bigger1 = _clamp_pad_bbox(bbox, work_for_fullpage.size, pad_frac=0.12)
+        if bigger1 and bigger1 != bbox:
+            crop1 = _crop_to_bytes(work_for_fullpage, bigger1)
+            raw1 = _gpt_exact_ocr_packsize(client, crop1, model)
+            if raw1.upper() != "IMAGE_UNREADABLE":
+                bbox, crop_bytes, raw = bigger1, crop1, raw1
+            else:
+                # widen 20%
+                bigger2 = _clamp_pad_bbox(bigger1, work_for_fullpage.size, pad_frac=0.20)
+                if bigger2 and bigger2 != bigger1:
+                    crop2 = _crop_to_bytes(work_for_fullpage, bigger2)
+                    raw2 = _gpt_exact_ocr_packsize(client, crop2, model)
+                    if raw2.upper() != "IMAGE_UNREADABLE":
+                        bbox, crop_bytes, raw = bigger2, crop2, raw2
+                    else:
+                        # full-page fallback (on normalized page)
+                        full_raw = _gpt_fullpage_packsize_text(client, work_for_fullpage, model)
+                        if full_raw.upper() != "IMAGE_UNREADABLE":
+                            raw = full_raw
+                        else:
+                            return {"ok": False, "error": "Detected pack size crop unreadable.",
+                                    "page_index": page_idx, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+                else:
+                    full_raw = _gpt_fullpage_packsize_text(client, work_for_fullpage, model)
+                    if full_raw.upper() != "IMAGE_UNREADABLE":
+                        raw = full_raw
+                    else:
+                        return {"ok": False, "error": "Detected pack size crop unreadable.",
+                                "page_index": page_idx, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+        else:
+            full_raw = _gpt_fullpage_packsize_text(client, work_for_fullpage, model)
+            if full_raw.upper() != "IMAGE_UNREADABLE":
+                raw = full_raw
+            else:
+                return {"ok": False, "error": "Detected pack size crop unreadable.",
+                        "page_index": page_idx, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+
+    # consistency
     raw2 = _gpt_exact_ocr_packsize(client, crop_bytes, model)
     consist_ratio = _similarity(raw2, raw) or 0.0
     consistency_ok = (raw2 == raw) or (consist_ratio >= 98.0)
 
     clean_text = _safe_punct_scrub(raw)
 
-    # structure parse
-    # NOTE: we use deterministic fallback if structurer fails; structurer call kept for API parity
+    # structure parse + regex merge
     try:
-        parsed = _gpt_structure_packsize(client, clean_text, model)
+        model_parsed = _gpt_structure_packsize(client, clean_text, model)
     except Exception:
-        parsed = None
+        model_parsed = None
+    regex_parsed = _regex_parse_packsize(clean_text)
 
-    if not parsed or (isinstance(parsed, dict) and all(
-        parsed.get(k) in (None, [], {}) for k in ["number_of_items", "base_quantity", "unit_of_measure", "net_weight", "gross_weight", "drained_weight"]
-    )):
-        parsed = _regex_parse_packsize(clean_text)
+    if not model_parsed or (isinstance(model_parsed, dict) and model_parsed.get("error") == "STRUCTURE_PARSE_FAILED"):
+        parsed = regex_parsed
     else:
-        reg = _regex_parse_packsize(clean_text)
-        parsed = _merge_packsize(parsed, reg)
+        parsed = _merge_packsize(model_parsed, regex_parsed)
 
     parsed["unit_of_measure"] = _title_if_count(parsed.get("unit_of_measure"))
     for k in ("net_weight", "gross_weight", "drained_weight"):
@@ -591,7 +645,7 @@ def process_artwork_packsize(
         "qa": qa,
         "debug": {
             "tesseract_available": TESS_AVAILABLE,
-            "bbox_area_pct": _area_pct(bbox, (img.size if is_pdf or img else (0,0))),
+            "bbox_area_pct": _area_pct(bbox, work_for_fullpage.size),
         }
     }
 
@@ -602,7 +656,7 @@ def _find_region_via_ocr_packsize(full_img: Image.Image):
         return None
 
     W, H = full_img.size
-    candidates: List[Tuple[int,int,int,int,float]] = []  # include a score
+    candidates: List[Tuple[int,int,int,int,float]] = []
 
     unit_or_label = re.compile(
         rf"({_U_ALL}|{_U_COUNT}|{_NET_LBL}|{_GROSS_LBL}|{_DRAINED_LBL}|{_E_MARK})",
@@ -613,11 +667,7 @@ def _find_region_via_ocr_packsize(full_img: Image.Image):
     for i in range(len(data["text"])):
         if not data["text"][i]:
             continue
-        key = (
-            data.get("block_num", [0])[i],
-            data.get("par_num",   [0])[i],
-            data.get("line_num",  [0])[i],
-        )
+        key = (data.get("block_num",[0])[i], data.get("par_num",[0])[i], data.get("line_num",[0])[i])
         rows.setdefault(key, []).append(i)
 
     for idxs in rows.values():
@@ -625,7 +675,6 @@ def _find_region_via_ocr_packsize(full_img: Image.Image):
         if not txt:
             continue
 
-        # Does this line "look like" pack size?
         looks_like_pack = (
             unit_or_label.search(txt)
             or MULTIPACK_RE.search(txt)
@@ -649,28 +698,23 @@ def _find_region_via_ocr_packsize(full_img: Image.Image):
         x0 = max(0, min(xs) - int(0.03 * W))
         x1 = min(W, max(xs[j] + ws[j] for j in range(len(xs))) + int(0.03 * W))
         y0 = max(0, min(ys) - int(0.02 * H))
-        y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.10 * H))  # a bit taller
+        y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(0.12 * H))
 
-        # base score = area (w*h) with slight preference for taller lines (often larger font)
         base = (x1 - x0) * (1.0 + 0.6 * (y1 - y0))
 
-        # bottom-of-label bias: boost if median-y is near bottom 35%
         y_mid = (y0 + y1) / 2.0
         bottom_bias = 1.0
         if y_mid >= 0.65 * H:
-            bottom_bias = 1.35  # strong nudge
+            bottom_bias = 1.35
         elif y_mid >= 0.55 * H:
-            bottom_bias = 1.15  # mild nudge
+            bottom_bias = 1.15
 
         candidates.append((x0, y0, x1, y1, base * bottom_bias))
 
     if not candidates:
         return None
-
-    # choose best scored candidate
     best = max(candidates, key=lambda b: b[4])
     return (best[0], best[1], best[2], best[3])
-
 
 # ---------- Public API: NUTRITION ---------------------------------------------
 def process_artwork_nutrition(
@@ -678,7 +722,7 @@ def process_artwork_nutrition(
     file_bytes: bytes,
     filename: str,
     *,
-    render_dpi: int = 350,
+    render_dpi: int = 400,
     model: str = "gpt-4o"
 ) -> Dict[str, Any]:
     is_pdf = filename.lower().endswith(".pdf")
@@ -701,13 +745,13 @@ def process_artwork_nutrition(
             x0, y0, x1, y1 = vec["bbox_pixels"]
             bbox = (int(round(x0 * scale)), int(round(y0 * scale)),
                     int(round(x1 * scale)), int(round(y1 * scale)))
-            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02)
+            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03)
 
         if bbox is None:
             for i, pg in enumerate(pages):
                 cand = (_find_region_via_ocr_nutri(pg) or _gpt_bbox_locator_nutri(client, pg, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
                     if cand:
                         page_idx, img, bbox = i, pg, cand
                         break
@@ -715,28 +759,31 @@ def process_artwork_nutrition(
         if bbox is None:
             for i, pg in enumerate(pages):
                 for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.02)
+                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.03)
                     if g:
                         page_idx, img, bbox = i, pg, g
                         break
                 if bbox is not None:
                     break
 
-        if page_idx is None or bbox is None:
+        if page_idx is None or bbox is None or img is None:
             return _fail("Could not locate a NUTRITION panel in the PDF.")
 
     else:
         try:
-            img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
+            base_img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
+        # normalize flat artwork first
+        norm_img, _, _ = _gpt_normalize_flatpack_page(client, base_img, model)
+        img = norm_img or base_img
         page_idx = 0
         bbox = (_find_region_via_ocr_nutri(img) or _gpt_bbox_locator_nutri(client, img, model))
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02) if bbox else None
+        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03) if bbox else None
 
         if bbox is None:
             for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.02)
+                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.03)
                 if g:
                     bbox = g
                     break
@@ -747,24 +794,47 @@ def process_artwork_nutrition(
     if _area_pct(bbox, img.size) < 0.8:
         alt = _gpt_bbox_locator_nutri(client, img, model)
         if alt:
-            alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+            alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.03)
             if alt:
                 bbox = alt
 
     crop_bytes = _crop_to_bytes(img, bbox)
 
+    # Try twice, compare similarity (helps filter flaky parses)
     p1 = _gpt_extract_nutri(client, crop_bytes, model)
     p2 = _gpt_extract_nutri(client, crop_bytes, model)
     sim = _similarity(json.dumps(p1, sort_keys=True), json.dumps(p2, sort_keys=True)) or 0.0
     parsed = p1 if sim >= 98.0 else p2
 
+    # If parse failed, try widening the crop once or twice before failing
     if isinstance(parsed, dict) and parsed.get("error") == "NUTRITION_PARSE_FAILED":
-        return {
-            "ok": False,
-            "error": "Nutrition parse failed",
-            "page_index": page_idx,
-            "bbox_pixels": list(map(int, bbox))
-        }
+        bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12)
+        if bigger1 and bigger1 != bbox:
+            crop1 = _crop_to_bytes(img, bigger1)
+            p1b = _gpt_extract_nutri(client, crop1, model)
+            if not (isinstance(p1b, dict) and p1b.get("error") == "NUTRITION_PARSE_FAILED"):
+                parsed, bbox, crop_bytes = p1b, bigger1, crop1
+            else:
+                bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
+                if bigger2 and bigger2 != bigger1:
+                    crop2 = _crop_to_bytes(img, bigger2)
+                    p2b = _gpt_extract_nutri(client, crop2, model)
+                    if not (isinstance(p2b, dict) and p2b.get("error") == "NUTRITION_PARSE_FAILED"):
+                        parsed, bbox, crop_bytes = p2b, bigger2, crop2
+                    else:
+                        return {
+                            "ok": False,
+                            "error": "Nutrition parse failed",
+                            "page_index": page_idx,
+                            "bbox_pixels": list(map(int, bbox))
+                        }
+        else:
+            return {
+                "ok": False,
+                "error": "Nutrition parse failed",
+                "page_index": page_idx,
+                "bbox_pixels": list(map(int, bbox))
+            }
 
     normalized = _normalize_nutri(parsed)
 
@@ -792,5 +862,10 @@ def process_artwork_nutrition(
         "bbox_pixels": list(map(int, bbox)),
         "parsed": normalized,
         "flat": flat,
-        "qa": qa
+        "qa": qa,
+        "debug": {
+            "image_size": img.size,
+            "bbox_area_pct": _area_pct(bbox, img.size),
+            "tesseract_available": TESS_AVAILABLE
+        }
     }
