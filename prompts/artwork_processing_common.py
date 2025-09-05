@@ -32,26 +32,92 @@ IMPERATIVE_VERBS = re.compile(
     re.IGNORECASE
 )
 TIME_QTY_TOKENS = re.compile(
-    r"\b(\d+\s*(?:min|mins|minutes|sec|seconds|°c|°f|ml|l|cup|cups|tsp|tbsp|scoop[s]?|"
+    r"\b(\d+\s*(?:min|mins|minutes|sec|seconds|°c|°f|℃|℉|ml|l|cup|cups|tsp|tbsp|scoop[s]?|"
     r"capsule[s]?|tablet[s]?|drop[s]?))\b",
     re.IGNORECASE
 )
 
+# ---------- Orientation / main-panel helper (optional) ----------
+ORIENTATION_CONTENT_FINDER_SYSTEM = """
+You are a packaging preprocessor. You will see a FLAT ARTWORK sheet that may contain:
+- multiple panels (front/back/sides), sometimes upside down
+- trim/bleed lines, cutter guides, registration targets
+- color swatches and print spec tables
+
+Goal: identify the single MAIN consumer-facing label panel and how to orient it upright.
+Return JSON ONLY:
+{
+  "rotation_deg": 0|90|180|270,
+  "content_bbox_pct": {"x":0-100,"y":0-100,"w":0-100,"h":0-100},
+  "found": true|false
+}
+
+Rules:
+- Ignore dielines, crop marks, color bars, spec tables, and whitespace.
+- Prefer the panel that contains brand name, product name/flavour, ingredients/nutrition/directions,
+  or a large net quantity (e.g., “250 g”, “10 sachets”).
+- rotation_deg rotates the whole page so the chosen panel reads upright.
+- content_bbox_pct tightly frames the chosen panel after rotation.
+- If nothing sensible is present, return {"found": false}.
+""".strip()
+
+def _gpt_normalize_flatpack_page(client, img: Image.Image, model: str):
+    """
+    Use GPT-vision to (a) choose the main consumer panel, (b) tell us the rotation,
+    and (c) give a tight content bbox. Returns (pre_img, bbox_px, meta)
+    or (img, None, {"found":False})
+    """
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    try:
+        r = client.chat.completions.create(
+            model=model, temperature=0, top_p=0,
+            messages=[
+                {"role": "system", "content": ORIENTATION_CONTENT_FINDER_SYSTEM},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Return JSON only."},
+                    {"type": "image_url", "image_url": {"url": _encode_data_url(buf.getvalue())}}
+                ]}
+            ]
+        )
+        js = json.loads(r.choices[0].message.content.strip())
+    except Exception:
+        return img, None, {"found": False, "reason": "locator_failed"}
+
+    if not js.get("found"):
+        return img, None, {"found": False}
+
+    rot = int(js.get("rotation_deg", 0)) % 360
+    pct = js.get("content_bbox_pct") or {}
+
+    # rotate first, then apply bbox pct relative to rotated page
+    rotated = img.rotate(-rot, expand=True)  # PIL rotates CCW for +angle; invert
+    RW, RH = rotated.size
+    x = int(RW * float(pct.get("x", 0)) / 100.0)
+    y = int(RH * float(pct.get("y", 0)) / 100.0)
+    w = int(RW * float(pct.get("w", 0)) / 100.0)
+    h = int(RH * float(pct.get("h", 0)) / 100.0)
+    bbox = (max(0, x), max(0, y), min(RW, x + w), min(RH, y + h))
+    pre = rotated.crop(bbox) if w > 0 and h > 0 else rotated
+    return pre, bbox, {"found": True, "rotation_deg": rot}
+
 # --- Pack size / weights tokens ---
-_U_MASS = r"(?:mg|g|kg|oz|lb)"
-_U_VOL  = r"(?:ml|cl|l)"
-_U_ALL  = rf"(?:{_U_MASS}|{_U_VOL})"
-_U_COUNT = r"(?:capsule[s]?|tablet[s]?|softgel[s]?|gumm(?:y|ies)|lozenge[s]?|sachet[s]?|stick[s]?|teabag[s]?|tea\s*bag[s]?|bar[s]?|piece[s]?|serving[s]?|portion[s]?|pouch[es]?|ampoule[s]?|caps|tabs|pcs?)"
-_NET_LBL = r"(?:net\s*(?:weight|wt\.?|contents)?)"
+_U_MASS   = r"(?:mg|g|kg|oz|lb)"
+_U_VOL    = r"(?:ml|cl|l)"
+_U_ALL    = rf"(?:{_U_MASS}|{_U_VOL})"
+_U_COUNT  = r"(?:capsule[s]?|tablet[s]?|softgel[s]?|gumm(?:y|ies)|lozenge[s]?|sachet[s]?|stick[s]?|teabag[s]?|tea\s*bag[s]?|bar[s]?|piece[s]?|serving[s]?|portion[s]?|pouch[es]?|ampoule[s]?|caps|tabs|pcs?)"
+_NET_LBL  = r"(?:net\s*(?:weight|wt\.?|contents)?)"
 _GROSS_LBL = r"(?:gross\s*weight|gw)"
 _DRAINED_LBL = r"(?:drained\s*(?:net\s*)?weight)"
-_E_MARK = r"(?:\u212E|℮)"
+_E_MARK  = r"(?:\u212E|℮)"
 
 # Multipack / Count / Single qty / Labeled / Compact GW/NW
 MULTIPACK_RE = re.compile(rf"\b(\d+)\s*(?:x|×|\*)\s*(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b", re.IGNORECASE)
 COUNT_RE = re.compile(rf"\b(\d+)\s*({_U_COUNT})\b", re.IGNORECASE)
 SINGLE_QTY_RE = re.compile(rf"(?:{_E_MARK}\s*)?\b(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b(?:\s*{_E_MARK})?", re.IGNORECASE)
-LABELED_WEIGHT_RE = re.compile(rf"\b(({_NET_LBL})|({_GROSS_LBL})|({_DRAINED_LBL}))\b[^\d%]*?(\d+(?:[.,]\d+)?)\s*({_U_MASS}|{_U_VOL})\b", re.IGNORECASE)
+LABELED_WEIGHT_RE = re.compile(
+    rf"\b(({_NET_LBL})|({_GROSS_LBL})|({_DRAINED_LBL}))\b[^\d%]*?(\d+(?:[.,]\d+)?)\s*({_U_MASS}|{_U_VOL})\b",
+    re.IGNORECASE
+)
 COMPACT_GW_NW_RE = re.compile(r"\b(NW|GW)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g|kg|oz|lb)\b", re.IGNORECASE)
 
 # ---------- Utility helpers ----------
@@ -59,10 +125,12 @@ def _fail(msg: str) -> Dict[str, Any]:
     return {"ok": False, "error": msg}
 
 def _pdf_to_page_images(pdf_bytes: bytes, dpi: int = 300) -> List[Image.Image]:
+    if fitz is None:
+        raise RuntimeError("PyMuPDF (fitz) not installed; cannot render PDF pages.")
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     imgs: List[Image.Image] = []
     for page in doc:
-        mat = fitz.Matrix(dpi/72.0, dpi/72.0)
+        mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         imgs.append(Image.frombytes("RGB", [pix.width, pix.height], pix.samples))
     return imgs
@@ -75,11 +143,11 @@ def _safe_punct_scrub(s: str) -> str:
             ).strip()
 
 def _structure_ok_ingredients(s: str) -> bool:
-    base = s.lower()
+    base = (s or "").lower()
     return ("ingredient" in base) and (len(s) >= 50)
 
 def _structure_ok_directions(s: str) -> bool:
-    base = s.lower()
+    base = (s or "").lower()
     has_header_or_imperative = (DIRECTIONS_HEADER_PAT.search(base) is not None) or (IMPERATIVE_VERBS.search(base) is not None)
     long_enough = len(s) >= 40
     has_time_qty = TIME_QTY_TOKENS.search(base) is not None
@@ -88,12 +156,12 @@ def _structure_ok_directions(s: str) -> bool:
 def _similarity(a: str, b: str) -> float | None:
     try:
         from rapidfuzz import fuzz
-        return float(fuzz.ratio(a.strip(), b.strip()))
+        return float(fuzz.ratio((a or "").strip(), (b or "").strip()))
     except Exception:
         return None
 
 def _clean_gpt_json_block(text: str) -> str:
-    t = text.strip()
+    t = (text or "").strip()
     if t.startswith("```"):
         t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"```$", "", t.strip(), flags=re.IGNORECASE)
@@ -106,10 +174,10 @@ def _area_pct(bbox: Tuple[int,int,int,int], size: Tuple[int,int]) -> float:
     return round(100.0 * max(0, x1-x0) * max(0, y1-y0) / (W*H), 2)
 
 def _num(s: str) -> float:
-    return float(s.replace(",", ".").strip())
+    return float(str(s).replace(",", ".").strip())
 
 def _norm_unit(u: str) -> str:
-    u = u.strip().lower().replace(" ", "")
+    u = str(u).strip().lower().replace(" ", "")
     if u in {"millilitre", "millilitres"}: return "ml"
     if u in {"litre", "litres"}: return "l"
     if u in {"gram", "grams"}: return "g"
@@ -153,15 +221,35 @@ def _ocr_words_image_to_string(crop_bytes: bytes) -> str:
     except Exception:
         return ""
 
+def _pdf_to_page_images_adaptive(pdf_bytes: bytes, *, dpi_primary=350, dpi_fallback=600):
+    """
+    Render all pages at dpi_primary first. Return (pages, scale72, dpi_primary, dpi_fallback).
+    For any page later flagged unreadable, call _rerender_single_page with dpi_fallback.
+    """
+    pages = _pdf_to_page_images(pdf_bytes, dpi=dpi_primary)
+    return pages, (dpi_primary/72.0), dpi_primary, dpi_fallback
+
+def _rerender_single_page(pdf_bytes: bytes, page_index: int, *, dpi: int):
+    if fitz is None:
+        return None
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if page_index < 0 or page_index >= len(doc):
+        return None
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    pix = doc[page_index].get_pixmap(matrix=mat, alpha=False)
+    img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    return img
+
 def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
-    flags = []
+    flags: List[str] = []
     ratio = None
     if TESS_AVAILABLE:
         try:
             baseline = _ocr_words_image_to_string(crop_bytes)
             try:
                 from rapidfuzz import fuzz
-                ratio = fuzz.ratio(baseline.strip(), gpt_text.strip()) if baseline else None
+                ratio = fuzz.ratio((baseline or "").strip(), (gpt_text or "").strip()) if baseline else None
             except Exception:
                 ratio = None
             if baseline and ratio is not None and ratio < 90:
@@ -173,6 +261,7 @@ def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
     return {"similarity_to_baseline": ratio, "flags": flags}
 
 def _clamp_pad_bbox(bbox, img_size, pad_frac=0.02):
+    if not bbox: return None
     x0, y0, x1, y1 = map(int, bbox)
     W, H = img_size
     x0 = max(0, min(x0, W - 1))
@@ -181,7 +270,7 @@ def _clamp_pad_bbox(bbox, img_size, pad_frac=0.02):
     y1 = max(0, min(y1, H))
     if x1 <= x0 or y1 <= y0:
         return None
-    pad = int(pad_frac * min(W, H))
+    pad = max(2, int(pad_frac * min(W, H)))
     x0 = max(0, x0 - pad); y0 = max(0, y0 - pad)
     x1 = min(W, x1 + pad); y1 = min(H, y1 + pad)
     return (x0, y0, x1, y1)
@@ -207,6 +296,8 @@ def _fallback_center_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
 
 # ---------- Vector-text heuristics (PDF) ---------------------------------------
 def _pdf_find_ingredient_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    if fitz is None:
+        return None
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     for i, page in enumerate(doc):
         blocks = page.get_text("blocks")
@@ -219,6 +310,8 @@ def _pdf_find_ingredient_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
     return None
 
 def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    if fitz is None:
+        return None
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     for i, page in enumerate(doc):
         blocks = page.get_text("blocks")
@@ -233,6 +326,8 @@ def _pdf_find_directions_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
     return None
 
 def _pdf_find_packsize_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
+    if fitz is None:
+        return None
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     unit_hint = re.compile(rf"\b({_U_ALL}|{_U_COUNT})\b", re.IGNORECASE)
     for i, page in enumerate(doc):
