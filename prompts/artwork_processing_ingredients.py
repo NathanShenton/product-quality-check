@@ -1,6 +1,6 @@
 # artwork_processing_ingredients.py
 from __future__ import annotations
-import io, json
+import io, json, re
 from typing import Optional, Tuple, Dict, Any, List
 from PIL import Image
 
@@ -10,10 +10,10 @@ from prompts.artwork_processing_common import (
     _fail, _pdf_to_page_images, _safe_punct_scrub, _structure_ok_ingredients, _similarity,
     _area_pct, _encode_data_url, _crop_to_bytes, _ocr_words, _qa_compare_tesseract,
     _clamp_pad_bbox, _fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox,
-    _pdf_find_ingredient_block
+    _pdf_find_ingredient_block, _gpt_normalize_flatpack_page
 )
-import re
 
+# ---------- Heuristics ----------
 LONG_LIST_PAT = re.compile(r"(?:,|;).*(?:,|;).*(?:,|;).*(?:,|;)", re.UNICODE)  # ≥4 separators
 ALLERGEN_LEADER_PAT = re.compile(r"\b(allergens?|contains|may contain)\b", re.I)
 
@@ -46,6 +46,16 @@ Return JSON ONLY:
 Rules:
 - Propose up to 3 likely boxes (largest first). Aim to include the full paragraph after an “Ingredients:” lead-in.
 - Look for long comma/semicolon-separated lists of substances. If nothing is present, return {"candidates":[]}.
+""".strip()
+
+FULLPAGE_ING_SYSTEM = """
+You will receive a full label image. Extract the exact INGREDIENTS statement text only.
+Rules:
+- Copy the visible characters exactly (punctuation, %, brackets).
+- Start after the token that reads like 'Ingredients:' (case-insensitive, allow minor OCR noise like l/!).
+- Stop before the next distinct section heading (e.g., Nutrition, Directions, Storage, Warnings, Recommended Use).
+- If no ingredients exist, output IMAGE_UNREADABLE.
+Return plain text only.
 """.strip()
 
 # ---------- Locators / OCR ----------
@@ -85,33 +95,29 @@ def _find_region_via_ocr_ingredients(full_img: Image.Image):
         x0 = max(0, min(xs) - int(0.06 * W))
         x1 = min(W, max(xs[j] + ws[j] for j in range(len(xs))) + int(0.06 * W))
         y0 = max(0, min(ys) - int(0.03 * H))
-        # if we saw a header, allow deeper vertical sweep to include the full paragraph
         ypad = 0.60 if hit_header else 0.35
         y1 = min(H, max(ys[j] + hs[j] for j in range(len(ys))) + int(ypad * H))
 
-        # score: prefer lines with more separators; slight boost if preceded by “Ingredients”
         sep_count = line_txt.count(",") + line_txt.count(";")
         score = sep_count + (3 if hit_header else 0)
         candidates.append(((x0, y0, x1, y1), score))
 
     if not candidates:
         return None
-    # pick best by score, tie-break on area (helps when there are multiple lists)
     return max(candidates, key=lambda t: (t[1], (t[0][2]-t[0][0])*(t[0][3]-t[0][1])))[0]
-
-FULLPAGE_ING_SYSTEM = """
-You will receive a full label image. Extract the exact INGREDIENTS statement text only.
-Rules:
-- Copy the visible characters exactly (punctuation, %, brackets).
-- Start after the token that reads like 'Ingredients:' (case-insensitive, allow minor OCR noise like l/!).
-- Stop before the next distinct section heading (e.g., Nutrition, Directions, Storage, Warnings, Recommended Use).
-- If no ingredients exist, output IMAGE_UNREADABLE.
-Return plain text only.
-""".strip()
 
 def _gpt_fullpage_ingredients_text(client, img: Image.Image, model: str) -> str:
     buf = io.BytesIO(); img.save(buf, format="PNG")
-    r = client.chat.completions.create(
+    r = client.chat.completions.create(  # alias-safe if you use "client.chat.completions.create"
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role":"system","content":FULLPAGE_ING_SYSTEM},
+            {"role":"user","content":[
+                {"type":"text","text":"Return plain text only."},
+                {"type":"image_url","image_url":{"url":_encode_data_url(buf.getvalue())}}
+            ]}
+        ]
+    ) if hasattr(client, "chat_completions") else client.chat.completions.create(
         model=model, temperature=0, top_p=0,
         messages=[
             {"role":"system","content":FULLPAGE_ING_SYSTEM},
@@ -123,9 +129,7 @@ def _gpt_fullpage_ingredients_text(client, img: Image.Image, model: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
-
 def _gpt_bbox_locator_ingredients(client, img: Image.Image, model: str):
-    import json, io
     buf = io.BytesIO(); img.save(buf, format="PNG")
     data_url = _encode_data_url(buf.getvalue())
     try:
@@ -189,6 +193,7 @@ def process_artwork(
 ) -> Dict[str, Any]:
     is_pdf = filename.lower().endswith(".pdf")
 
+    # =================== PDF PATH ===================
     if is_pdf:
         if fitz is None:
             return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
@@ -198,143 +203,176 @@ def process_artwork(
 
         vec = _pdf_find_ingredient_block(file_bytes)
         page_idx: Optional[int] = None
-        img = None
+        page_img = None
         bbox = None
 
+        # (1) Vector-guided region (best if present)
         if vec and 0 <= vec["page_index"] < len(pages):
             page_idx = vec["page_index"]
             bbox_pts = vec["bbox_pixels"]   # points @ 72 dpi
             scale = render_dpi / 72.0
             bbox = tuple(int(round(v * scale)) for v in bbox_pts)
-            img = pages[page_idx]
-            bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03)
+            page_img = pages[page_idx]
+            bbox = _clamp_pad_bbox(bbox, page_img.size, pad_frac=0.03)
 
-        # (2) OCR/GPT per-page if needed
+        # (2) If we still don't have a bbox, try OCR/GPT on the page image
         if bbox is None:
             for i, pg in enumerate(pages):
                 cand = (_find_region_via_ocr_ingredients(pg) or _gpt_bbox_locator_ingredients(client, pg, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.02)
+                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
                     if cand:
-                        page_idx, img, bbox = i, pg, cand
+                        page_idx, page_img, bbox = i, pg, cand
                         break
 
-        # (3) NEW heuristic fallbacks: LEFT → RIGHT → CENTER
+        # (3) Heuristic guesses: LEFT → RIGHT → CENTER
         if bbox is None:
             for i, pg in enumerate(pages):
                 for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.02)
+                    g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.03)
                     if g:
-                        page_idx, img, bbox = i, pg, g
+                        page_idx, page_img, bbox = i, pg, g
                         break
                 if bbox is not None:
                     break
 
-        if page_idx is None or img is None or bbox is None:
+        if page_idx is None or page_img is None or bbox is None:
             return _fail("Could not locate an INGREDIENTS panel in the PDF.")
 
-        # Tiny-area sanity
-        if _area_pct(bbox, img.size) < 2.0:
-            alt = _gpt_bbox_locator_ingredients(client, img, model)
+        # Tiny-area sanity: one more GPT box attempt
+        if _area_pct(bbox, page_img.size) < 1.2:
+            alt = _gpt_bbox_locator_ingredients(client, page_img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+                alt = _clamp_pad_bbox(alt, page_img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
-        crop_bytes = _crop_to_bytes(img, bbox)
-        return _final_ocr_and_format(client, crop_bytes, model, page_idx, bbox, img)
+        crop_bytes = _crop_to_bytes(page_img, bbox)
+        work_for_fullpage = page_img  # (no orientation pass for PDF pages to preserve coords)
 
-    # Single image
-    try:
-        img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
-    except Exception:
-        return _fail("Could not open image.")
-    bbox = (_find_region_via_ocr_ingredients(img) or _gpt_bbox_locator_ingredients(client, img, model))
-    bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.02) if bbox else None
+    # =================== IMAGE PATH ===================
+    else:
+        try:
+            base_img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
+        except Exception:
+            return _fail("Could not open image.")
 
-    # NEW heuristic fallbacks on image
-    if bbox is None:
-        for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-            g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.02)
-            if g:
-                bbox = g
-                break
+        # Normalize flatpack orientation + tightly crop to main consumer panel
+        norm_img, _, _ = _gpt_normalize_flatpack_page(client, base_img, model)
+        work_img = norm_img or base_img
 
-    if not bbox:
-        return _fail("Could not locate an INGREDIENTS panel in the image.")
+        # Locate ingredients area on the normalized view
+        bbox = (_find_region_via_ocr_ingredients(work_img)
+                or _gpt_bbox_locator_ingredients(client, work_img, model))
+        bbox = _clamp_pad_bbox(bbox, work_img.size, pad_frac=0.03) if bbox else None
 
-    if _area_pct(bbox, img.size) < 2.0:  # microscopic-crop sanity
-        alt = _gpt_bbox_locator_ingredients(client, img, model)
-        if alt:
-            alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.02)
+        # Heuristic fallbacks if locator failed
+        if bbox is None:
+            for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
+                g = _clamp_pad_bbox(guess_fn(work_img), work_img.size, pad_frac=0.03)
+                if g:
+                    bbox = g
+                    break
+
+        if not bbox:
+            return _fail("Could not locate an INGREDIENTS panel in the image.")
+
+        # Tiny-area sanity: let GPT re-pick once
+        if _area_pct(bbox, work_img.size) < 1.2:
+            alt = _gpt_bbox_locator_ingredients(client, work_img, model)
             if alt:
-                bbox = alt
+                alt = _clamp_pad_bbox(alt, work_img.size, pad_frac=0.03)
+                if alt:
+                    bbox = alt
 
-    crop_bytes = _crop_to_bytes(img, bbox)
-    return _final_ocr_and_format(client, crop_bytes, model, page_index=0, bbox=bbox, full_image=img)
+        crop_bytes = _crop_to_bytes(work_img, bbox)
+        page_idx = 0
+        work_for_fullpage = work_img
 
-# ---------- Final OCR & QA (same contract as original) ------------------------
-def _final_ocr_and_format(client, crop_bytes: bytes, model: str, page_index: int, bbox, full_image: Image.Image) -> Dict[str, Any]:
-    crop_bytes_used = crop_bytes
-    gpt_text = _gpt_exact_ocr_ingredients(client, crop_bytes_used, model)
+    # =================== OCR + ESCALATION (shared) ===================
+    raw = _gpt_exact_ocr_ingredients(client, crop_bytes, model)
 
-    if gpt_text.upper() == "IMAGE_UNREADABLE":
-        # FIRST, retry with a much wider pad (12%)
-        bigger1 = _clamp_pad_bbox(bbox, full_image.size, pad_frac=0.12)
+    if raw.upper() == "IMAGE_UNREADABLE":
+        # 1) Wider crop (+12%)
+        bigger1 = _clamp_pad_bbox(bbox, work_for_fullpage.size, pad_frac=0.12)
         if bigger1 and bigger1 != bbox:
-            crop_bytes_retry1 = _crop_to_bytes(full_image, bigger1)
-            gpt_text_retry1 = _gpt_exact_ocr_ingredients(client, crop_bytes_retry1, model)
-            if gpt_text_retry1.upper() != "IMAGE_UNREADABLE":
-                bbox = bigger1
-                crop_bytes_used = crop_bytes_retry1
-                gpt_text = gpt_text_retry1
+            crop1 = _crop_to_bytes(work_for_fullpage, bigger1)
+            raw1 = _gpt_exact_ocr_ingredients(client, crop1, model)
+            if raw1.upper() != "IMAGE_UNREADABLE":
+                bbox, crop_bytes, raw = bigger1, crop1, raw1
             else:
-                # SECOND, try even wider (20%) as a last crop-expansion
-                bigger2 = _clamp_pad_bbox(bigger1, full_image.size, pad_frac=0.20)
+                # 2) Even wider (+20%)
+                bigger2 = _clamp_pad_bbox(bigger1, work_for_fullpage.size, pad_frac=0.20)
                 if bigger2 and bigger2 != bigger1:
-                    crop_bytes_retry2 = _crop_to_bytes(full_image, bigger2)
-                    gpt_text_retry2 = _gpt_exact_ocr_ingredients(client, crop_bytes_retry2, model)
-                    if gpt_text_retry2.upper() != "IMAGE_UNREADABLE":
-                        bbox = bigger2
-                        crop_bytes_used = crop_bytes_retry2
-                        gpt_text = gpt_text_retry2
+                    crop2 = _crop_to_bytes(work_for_fullpage, bigger2)
+                    raw2 = _gpt_exact_ocr_ingredients(client, crop2, model)
+                    if raw2.upper() != "IMAGE_UNREADABLE":
+                        bbox, crop_bytes, raw = bigger2, crop2, raw2
                     else:
-                        return {"ok": False, "error": "Detected panel unreadable.",
-                                "page_index": page_index, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+                        # 3) Full-page extraction as last resort
+                        full_raw = _gpt_fullpage_ingredients_text(client, work_for_fullpage, model)
+                        if full_raw.upper() != "IMAGE_UNREADABLE":
+                            raw = full_raw
+                        else:
+                            return {
+                                "ok": False,
+                                "error": "Detected ingredients crop unreadable.",
+                                "page_index": page_idx,
+                                "bbox_pixels": list(map(int, bbox)) if bbox else None
+                            }
                 else:
-                    return {"ok": False, "error": "Detected panel unreadable.",
-                            "page_index": page_index, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+                    full_raw = _gpt_fullpage_ingredients_text(client, work_for_fullpage, model)
+                    if full_raw.upper() != "IMAGE_UNREADABLE":
+                        raw = full_raw
+                    else:
+                        return {
+                            "ok": False,
+                            "error": "Detected ingredients crop unreadable.",
+                            "page_index": page_idx,
+                            "bbox_pixels": list(map(int, bbox)) if bbox else None
+                        }
         else:
-            return {"ok": False, "error": "Detected panel unreadable.",
-                    "page_index": page_index, "bbox_pixels": list(map(int, bbox)) if bbox else None}
+            full_raw = _gpt_fullpage_ingredients_text(client, work_for_fullpage, model)
+            if full_raw.upper() != "IMAGE_UNREADABLE":
+                raw = full_raw
+            else:
+                return {
+                    "ok": False,
+                    "error": "Detected ingredients crop unreadable.",
+                    "page_index": page_idx,
+                    "bbox_pixels": list(map(int, bbox)) if bbox else None
+                }
 
-    structure_pass = _structure_ok_ingredients(gpt_text)
+    # =================== Structure, QA, HTML ===================
+    structure_pass = _structure_ok_ingredients(raw)
 
-    gpt_text_2 = _gpt_exact_ocr_ingredients(client, crop_bytes_used, model)
-    consistency_ratio = _similarity(gpt_text_2, gpt_text) or 0.0
-    consistency_ok = (gpt_text_2 == gpt_text) or (consistency_ratio >= 98.0)
+    # Consistency check on the same crop
+    raw2 = _gpt_exact_ocr_ingredients(client, crop_bytes, model)
+    consist_ratio = _similarity(raw2, raw) or 0.0
+    consistency_ok = (raw2 == raw) or (consist_ratio >= 98.0)
 
-    clean_text = _safe_punct_scrub(gpt_text)
+    clean_text = _safe_punct_scrub(raw)
     html_out = _gpt_html_allergen_bold(client, clean_text, model)
 
-    qa = _qa_compare_tesseract(crop_bytes_used, clean_text)
+    # QA vs Tesseract baseline
+    qa = _qa_compare_tesseract(crop_bytes, clean_text)
     qa.update({
         "structure_pass": structure_pass,
         "consistency_ok": consistency_ok,
-        "consistency_ratio": consistency_ratio,
+        "consistency_ratio": consist_ratio,
     })
     qa["accepted"] = bool(structure_pass and consistency_ok)
 
     return {
         "ok": True,
-        "page_index": page_index,
+        "page_index": page_idx,
         "bbox_pixels": list(map(int, bbox)) if bbox else None,
         "ingredients_text": clean_text,
         "ingredients_html": html_out,
         "qa": qa,
         "debug": {
-            "image_size": full_image.size,
-            "bbox_area_pct": _area_pct(bbox, full_image.size),
+            "image_size": work_for_fullpage.size,
+            "bbox_area_pct": _area_pct(bbox, work_for_fullpage.size),
             "tesseract_available": TESS_AVAILABLE
         }
     }
