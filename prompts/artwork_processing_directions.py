@@ -7,10 +7,11 @@ from PIL import Image
 from prompts.artwork_processing_common import (
     fitz, Image as PILImage, TESS_AVAILABLE,
     DIRECTIONS_HEADER_PAT, IMPERATIVE_VERBS, TIME_QTY_TOKENS,
-    _fail, _pdf_to_page_images, _safe_punct_scrub, _structure_ok_directions, _similarity,
+    _fail, _pdf_to_page_images, _pdf_to_page_images_adaptive, _rerender_single_page,
+    _safe_punct_scrub, _structure_ok_directions, _similarity,
     _area_pct, _encode_data_url, _crop_to_bytes, _ocr_words, _qa_compare_tesseract,
     _clamp_pad_bbox, _fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox,
-    _pdf_find_directions_block
+    _pdf_find_directions_block, _gpt_normalize_flatpack_page
 )
 
 # ---------- Systems ----------
@@ -265,16 +266,23 @@ def process_artwork_directions(
             scale = render_dpi / 72.0
             bbox = tuple(int(round(v * scale)) for v in bbox_pts)
             img = pages[page_idx]
+            # Normalize flatpack orientation + isolate the main consumer panel
+            norm_img, _, _ = _gpt_normalize_flatpack_page(client, img, model)
+            work_img = norm_img or img
             bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03)
 
         # (2) OCR/GPT per-page fallback
         if bbox is None:
             for i, pg in enumerate(pages):
-                cand = (_find_region_via_ocr_directions(pg) or _gpt_bbox_locator_directions(client, pg, model))
+                # Normalize each page before trying to locate directions
+                norm_pg, _, _ = _gpt_normalize_flatpack_page(client, pg, model)
+                page_for_loc = norm_pg or pg
+                cand = (_find_region_via_ocr_directions(page_for_loc) 
+                        or _gpt_bbox_locator_directions(client, page_for_loc, model))
                 if cand:
-                    cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
+                    cand = _clamp_pad_bbox(cand, page_for_loc.size, pad_frac=0.03)
                     if cand:
-                        page_idx, img, bbox = i, pg, cand
+                        page_idx, img, bbox = i, page_for_loc, cand
                         break
 
         # (3) NEW heuristic guesses: LEFT → RIGHT → CENTER
@@ -301,17 +309,25 @@ def process_artwork_directions(
         crop_bytes = _crop_to_bytes(img, bbox)
 
     else:
+        # ----- IMAGE PATH (non-PDF) -----
         try:
-            img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
+            base_img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
-        bbox = (_find_region_via_ocr_directions(img) or _gpt_bbox_locator_directions(client, img, model))
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03) if bbox else None
 
-        # NEW heuristic fallbacks
+        # Normalize flatpack orientation + isolate main panel
+        norm_img, _, _ = _gpt_normalize_flatpack_page(client, base_img, model)
+        work_img = norm_img or base_img
+
+        # Locate directions area on the normalized view
+        bbox = (_find_region_via_ocr_directions(work_img)
+                or _gpt_bbox_locator_directions(client, work_img, model))
+        bbox = _clamp_pad_bbox(bbox, work_img.size, pad_frac=0.03) if bbox else None
+
+        # Heuristic fallbacks if locator failed
         if bbox is None:
             for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
-                g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.03)
+                g = _clamp_pad_bbox(guess_fn(work_img), work_img.size, pad_frac=0.03)
                 if g:
                     bbox = g
                     break
@@ -319,39 +335,41 @@ def process_artwork_directions(
         if not bbox:
             return _fail("Could not locate a DIRECTIONS/USAGE/PREPARATION panel in the image.")
 
-        if _area_pct(bbox, img.size) < 1.2:
-            alt = _gpt_bbox_locator_directions(client, img, model)
+        # Sanity: if very tiny crop, let GPT re-pick a box once more
+        if _area_pct(bbox, work_img.size) < 1.2:
+            alt = _gpt_bbox_locator_directions(client, work_img, model)
             if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.03)
+                alt = _clamp_pad_bbox(alt, work_img.size, pad_frac=0.03)
                 if alt:
                     bbox = alt
 
-        crop_bytes = _crop_to_bytes(img, bbox)
-        page_idx = 0
+        crop_bytes = _crop_to_bytes(work_img, bbox)
+        page_idx = 0  # single image
 
-    # --- OCR pass 1
+    # ---------------- OCR + ESCALATION (shared) ----------------
     raw = _gpt_exact_ocr_directions(client, crop_bytes, model)
+
     if raw.upper() == "IMAGE_UNREADABLE":
         # 1) Retry with wider crop (+12%)
-        bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12)
+        bigger1 = _clamp_pad_bbox(bbox, (work_img.size if not is_pdf else img.size), pad_frac=0.12)
         if bigger1 and bigger1 != bbox:
-            crop_bytes1 = _crop_to_bytes(img, bigger1)
+            crop_bytes1 = _crop_to_bytes(work_img if not is_pdf else img, bigger1)
             raw1 = _gpt_exact_ocr_directions(client, crop_bytes1, model)
             if raw1.upper() != "IMAGE_UNREADABLE":
                 bbox, crop_bytes, raw = bigger1, crop_bytes1, raw1
             else:
                 # 2) Retry even wider (+20%)
-                bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
+                bigger2 = _clamp_pad_bbox(bigger1, (work_img.size if not is_pdf else img.size), pad_frac=0.20)
                 if bigger2 and bigger2 != bigger1:
-                    crop_bytes2 = _crop_to_bytes(img, bigger2)
+                    crop_bytes2 = _crop_to_bytes(work_img if not is_pdf else img, bigger2)
                     raw2 = _gpt_exact_ocr_directions(client, crop_bytes2, model)
                     if raw2.upper() != "IMAGE_UNREADABLE":
                         bbox, crop_bytes, raw = bigger2, crop_bytes2, raw2
                     else:
-                        # 3) Full-page extraction as last resort
-                        full_raw = _gpt_fullpage_directions_text(client, img, model)
+                        # 3) Full-page extraction (normalized page for images; page image for PDFs)
+                        full_src = (work_img if not is_pdf else img)
+                        full_raw = _gpt_fullpage_directions_text(client, full_src, model)
                         if full_raw.upper() != "IMAGE_UNREADABLE":
-                            # we keep bbox for pictograms if we had one; text comes from full page
                             raw = full_raw
                         else:
                             return {
@@ -361,8 +379,8 @@ def process_artwork_directions(
                                 "bbox_pixels": list(map(int, bbox)) if bbox else None
                             }
                 else:
-                    # 3) Full-page extraction as last resort
-                    full_raw = _gpt_fullpage_directions_text(client, img, model)
+                    full_src = (work_img if not is_pdf else img)
+                    full_raw = _gpt_fullpage_directions_text(client, full_src, model)
                     if full_raw.upper() != "IMAGE_UNREADABLE":
                         raw = full_raw
                     else:
@@ -373,8 +391,8 @@ def process_artwork_directions(
                             "bbox_pixels": list(map(int, bbox)) if bbox else None
                         }
         else:
-            # 3) Full-page extraction as last resort
-            full_raw = _gpt_fullpage_directions_text(client, img, model)
+            full_src = (work_img if not is_pdf else img)
+            full_raw = _gpt_fullpage_directions_text(client, full_src, model)
             if full_raw.upper() != "IMAGE_UNREADABLE":
                 raw = full_raw
             else:
@@ -385,15 +403,18 @@ def process_artwork_directions(
                     "bbox_pixels": list(map(int, bbox)) if bbox else None
                 }
 
-    # --- Structure & consistency
+    # ---------------- Structure, QA, HTML ----------------
     structure_pass = _structure_ok_directions(raw)
+
+    # Consistency check on the *same* crop
     raw2 = _gpt_exact_ocr_directions(client, crop_bytes, model)
     consist_ratio = _similarity(raw2, raw) or 0.0
     consistency_ok = (raw2 == raw) or (consist_ratio >= 98.0)
 
-    # --- Clean + structure + pictos
     clean_text = _safe_punct_scrub(raw)
     structured = _gpt_structure_directions(client, clean_text, model)
+
+    # Lightweight extraction fallback (keep original wording in steps)
     if (isinstance(structured, dict) and (
         structured.get("error") == "STRUCTURE_PARSE_FAILED"
         or (not structured.get("steps") and not structured.get("dosage", {}).get("amount"))
@@ -404,9 +425,10 @@ def process_artwork_directions(
         if (not structured.get("dosage") or structured["dosage"].get("amount") is None):
             structured["dosage"] = fb["dosage"]
 
+    # Pictograms from the final crop
     pictos = _gpt_pictograms(client, crop_bytes, model)
 
-    # --- Baseline OCR QA
+    # QA vs Tesseract baseline
     qa = _qa_compare_tesseract(crop_bytes, clean_text)
     qa.update({
         "structure_pass": structure_pass,
@@ -415,11 +437,14 @@ def process_artwork_directions(
     })
     qa["accepted"] = bool(structure_pass and consistency_ok)
 
-    # --- Steps HTML
+    # Steps HTML
     steps_html = ""
     if isinstance(structured, dict) and structured.get("steps"):
         items = "".join(f"<li>{s.get('text','').strip()}</li>" for s in structured["steps"])
         steps_html = f"<ol>{items}</ol>"
+
+    # Debug sizes: normalized for images; page image for PDFs
+    dbg_size = (work_img.size if not is_pdf else img.size)
 
     return {
         "ok": True,
@@ -431,8 +456,8 @@ def process_artwork_directions(
         "pictograms": pictos,
         "qa": qa,
         "debug": {
-            "image_size": img.size if is_pdf or img else None,
-            "bbox_area_pct": _area_pct(bbox, img.size),
+            "image_size": dbg_size,
+            "bbox_area_pct": _area_pct(bbox, dbg_size),
             "tesseract_available": TESS_AVAILABLE
         }
     }
