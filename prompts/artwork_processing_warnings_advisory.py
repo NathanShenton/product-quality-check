@@ -17,12 +17,18 @@ from prompts.artwork_processing_common import (
 
 WARNADV_BBOX_FINDER_SYSTEM = """
 You are a vision locator. You will be shown a full product label image.
-Return JSON ONLY with a single bounding box for a WARNINGS / CAUTIONS / ADVISORY / SAFETY section if present:
-{"bbox_pct": {"x": 0-100, "y": 0-100, "w": 0-100, "h": 0-100}, "found": true/false}
+Return JSON ONLY with up to 4 bounding boxes for WARNINGS / CAUTIONS / ADVISORY / SAFETY text blocks:
+{
+  "found": true/false,
+  "regions": [
+    {"bbox_pct": {"x": 0-100, "y": 0-100, "w": 0-100, "h": 0-100}},
+    ...
+  ]
+}
 Rules:
 - Coordinates are percentages of the entire image.
-- Look for headings like “Warnings”, “Cautions”, “Advisory”, “Safety”, “Important”, or clusters of short imperative lines.
-- If not present, return {"found": false}.
+- Look for headings like “Warnings”, “Cautions”, “Advisory”, “Safety”, “Important”, and for clusters of short imperative lines.
+- If none are present, return {"found": false, "regions": []}.
 """.strip()
 
 WARNADV_EXACT_OCR_SYSTEM = """
@@ -53,6 +59,20 @@ Instructions:
   "advisory_info": ["exact statement 1", "…"]
 }
 """.strip()
+
+_SAFETY_HINTS = [
+    r"\bkeep\s+out\s+of\s+reach\s+of\s+(?:young\s+)?children\b",
+    r"\bdo\s+not\s+exceed\b",
+    r"\bnot\s+recommended\s+for\s+children\s+under\b",
+    r"\bif\s+(?:pregnant|breastfeeding|breast-?feeding)\b",
+    r"\bif\s+adverse\s+effects?\s+occur\b|\bdiscontinue\s+use\b",
+    r"\bfor\s+external\s+use\s+only\b",
+    r"\bavoid\s+contact\s+with\s+eyes\b",
+    r"\bmay\s+cause\s+skin\s+irritation\b",
+    r"\bstore\s+in\s+a\s+cool\s+dry\s+place\b",
+    r"\bfood\s+supplement[s]?\s+should\s+not\s+be\s+used\s+as\s+a\s+substitute\b",
+]
+_SAFETY_HINTS = [re.compile(p, re.IGNORECASE) for p in _SAFETY_HINTS]
 
 FULLPAGE_WARNADV_SYSTEM = """
 You will receive a full label image. Extract the exact WARNINGS / CAUTIONS / ADVISORY / SAFETY statements only.
@@ -152,6 +172,80 @@ def _gpt_exact_ocr_warnadv(client, crop_bytes: bytes, model: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
+def _hint_missed_statements(full_text: str) -> List[str]:
+    cands = []
+    for s in _split_statements(full_text):
+        for pat in _SAFETY_HINTS:
+            if pat.search(s):
+                cands.append(s)
+                break
+    # de-dupe
+    seen=set(); out=[]
+    for s in cands:
+        k = re.sub(r"\s+", " ", s.lower())
+        if k not in seen:
+            seen.add(k); out.append(s)
+    return out
+
+
+def _gpt_bbox_locator_warnadv_multi(client, img: Image.Image, model: str):
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    data_url = _encode_data_url(buf.getvalue())
+    r = client.chat.completions.create(
+        model=model, temperature=0, top_p=0,
+        messages=[
+            {"role": "system", "content": WARNADV_BBOX_FINDER_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Locate up to 4 WARNINGS/CAUTIONS/ADVISORY areas. JSON only."},
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]}
+        ]
+    )
+    try:
+        js = json.loads(r.choices[0].message.content.strip())
+        if not js.get("found"):
+            return []
+        W, H = img.size
+        out = []
+        for reg in js.get("regions", [])[:4]:
+            pct = reg.get("bbox_pct", {})
+            x = int(W * pct.get("x",0) / 100.0); y = int(H * pct.get("y",0) / 100.0)
+            w = int(W * pct.get("w",0) / 100.0); h = int(H * pct.get("h",0) / 100.0)
+            out.append((x, y, x + w, y + h))
+        return [b for b in out if (b[2] > b[0] and b[3] > b[1])]
+    except Exception:
+        return []
+
+def _merge_nearby_boxes(boxes: List[Tuple[int,int,int,int]], img_size: Tuple[int,int], iou_thresh: float = 0.35):
+    def _iou(a,b):
+        ax0,ay0,ax1,ay1=a; bx0,by0,bx1,by1=b
+        inter_x0=max(ax0,bx0); inter_y0=max(ay0,by0); inter_x1=min(ax1,bx1); inter_y1=min(ay1,by1)
+        inter=max(0, inter_x1-inter_x0)*max(0, inter_y1-inter_y0)
+        a_area=(ax1-ax0)*(ay1-ay0); b_area=(bx1-bx0)*(by1-by0)
+        union=a_area+b_area-inter if (a_area+b_area-inter)>0 else 1
+        return inter/union
+    keep=[]
+    for b in sorted(boxes, key=lambda r:(r[2]-r[0])*(r[3]-r[1]), reverse=True):
+        if all(_iou(b,k)<iou_thresh for k in keep):
+            keep.append(_clamp_pad_bbox(b, img_size, pad_frac=0.03))
+        if len(keep)>=4: break
+    return keep
+
+_SPLIT_RE = re.compile(r"(?:\n+|•\s*|-{1,2}\s+|;\s+|(?<=[\.\!\?])\s+(?=[A-Z]))")
+
+def _split_statements(text: str) -> List[str]:
+    # normalise bullets/hyphens
+    t = text.replace("\u2022", "•")
+    t = re.sub(r"[ \t]+", " ", t)
+    parts = [p.strip(" \t\r\n•-–—") for p in _SPLIT_RE.split(t) if p.strip()]
+    # de-dupe while preserving order
+    seen=set(); out=[]
+    for p in parts:
+        key=re.sub(r"\s+", " ", p.lower())
+        if key not in seen:
+            seen.add(key); out.append(p)
+    return out
+
 def _gpt_fullpage_warnadv_text(client, img: Image.Image, model: str) -> str:
     buf = io.BytesIO(); img.save(buf, format="PNG")
     r = client.chat.completions.create(
@@ -216,7 +310,7 @@ def process_artwork_warnings_advisory(
     """
     is_pdf = filename.lower().endswith(".pdf")
 
-    # 1) Load page(s)
+    # ============== 1) Load page(s) and collect MULTIPLE regions ==============
     if is_pdf:
         if fitz is None:
             return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
@@ -225,115 +319,110 @@ def process_artwork_warnings_advisory(
             return _fail("PDF contained no pages after rendering.")
 
         page_idx: Optional[int] = None
-        img = None
-        bbox = None
+        img: Optional[Image.Image] = None
+        boxes: List[Tuple[int,int,int,int]] = []
 
-        # First pass: OCR scan for likely region; else GPT bbox; else heuristic guesses
+        # Try each page until we find any plausible regions
         for i, pg in enumerate(pages):
-            cand = (_find_region_via_ocr_warnadv(pg) or _gpt_bbox_locator_warnadv(client, pg, model))
-            if cand:
-                cand = _clamp_pad_bbox(cand, pg.size, pad_frac=0.03)
-                if cand:
-                    page_idx, img, bbox = i, pg, cand
-                    break
-        if bbox is None:
-            for i, pg in enumerate(pages):
+            ocr_box = _find_region_via_ocr_warnadv(pg)
+            gpt_boxes = _gpt_bbox_locator_warnadv_multi(client, pg, model)
+            cand_boxes = [b for b in ([ocr_box] if ocr_box else [])] + gpt_boxes
+            if not cand_boxes:
+                # heuristic guesses if locator fails
                 for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
                     g = _clamp_pad_bbox(guess_fn(pg), pg.size, pad_frac=0.03)
                     if g:
-                        page_idx, img, bbox = i, pg, g
+                        cand_boxes.append(g)
                         break
-                if bbox is not None:
+            if cand_boxes:
+                boxes = _merge_nearby_boxes(cand_boxes, pg.size)
+                if boxes:
+                    page_idx, img = i, pg
                     break
 
-        if page_idx is None or img is None or bbox is None:
-            # last resort: full-page text
+        # If nothing found on any page, fall back to page 0 (full-page OCR only)
+        if img is None:
             img = pages[0]
             page_idx = 0
-            bbox = None
-
-        if bbox and _area_pct(bbox, img.size) < 1.2:
-            alt = _gpt_bbox_locator_warnadv(client, img, model)
-            if alt:
-                alt = _clamp_pad_bbox(alt, img.size, pad_frac=0.03)
-                if alt:
-                    bbox = alt
-
-        crop_bytes = _crop_to_bytes(img, bbox) if bbox else None
+            boxes = []
 
     else:
         try:
             img = PILImage.open(io.BytesIO(file_bytes)).convert("RGB")
         except Exception:
             return _fail("Could not open image.")
-        bbox = (_find_region_via_ocr_warnadv(img) or _gpt_bbox_locator_warnadv(client, img, model))
-        bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03) if bbox else None
+        page_idx = 0
 
-        if bbox is None:
-            # heuristic guesses if locator fails
+        ocr_box = _find_region_via_ocr_warnadv(img)
+        gpt_boxes = _gpt_bbox_locator_warnadv_multi(client, img, model)
+        cand_boxes = [b for b in ([ocr_box] if ocr_box else [])] + gpt_boxes
+        if not cand_boxes:
             for guess_fn in (_fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox):
                 g = _clamp_pad_bbox(guess_fn(img), img.size, pad_frac=0.03)
                 if g:
-                    bbox = g
+                    cand_boxes.append(g)
                     break
+        boxes = _merge_nearby_boxes(cand_boxes, img.size) if cand_boxes else []
 
-        crop_bytes = _crop_to_bytes(img, bbox) if bbox else None
-        page_idx = 0
+    # ============== 2) OCR every box + 1 full-page sweep ======================
+    raw_blocks: List[str] = []
+    for b in boxes:
+        cb = _crop_to_bytes(img, b)
+        txt = _gpt_exact_ocr_warnadv(client, cb, model).strip()
+        if txt.upper() != "IMAGE_UNREADABLE":
+            raw_blocks.append(txt)
 
-    # 2) Exact OCR via GPT (crop preferred; full-page fallback)
-    if crop_bytes:
-        raw = _gpt_exact_ocr_warnadv(client, crop_bytes, model)
-        if raw.upper() == "IMAGE_UNREADABLE":
-            # retry with wider crops (+12%, then +20%), then full page
-            bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12) if bbox else None
-            tried_full = False
-            if bigger1 and bigger1 != bbox:
-                raw1 = _gpt_exact_ocr_warnadv(client, _crop_to_bytes(img, bigger1), model)
-                if raw1.upper() != "IMAGE_UNREADABLE":
-                    raw, bbox, crop_bytes = raw1, bigger1, _crop_to_bytes(img, bigger1)
-                else:
-                    bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
-                    if bigger2 and bigger2 != bigger1:
-                        raw2 = _gpt_exact_ocr_warnadv(client, _crop_to_bytes(img, bigger2), model)
-                        if raw2.upper() != "IMAGE_UNREADABLE":
-                            raw, bbox, crop_bytes = raw2, bigger2, _crop_to_bytes(img, bigger2)
-                        else:
-                            tried_full = True
-            if not crop_bytes or raw.upper() == "IMAGE_UNREADABLE" or tried_full:
-                full_raw = _gpt_fullpage_warnadv_text(client, img, model)
-                if full_raw.upper() != "IMAGE_UNREADABLE":
-                    raw = full_raw
-                else:
-                    return {
-                        "ok": False,
-                        "error": "Detected warnings/advisory crop unreadable.",
-                        "page_index": page_idx,
-                        "bbox_pixels": list(map(int, bbox)) if bbox else None
-                    }
-    else:
-        full_raw = _gpt_fullpage_warnadv_text(client, img, model)
-        if full_raw.upper() == "IMAGE_UNREADABLE":
-            return _fail("Could not locate WARNINGS/ADVISORY content.")
-        raw = full_raw
+    full_raw = _gpt_fullpage_warnadv_text(client, img, model).strip()
+    if full_raw.upper() != "IMAGE_UNREADABLE":
+        raw_blocks.append(full_raw)
 
-    # 3) Consistency & QA vs second pass + Tesseract baseline
-    clean_text = _safe_punct_scrub(raw)
-    # second pass consistency check (if we had a crop)
-    consistency_ok = True
-    consist_ratio = 100.0
-    if crop_bytes:
-        raw2 = _gpt_exact_ocr_warnadv(client, crop_bytes, model)
-        consist_ratio = _similarity(raw2, raw) or 0.0
-        consistency_ok = (raw2 == raw) or (consist_ratio >= 98.0)
+    if not raw_blocks:
+        return _fail("Could not locate WARNINGS/ADVISORY content.")
 
-    qa = _qa_compare_tesseract(crop_bytes if crop_bytes else _crop_to_bytes(img, (0,0, img.size[0], img.size[1])), clean_text)
+    combined = "\n".join(raw_blocks)
+    clean_text = _safe_punct_scrub(combined)
 
-    # 4) Classification
-    classified = _gpt_classify_warnadv(client, clean_text, model)
-    warning_info: List[str] = [s for s in (classified.get("warning_info") or []) if str(s).strip()]
+    # ============== 3) Split to atomic statements =============================
+    statements = _split_statements(clean_text)
+
+    # ============== 4) Classify + top-up with hint sweep ======================
+    classified = _gpt_classify_warnadv(client, "\n".join(statements), model)
+    warning_info: List[str]  = [s for s in (classified.get("warning_info")  or []) if str(s).strip()]
     advisory_info: List[str] = [s for s in (classified.get("advisory_info") or []) if str(s).strip()]
 
-    # 5) Structure pass: at least one of the two lists populated
+    # Top-up: look for staple phrases anywhere in the full page text
+    hinted = _hint_missed_statements(full_raw if full_raw.upper() != "IMAGE_UNREADABLE" else clean_text)
+
+    def _have(lst: List[str], s: str) -> bool:
+        key = re.sub(r"\s+", " ", s.lower())
+        return any(re.sub(r"\s+", " ", x.lower()) == key for x in lst)
+
+    for s in hinted:
+        if not _have(warning_info, s) and not _have(advisory_info, s):
+            if _NEG_IMPERATIVE.search(s):
+                warning_info.append(s)
+            else:
+                advisory_info.append(s)
+
+    # ============== 5) QA & acceptance =======================================
+    # Use the largest box (if any) for QA image; else whole page
+    qa_img_bytes = None
+    if boxes:
+        biggest = max(boxes, key=lambda r: (r[2]-r[0])*(r[3]-r[1]))
+        qa_img_bytes = _crop_to_bytes(img, biggest)
+    else:
+        qa_img_bytes = _crop_to_bytes(img, (0, 0, img.size[0], img.size[1]))
+
+    qa = _qa_compare_tesseract(qa_img_bytes, "\n".join(statements) if statements else clean_text)
+
+    # We still do a tiny consistency check if we had at least one box
+    consistency_ok = True
+    consist_ratio = 100.0
+    if boxes:
+        again_txt = _gpt_exact_ocr_warnadv(client, qa_img_bytes, model)
+        consist_ratio = _similarity(again_txt, "\n".join(statements) if statements else clean_text) or 0.0
+        consistency_ok = (again_txt == ("\n".join(statements) if statements else clean_text)) or (consist_ratio >= 98.0)
+
     structure_pass = bool(warning_info or advisory_info)
     qa.update({
         "structure_pass": structure_pass,
@@ -344,15 +433,18 @@ def process_artwork_warnings_advisory(
 
     return {
         "ok": True,
-        "page_index": (0 if not is_pdf else page_idx),
-        "bbox_pixels": list(map(int, bbox)) if bbox else None,
+        "page_index": page_idx,
+        "bbox_pixels": [list(map(int, b)) for b in boxes] if boxes else None,
         "warning_info": warning_info,
         "advisory_info": advisory_info,
         "qa": qa,
         "debug": {
-            "image_size": (img.size if img else None),
-            "bbox_area_pct": (_area_pct(bbox, img.size) if bbox else None),
+            "image_size": img.size if img else None,
+            "num_regions": len(boxes),
+            "bbox_area_pct_each": [ _area_pct(b, img.size) for b in boxes ] if boxes else None,
             "tesseract_available": TESS_AVAILABLE,
             "classifier_error": classified.get("error") if isinstance(classified, dict) else None
         }
     }
+
+
