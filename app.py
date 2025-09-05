@@ -11,6 +11,7 @@ import io
 from openai import OpenAI
 from prompts.artwork_processing_ingredients import process_artwork
 from prompts.artwork_processing_directions import process_artwork_directions
+from prompts.artwork_processing_warnings_advisory import process_artwork_warnings_advisory
 from prompts.artwork_processing_packsize_nutrition import (
     process_artwork_packsize,
     process_artwork_nutrition,
@@ -253,8 +254,7 @@ ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
 ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
 ARTWORK_SUPPLIER_PROMPT = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
 ARTWORK_RUN_ALL_PROMPT = "Artwork: Run ALL Packaging Pipelines (PDF/JPEG)"
-
-
+ARTWORK_WARNINGS_ADVISORY_PROMPT = "Artwork: Warnings & Advisory (PDF/JPEG)"
 
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_AUTO_PROMPT,
@@ -262,6 +262,7 @@ prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_PACKSIZE_PROMPT,
     ARTWORK_NUTRITION_PROMPT,
     ARTWORK_SUPPLIER_PROMPT,
+    ARTWORK_WARNINGS_ADVISORY_PROMPT,
     ARTWORK_RUN_ALL_PROMPT,
 ]
 
@@ -323,6 +324,13 @@ elif prompt_choice == ARTWORK_RUN_ALL_PROMPT:
     prompt_description   = (
         "Upload PDF/JPG/PNG artwork. Runs Ingredients → Directions → Pack Size → "
         "Nutrition → Supplier in sequence. Choose a single combined JSON or a ZIP with five JSONs."
+    )
+    recommended_model    = "gpt-4o"
+elif prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (warnings/advisory) module"
+    prompt_description   = (
+        "Upload PDF/JPG/PNG artwork. Auto-locates warnings/safety/advisory text and returns two verbatim lists: "
+        "'warning_info' (prohibitions/risks) and 'advisory_info' (guidance/disclaimers)."
     )
     recommended_model    = "gpt-4o"
 else:
@@ -454,6 +462,62 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
     # so the rest of the app behaves as before for all other prompts.
     st.stop()
 
+if prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Warnings & Advisory")
+    art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_warnadv_auto")
+
+    if model_choice != "gpt-4o":
+        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+
+    run_auto = st.button("🚀 Extract Warnings & Advisory (Auto)")
+    if art_file and run_auto:
+        with st.spinner("Locating WARNINGS/ADVISORY text and extracting…"):
+            try:
+                res = process_artwork_warnings_advisory(
+                    client=client,
+                    file_bytes=art_file.read(),
+                    filename=art_file.name,
+                    render_dpi=350,
+                    model="gpt-4o"
+                )
+            except Exception as e:
+                res = {"ok": False, "error": f"Processing failed: {e}"}
+
+        if not res.get("ok"):
+            st.error(res.get("error", "Failed"))
+        else:
+            st.success("✅ Extracted Warnings/Advisory")
+            st.write(f"**Page:** {res.get('page_index')}")
+            if res.get("bbox_pixels"):
+                st.write(f"**BBox (pixels):** {res.get('bbox_pixels')}")
+
+            st.markdown("#### ⚠️ Warnings")
+            if res.get("warning_info"):
+                for w in res["warning_info"]:
+                    st.markdown(f"- {w}")
+            else:
+                st.info("No warnings detected.")
+
+            st.markdown("#### ℹ️ Advisory")
+            if res.get("advisory_info"):
+                for a in res["advisory_info"]:
+                    st.markdown(f"- {a}")
+            else:
+                st.info("No advisory statements detected.")
+
+            st.markdown("#### 🧪 QA")
+            st.json(res.get("qa", {}))
+
+            st.download_button(
+                "⬇️ Download JSON",
+                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="warnings_advisory_result.json",
+                mime="application/json"
+            )
+
+    st.stop()
+
+
 if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – run **all** packaging pipelines in sequence")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_run_all")
@@ -464,7 +528,7 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
 
     output_mode = st.radio(
         "Output format",
-        options=["Single JSON (everything together)", "Five JSONs (zipped)"],
+        options=["Single JSON (everything together)", "6 JSONs (zipped)"],
         index=0
     )
 
@@ -501,6 +565,8 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
         packsize_res    = run_step(process_artwork_packsize,      "Pack Size / Weights")
         nutrition_res   = run_step(process_artwork_nutrition,     "Nutrition")
         supplier_res    = run_step(process_artwork_suppliers,     "Supplier Addresses")
+        warnings_adv_res = run_step(process_artwork_warnings_advisory, "Warnings & Advisory")
+
 
         # Build combined payload
         combined = {
@@ -511,7 +577,8 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
                 "directions":  directions_res,
                 "packsize":    packsize_res,
                 "nutrition":   nutrition_res,
-                "suppliers":   supplier_res
+                "suppliers":   supplier_res,
+                "warnings_advisory": warnings_adv_res
             }
         }
 
@@ -523,6 +590,7 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
             "packsize_ok":    bool(packsize_res.get("ok", True)),
             "nutrition_ok":   bool(nutrition_res.get("ok", True)),
             "suppliers_ok":   bool(supplier_res.get("ok", True)),
+            "warnings_advisory_ok": bool(warnings_adv_res.get("ok", True)),
         })
 
         # Downloads
@@ -543,6 +611,7 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
                 zf.writestr("packsize_result.json",    json.dumps(packsize_res,    ensure_ascii=False, indent=2))
                 zf.writestr("nutrition_result.json",   json.dumps(nutrition_res,   ensure_ascii=False, indent=2))
                 zf.writestr("supplier_addresses_result.json", json.dumps(supplier_res, ensure_ascii=False, indent=2))
+                zf.writestr("warnings_advisory_result.json",  json.dumps(warnings_adv_res,ensure_ascii=False, indent=2))
                 # Optional: also include the combined
                 zf.writestr("packaging_pipelines_all.json", json.dumps(combined, ensure_ascii=False, indent=2))
             buf.seek(0)
