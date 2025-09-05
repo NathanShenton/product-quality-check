@@ -1,5 +1,6 @@
 # artwork_processing_common.py
 from __future__ import annotations
+
 import io, re, json, base64
 from typing import Optional, Tuple, Dict, Any, List
 
@@ -18,7 +19,11 @@ except Exception:
     pytesseract = None
     TESS_AVAILABLE = False
 
-# ---------- Shared regex & tokens ----------
+
+# ======================================================================
+# Shared regex & tokens
+# ======================================================================
+
 HEADER_PAT = re.compile(r"\bingredient[s]?\b", re.IGNORECASE)
 
 DIRECTIONS_HEADER_PAT = re.compile(
@@ -37,7 +42,31 @@ TIME_QTY_TOKENS = re.compile(
     re.IGNORECASE
 )
 
-# ---------- Orientation / main-panel helper (optional) ----------
+# --- Pack size / weights tokens ---
+_U_MASS   = r"(?:mg|g|kg|oz|lb)"
+_U_VOL    = r"(?:ml|cl|l)"
+_U_ALL    = rf"(?:{_U_MASS}|{_U_VOL})"
+_U_COUNT  = r"(?:capsule[s]?|tablet[s]?|softgel[s]?|gumm(?:y|ies)|lozenge[s]?|sachet[s]?|stick[s]?|teabag[s]?|tea\s*bag[s]?|bar[s]?|piece[s]?|serving[s]?|portion[s]?|pouch[es]?|ampoule[s]?|caps|tabs|pcs?)"
+_NET_LBL  = r"(?:net\s*(?:weight|wt\.?|contents)?)"
+_GROSS_LBL = r"(?:gross\s*weight|gw)"
+_DRAINED_LBL = r"(?:drained\s*(?:net\s*)?weight)"
+_E_MARK  = r"(?:\u212E|℮)"
+
+# Multipack / Count / Single qty / Labeled / Compact GW/NW
+MULTIPACK_RE = re.compile(rf"\b(\d+)\s*(?:x|×|\*)\s*(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b", re.IGNORECASE)
+COUNT_RE = re.compile(rf"\b(\d+)\s*({_U_COUNT})\b", re.IGNORECASE)
+SINGLE_QTY_RE = re.compile(rf"(?:{_E_MARK}\s*)?\b(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b(?:\s*{_E_MARK})?", re.IGNORECASE)
+LABELED_WEIGHT_RE = re.compile(
+    rf"\b(({_NET_LBL})|({_GROSS_LBL})|({_DRAINED_LBL}))\b[^\d%]*?(\d+(?:[.,]\d+)?)\s*({_U_MASS}|{_U_VOL})\b",
+    re.IGNORECASE
+)
+COMPACT_GW_NW_RE = re.compile(r"\b(NW|GW)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g|kg|oz|lb)\b", re.IGNORECASE)
+
+
+# ======================================================================
+# Orientation / main-panel helper (optional)
+# ======================================================================
+
 ORIENTATION_CONTENT_FINDER_SYSTEM = """
 You are a packaging preprocessor. You will see a FLAT ARTWORK sheet that may contain:
 - multiple panels (front/back/sides), sometimes upside down
@@ -89,8 +118,7 @@ def _gpt_normalize_flatpack_page(client, img: Image.Image, model: str):
     rot = int(js.get("rotation_deg", 0)) % 360
     pct = js.get("content_bbox_pct") or {}
 
-    # rotate first, then apply bbox pct relative to rotated page
-    rotated = img.rotate(-rot, expand=True)  # PIL rotates CCW for +angle; invert
+    rotated = img.rotate(-rot, expand=True)  # PIL CCW for +angle; invert
     RW, RH = rotated.size
     x = int(RW * float(pct.get("x", 0)) / 100.0)
     y = int(RH * float(pct.get("y", 0)) / 100.0)
@@ -100,27 +128,11 @@ def _gpt_normalize_flatpack_page(client, img: Image.Image, model: str):
     pre = rotated.crop(bbox) if w > 0 and h > 0 else rotated
     return pre, bbox, {"found": True, "rotation_deg": rot}
 
-# --- Pack size / weights tokens ---
-_U_MASS   = r"(?:mg|g|kg|oz|lb)"
-_U_VOL    = r"(?:ml|cl|l)"
-_U_ALL    = rf"(?:{_U_MASS}|{_U_VOL})"
-_U_COUNT  = r"(?:capsule[s]?|tablet[s]?|softgel[s]?|gumm(?:y|ies)|lozenge[s]?|sachet[s]?|stick[s]?|teabag[s]?|tea\s*bag[s]?|bar[s]?|piece[s]?|serving[s]?|portion[s]?|pouch[es]?|ampoule[s]?|caps|tabs|pcs?)"
-_NET_LBL  = r"(?:net\s*(?:weight|wt\.?|contents)?)"
-_GROSS_LBL = r"(?:gross\s*weight|gw)"
-_DRAINED_LBL = r"(?:drained\s*(?:net\s*)?weight)"
-_E_MARK  = r"(?:\u212E|℮)"
 
-# Multipack / Count / Single qty / Labeled / Compact GW/NW
-MULTIPACK_RE = re.compile(rf"\b(\d+)\s*(?:x|×|\*)\s*(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b", re.IGNORECASE)
-COUNT_RE = re.compile(rf"\b(\d+)\s*({_U_COUNT})\b", re.IGNORECASE)
-SINGLE_QTY_RE = re.compile(rf"(?:{_E_MARK}\s*)?\b(\d+(?:[.,]\d+)?)\s*({_U_ALL})\b(?:\s*{_E_MARK})?", re.IGNORECASE)
-LABELED_WEIGHT_RE = re.compile(
-    rf"\b(({_NET_LBL})|({_GROSS_LBL})|({_DRAINED_LBL}))\b[^\d%]*?(\d+(?:[.,]\d+)?)\s*({_U_MASS}|{_U_VOL})\b",
-    re.IGNORECASE
-)
-COMPACT_GW_NW_RE = re.compile(r"\b(NW|GW)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g|kg|oz|lb)\b", re.IGNORECASE)
+# ======================================================================
+# Utility helpers
+# ======================================================================
 
-# ---------- Utility helpers ----------
 def _fail(msg: str) -> Dict[str, Any]:
     return {"ok": False, "error": msg}
 
@@ -135,21 +147,41 @@ def _pdf_to_page_images(pdf_bytes: bytes, dpi: int = 300) -> List[Image.Image]:
         imgs.append(Image.frombytes("RGB", [pix.width, pix.height], pix.samples))
     return imgs
 
+def _pdf_to_page_images_adaptive(pdf_bytes: bytes, *, dpi_primary=350, dpi_fallback=600):
+    """
+    Render all pages at dpi_primary first. Return (pages, scale72, dpi_primary, dpi_fallback).
+    For any page later flagged unreadable, call _rerender_single_page with dpi_fallback.
+    """
+    pages = _pdf_to_page_images(pdf_bytes, dpi=dpi_primary)
+    return pages, (dpi_primary/72.0), dpi_primary, dpi_fallback
+
+def _rerender_single_page(pdf_bytes: bytes, page_index: int, *, dpi: int):
+    if fitz is None:
+        return None
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if page_index < 0 or page_index >= len(doc):
+        return None
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    pix = doc[page_index].get_pixmap(matrix=mat, alpha=False)
+    img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    return img
+
 def _safe_punct_scrub(s: str) -> str:
-    return (s.replace("))", ")")
-             .replace(" ,", ",")
-             .replace(" .", ".")
-             .replace(" :", ":")
+    return (str(s).replace("))", ")")
+                  .replace(" ,", ",")
+                  .replace(" .", ".")
+                  .replace(" :", ":")
             ).strip()
 
 def _structure_ok_ingredients(s: str) -> bool:
     base = (s or "").lower()
-    return ("ingredient" in base) and (len(s) >= 50)
+    return ("ingredient" in base) and (len(s or "") >= 50)
 
 def _structure_ok_directions(s: str) -> bool:
     base = (s or "").lower()
     has_header_or_imperative = (DIRECTIONS_HEADER_PAT.search(base) is not None) or (IMPERATIVE_VERBS.search(base) is not None)
-    long_enough = len(s) >= 40
+    long_enough = len(s or "") >= 40
     has_time_qty = TIME_QTY_TOKENS.search(base) is not None
     return has_header_or_imperative and long_enough and has_time_qty
 
@@ -221,29 +253,10 @@ def _ocr_words_image_to_string(crop_bytes: bytes) -> str:
     except Exception:
         return ""
 
-def _pdf_to_page_images_adaptive(pdf_bytes: bytes, *, dpi_primary=350, dpi_fallback=600):
-    """
-    Render all pages at dpi_primary first. Return (pages, scale72, dpi_primary, dpi_fallback).
-    For any page later flagged unreadable, call _rerender_single_page with dpi_fallback.
-    """
-    pages = _pdf_to_page_images(pdf_bytes, dpi=dpi_primary)
-    return pages, (dpi_primary/72.0), dpi_primary, dpi_fallback
-
-def _rerender_single_page(pdf_bytes: bytes, page_index: int, *, dpi: int):
-    if fitz is None:
-        return None
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    if page_index < 0 or page_index >= len(doc):
-        return None
-    zoom = dpi / 72.0
-    mat = fitz.Matrix(zoom, zoom)
-    pix = doc[page_index].get_pixmap(matrix=mat, alpha=False)
-    img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
-    return img
-
 def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
     flags: List[str] = []
     ratio = None
+    baseline = ""
     if TESS_AVAILABLE:
         try:
             baseline = _ocr_words_image_to_string(crop_bytes)
@@ -254,6 +267,10 @@ def _qa_compare_tesseract(crop_bytes: bytes, gpt_text: str) -> Dict[str, Any]:
                 ratio = None
             if baseline and ratio is not None and ratio < 90:
                 flags.append("LOW_SIMILARITY_TO_BASELINE_OCR")
+            # NEW: low text density can hint we need hi-DPI rerender
+            alnum = len(re.findall(r"[A-Za-z0-9]", baseline or ""))
+            if baseline and alnum < 12:
+                flags.append("LOW_TEXT_DENSITY")
         except Exception:
             pass
     if "IMAGE_UNREADABLE" in (gpt_text or "").upper():
@@ -275,7 +292,99 @@ def _clamp_pad_bbox(bbox, img_size, pad_frac=0.02):
     x1 = min(W, x1 + pad); y1 = min(H, y1 + pad)
     return (x0, y0, x1, y1)
 
-# ---- Heuristic panel guesses (shared) -----------------------------------------
+def _bbox_pct_to_pixels(pct: Dict[str,float], size: Tuple[int,int]) -> Tuple[int,int,int,int]:
+    W,H = size
+    x = int(W * float(pct.get("x",0)) / 100.0)
+    y = int(H * float(pct.get("y",0)) / 100.0)
+    w = int(W * float(pct.get("w",0)) / 100.0)
+    h = int(H * float(pct.get("h",0)) / 100.0)
+    return (x, y, x+w, y+h)
+
+
+# ======================================================================
+# Optional robustness helpers (opt-in in feature modules)
+# ======================================================================
+
+def _rotate_to_upright_ocr(img: Image.Image) -> Tuple[Image.Image, int, Dict[str, Any]]:
+    """
+    Try 0/90/180/270, choose the orientation with the most OCR word characters.
+    Returns (rotated_img, rotation_deg, meta). No throw.
+    """
+    if not TESS_AVAILABLE:
+        return img, 0, {"tess": False}
+
+    def score(pil_img):
+        try:
+            txt = pytesseract.image_to_string(pil_img)
+        except Exception:
+            return 0
+        return len(re.findall(r"[A-Za-z0-9]", txt or ""))
+
+    best_deg, best_img, best_score = 0, img, -1
+    for deg in (0, 90, 180, 270):
+        candidate = img.rotate(-deg, expand=True) if deg else img
+        s = score(candidate)
+        if s > best_score:
+            best_deg, best_img, best_score = deg, candidate, s
+
+    return best_img, best_deg, {"tess": True, "score": best_score}
+
+def _maybe_rerender_and_rescale(
+    pdf_bytes: bytes,
+    page_index: int,
+    bbox_px_at_render_dpi: Optional[Tuple[int,int,int,int]],
+    *,
+    render_dpi: int,
+    dpi_fallback: int = 600,
+    min_short_side_px: int = 1200
+) -> Tuple[Optional[Image.Image], Optional[Tuple[int,int,int,int]], Dict[str, Any]]:
+    """
+    If current page render (render_dpi) is small or text is thin, re-render this ONE page at dpi_fallback
+    and rescale the bbox. Returns (hi_img, hi_bbox, meta).
+    If re-render not needed/possible: (None, None, {"rerendered":False}).
+    """
+    if fitz is None:
+        return None, None, {"rerendered": False, "reason": "no_fitz"}
+
+    hi_img = _rerender_single_page(pdf_bytes, page_index, dpi=dpi_fallback)
+    if hi_img is None:
+        return None, None, {"rerendered": False, "reason": "rerender_failed"}
+
+    if not bbox_px_at_render_dpi:
+        return hi_img, None, {"rerendered": True, "scale": dpi_fallback / float(render_dpi)}
+
+    scale = dpi_fallback / float(render_dpi)
+    x0, y0, x1, y1 = map(int, bbox_px_at_render_dpi)
+    hi_bbox = (int(round(x0 * scale)), int(round(y0 * scale)),
+               int(round(x1 * scale)), int(round(y1 * scale)))
+
+    # Ensure the crop isn't still tiny
+    w = max(1, hi_bbox[2] - hi_bbox[0]); h = max(1, hi_bbox[3] - hi_bbox[1])
+    if min(w, h) < min_short_side_px:
+        hi_bbox = _clamp_pad_bbox(hi_bbox, hi_img.size, pad_frac=0.04)
+
+    return hi_img, hi_bbox, {"rerendered": True, "scale": scale}
+
+def _pdf_is_vector_text_heavy(pdf_bytes: bytes, sample_pages: int = 2) -> bool:
+    """
+    Quick sniff: if selectable text is abundant on first pages, prefer vector heuristics first.
+    """
+    if fitz is None:
+        return False
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for i, page in enumerate(doc):
+        if i >= sample_pages:
+            break
+        text = page.get_text("text") or ""
+        if len(text.strip()) >= 200:
+            return True
+    return False
+
+
+# ======================================================================
+# Heuristic panel guesses (shared)
+# ======================================================================
+
 def _fallback_left_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
     W, H = img.size
     left = int(0.07 * W); right = int(0.45 * W)
@@ -294,7 +403,11 @@ def _fallback_center_panel_bbox(img: Image.Image) -> Tuple[int,int,int,int]:
     top = int(0.12 * H);  bottom = int(0.88 * H)
     return (left, top, right, bottom)
 
-# ---------- Vector-text heuristics (PDF) ---------------------------------------
+
+# ======================================================================
+# Vector-text heuristics (PDF) — fast “selectable text” scans
+# ======================================================================
+
 def _pdf_find_ingredient_block(pdf_bytes: bytes) -> Optional[Dict[str, Any]]:
     if fitz is None:
         return None
