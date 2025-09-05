@@ -6,7 +6,8 @@ from PIL import Image
 
 from prompts.artwork_processing_common import (
     fitz, Image as PILImage, TESS_AVAILABLE,
-    _fail, _pdf_to_page_images, _encode_data_url, _crop_to_bytes, _ocr_words,
+    _fail, _pdf_to_page_images, _pdf_to_page_images_adaptive, _rerender_single_page,
+    _encode_data_url, _crop_to_bytes, _ocr_words,
     _clamp_pad_bbox, _fallback_left_panel_bbox, _fallback_right_panel_bbox, _fallback_center_panel_bbox,
     _area_pct, _qa_compare_tesseract, _similarity, _gpt_normalize_flatpack_page
 )
@@ -30,8 +31,7 @@ ADDR_CUE_PAT = re.compile(
 )
 
 UK_CUES = {
-    "uk","u.k.","united kingdom","england","scotland","wales","gb","great britain",
-    "northern ireland"
+    "uk","u.k.","united kingdom","england","scotland","wales","gb","great britain","northern ireland"
 }
 
 EU_MEMBER_COUNTRIES = {
@@ -125,7 +125,7 @@ def _is_eu_like_line(line: str) -> bool:
     return _mentions_eu_country(ln)
 
 def _country_hint(text: str) -> str:
-    t = text.lower()
+    t = (text or "").lower()
     if _has_uk_postcode(text) or any(k in t for k in UK_CUES):
         return "UK"
     if any(c in t for c in EU_MEMBER_COUNTRIES):
@@ -325,7 +325,11 @@ def process_artwork(
     if is_pdf:
         if fitz is None:
             return _fail("PyMuPDF (fitz) not installed; cannot read PDF.")
-        pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
+        # Adaptive render to help tiny vector text
+        try:
+            pages, _, _, _ = _pdf_to_page_images_adaptive(file_bytes, dpi_primary=render_dpi, dpi_fallback=max(550, render_dpi+150))
+        except Exception:
+            pages = _pdf_to_page_images(file_bytes, dpi=render_dpi)
         if not pages:
             return _fail("PDF contained no pages after rendering.")
     else:
@@ -336,8 +340,6 @@ def process_artwork(
         # Normalize flat artwork to main consumer panel before asking for addresses
         norm_img, _, _ = _gpt_normalize_flatpack_page(client, base_img, model)
         pages = [norm_img or base_img]
-
-    best_result: Dict[str, Any] = {"ok": False, "error": "No addresses found."}
 
     for page_idx, img in enumerate(pages):
         # 1) Vision full-page JSON to get initial UK/EU candidates
@@ -351,7 +353,8 @@ def process_artwork(
                 bbox = _bbox_pct_to_pixels(pct, img.size)
                 bbox = _clamp_pad_bbox(bbox, img.size, pad_frac=0.03)
                 text = (c.get("text") or "").strip()
-                yield bbox, text
+                if bbox and (bbox[2] > bbox[0]) and (bbox[3] > bbox[1]):
+                    yield bbox, text
 
         uk_bbox, uk_text_gpt = next(_first_box(uk_cands), (None, ""))
         eu_bbox, eu_text_gpt = next(_first_box(eu_cands), (None, ""))
@@ -385,13 +388,14 @@ def process_artwork(
         if eu_bbox and _area_pct(eu_bbox, img.size) < 0.8:
             eu_bbox = _clamp_pad_bbox(eu_bbox, img.size, pad_frac=0.12)
 
-        # 4) Exact OCR with progressive widening
-        def _ocr_with_retries(bbox):
+        # 4) Exact OCR with progressive widening (+ optional hi-DPI re-render for PDFs)
+        def _ocr_with_retries(bbox, side: str):
             if not bbox: return None, None, None
             crop = _crop_to_bytes(img, bbox)
             txt = _gpt_exact_ocr_address(client, crop, model).strip()
             if txt.upper() != "IMAGE_UNREADABLE":
                 return bbox, crop, txt
+
             # widen +12%
             bigger1 = _clamp_pad_bbox(bbox, img.size, pad_frac=0.12)
             if bigger1 and bigger1 != bbox:
@@ -399,17 +403,35 @@ def process_artwork(
                 txt1 = _gpt_exact_ocr_address(client, crop1, model).strip()
                 if txt1.upper() != "IMAGE_UNREADABLE":
                     return bigger1, crop1, txt1
-                # widen +20% more
+
+                # widen +20%
                 bigger2 = _clamp_pad_bbox(bigger1, img.size, pad_frac=0.20)
                 if bigger2 and bigger2 != bigger1:
                     crop2 = _crop_to_bytes(img, bigger2)
                     txt2 = _gpt_exact_ocr_address(client, crop2, model).strip()
                     if txt2.upper() != "IMAGE_UNREADABLE":
                         return bigger2, crop2, txt2
+
+            # optional hi-DPI retry for PDFs
+            if is_pdf:
+                hi_img = _rerender_single_page(file_bytes, page_idx, dpi=max(550, render_dpi+150))
+                if hi_img is not None:
+                    ow, oh = img.size
+                    nw, nh = hi_img.size
+                    sx, sy = (nw / max(1, ow), nh / max(1, oh))
+                    scaled_bbox = (int(bbox[0]*sx), int(bbox[1]*sy), int(bbox[2]*sx), int(bbox[3]*sy))
+                    scaled_bbox = _clamp_pad_bbox(scaled_bbox, hi_img.size, pad_frac=0.03)
+                    if scaled_bbox:
+                        crop3 = _crop_to_bytes(hi_img, scaled_bbox)
+                        txt3 = _gpt_exact_ocr_address(client, crop3, model).strip()
+                        if txt3.upper() != "IMAGE_UNREADABLE":
+                            # swap working canvas for downstream QA
+                            return scaled_bbox, crop3, txt3
+
             return bbox, crop, txt  # still unreadable
 
-        uk_bbox_use, uk_crop, uk_text = _ocr_with_retries(uk_bbox)
-        eu_bbox_use, eu_crop, eu_text = _ocr_with_retries(eu_bbox)
+        uk_bbox_use, uk_crop, uk_text = _ocr_with_retries(uk_bbox, "uk")
+        eu_bbox_use, eu_crop, eu_text = _ocr_with_retries(eu_bbox, "eu")
 
         # If fullpage GPT gave cleaner text, prefer it when crop is unreadable
         if (not uk_text or uk_text.upper() == "IMAGE_UNREADABLE") and uk_text_gpt:
@@ -425,7 +447,7 @@ def process_artwork(
         if not (uk_text or eu_text):
             continue
 
-        # 5) Light consistency QA
+        # 5) Light consistency QA (re-run on same crop to compute similarity)
         qa = {}
         if uk_text:
             if uk_crop is None and uk_bbox_use:
@@ -454,8 +476,9 @@ def process_artwork(
             "debug": {
                 "image_size": img.size,
                 "tesseract_available": TESS_AVAILABLE,
-                "source": "vision-first-gpt+ocr-fallback+normalized-panel" if not is_pdf else "vision-first-gpt+ocr-fallback(pdf)"
+                "source": ("vision-first-gpt+ocr-fallback+normalized-panel"
+                           if not is_pdf else "vision-first-gpt+ocr-fallback(pdf)"),
             }
         }
 
-    return best_result
+    return {"ok": False, "error": "No addresses found on any page."}
