@@ -1305,7 +1305,7 @@ PROMPT_OPTIONS = {
             "SYSTEM MESSAGE:\n"
             "You are a JSON-producing assistant that removes specified marketing claims from supplied HTML while preserving\n"
             "its structure, readability, and original intent. Never hallucinate. Make the smallest edits required to remove\n"
-            "only the claims provided.\n\n"
+            "only the claims provided, but always prioritise natural, fluent text over minimal deletion.\n\n"
     
             "GENERAL ANALYSIS INSTRUCTIONS (read carefully):\n"
             "• Treat {{product_data}} as a dictionary with the following keys:\n"
@@ -1321,9 +1321,10 @@ PROMPT_OPTIONS = {
     
             "REMOVAL RULES (apply minimally, in this order):\n"
             "1) LIST ITEMS: If a <li> mainly expresses the claim (or is essentially the claim), remove the entire <li>…</li>.\n"
-            "2) INLINE PHRASES: If a claim appears inside prose (<p>, <em>, <strong>, etc.), remove the smallest natural phrase\n"
-            "   that fully eliminates the claim without breaking readability. Avoid deleting unrelated information.\n"
-            "3) SENTENCES: If the claim is a distinct sentence, remove that sentence and repair punctuation/spacing in neighbours.\n"
+            "2) INLINE PHRASES: If a claim appears inside prose (<p>, <em>, <strong>, etc.), first attempt to remove only the minimal\n"
+            "   phrase. If this makes the sentence ungrammatical, awkward, or meaningless, escalate to removing the entire sentence instead.\n"
+            "3) SENTENCES: If the claim is a distinct sentence, or phrase removal would leave the sentence broken or unclear, remove\n"
+            "   the full sentence and repair punctuation/spacing in neighbours.\n"
             "4) CONTAINERS: If a container becomes empty or meaningless (e.g., empty <ul>, or a <p> left with just punctuation),\n"
             "   remove the container element entirely.\n"
             "5) DO NOT introduce new claims, rephrase benefits, or add promotional language. Keep edits conservative.\n\n"
@@ -1332,6 +1333,7 @@ PROMPT_OPTIONS = {
             "• Fix doubled spaces and stray punctuation (e.g., ', ,', '. ,').\n"
             "• Remove dangling conjunctions left at sentence starts ('and', 'or', 'but') caused by a deletion.\n"
             "• Maintain list grammar consistency (no empty bullets, no trailing delimiters).\n"
+            "• If phrase deletion leaves an awkward fragment, prefer full sentence removal.\n"
             "• Keep original tags and ordering wherever possible; never re-wrap large sections in different tags.\n\n"
     
             "MATCHING & NORMALISATION DETAILS:\n"
@@ -1339,7 +1341,8 @@ PROMPT_OPTIONS = {
             "• Split 'claim_id' by '||' to align IDs to claims by index when reporting which claims were removed.\n"
             "• Matching is case-insensitive and whitespace-insensitive (collapse runs of spaces for comparison).\n"
             "• Treat common hyphenation and apostrophe variants as equivalent (eco friendly ~ eco-friendly; nature’s ~ nature's).\n"
-            "• When a claim is a substring of a longer phrase, remove the minimal surrounding phrase that conveys the claim.\n\n"
+            "• When a claim is a substring of a longer phrase, remove the minimal surrounding phrase that conveys the claim,\n"
+            "  unless this breaks readability, in which case remove the full sentence.\n\n"
     
             "OUTPUT SCHEMA (return valid JSON only in exactly this shape):\n"
             "{\n"
@@ -1360,8 +1363,8 @@ PROMPT_OPTIONS = {
             "DECISION RULES (apply carefully):\n"
             "1. Identify all claims from 'claim_to_remove' and find occurrences in 'Exported Data From Web'.\n"
             "2. Prefer removing entire <li> nodes when they primarily express a listed claim.\n"
-            "3. Otherwise remove the smallest necessary phrase/sentence inside <p>/<em>/<strong> etc.\n"
-            "4. After deletions, clean up artifacts (spacing/punctuation, dangling conjunctions, empty containers).\n"
+            "3. Remove phrases minimally where possible, but escalate to full sentence removal if readability suffers.\n"
+            "4. After deletions, always repair grammar and readability — prioritise fluent, natural text over minimal deletion.\n"
             "5. Track which claim IDs (by index in 'claim_id') were actually removed at least once.\n"
             "6. If a claim is not found, set status = 'unable_to_remove_not_found'.\n"
             "7. If found but cannot be removed without breaking readability, set status = 'unable_to_remove_breaks_readability'.\n"
@@ -1383,7 +1386,7 @@ PROMPT_OPTIONS = {
             "{{product_data}}\n"
         ),
         "recommended_model": "gpt-4o-mini",
-        "description": "Removes specified marketing claims from HTML while preserving structure/readability; returns cleaned_html with removal trace and explicit failure reasons."
+        "description": "Removes specified marketing claims from HTML while preserving readability; escalates to sentence removal if phrase deletion breaks clarity."
     },
     "INCOMPLETE: AUDIT: Nutritionals": {
         "prompt": (
@@ -1638,6 +1641,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
