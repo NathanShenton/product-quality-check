@@ -1443,27 +1443,43 @@ PROMPT_OPTIONS = {
             "  },\n"
             "  \"summary\": \"<short one-line summary of what changed (e.g., 'Removed 2 sentences and 1 phrase across 2 claims; HTML preserved.')\"\n"
             "}\n\n"
-    
-            "RULES (DO ALL OF THESE):\n"
-            "1) Handle MULTIPLE claims: the field may contain multiple claims delimited by '||'. Treat each claim independently and remove ALL occurrences (case-insensitive, ignore extra internal spaces, treat hyphens/dashes as equivalent).\n"
-            "2) Decide the removal strategy PER OCCURRENCE:\n"
-            "   • remove_phrase: If removing ONLY the claim text leaves a natural, grammatical sentence/list item with no ambiguity or awkwardness.\n"
-            "   • remove_sentence: If removing the phrase leaves a vague, ungrammatical or awkward sentence (e.g., dangling 'for', 'and', 'or', trailing dashes/colons, or a sentence conveying no information).\n"
-            "   • remove_element: If the entire <li>, <p>, or similar element becomes empty or meaningless after removal.\n"
-            "   When claims appear in constructs like ' - for <claim>' or '(for <claim>)', remove the surrounding connective (e.g., 'for', leading dash) as part of remove_phrase. If that causes awkwardness, escalate to remove_sentence.\n"
-            "3) Readability is CRITICAL. After edits, fix punctuation/spaces: collapse multiple spaces, remove stray commas/dashes/semicolons/colons, and normalise spaces around tags. NEVER leave half-sentences.\n"
-            "4) Preserve HTML structure. Keep the original tag layout as much as possible. Balance tags; remove empty tags (<p></p>, <li></li>), collapse redundant <br> chains, and do NOT invent new marketing claims.\n"
-            "5) ASCII-safe output: replace non-ASCII characters with ASCII equivalents BEFORE matching and BEFORE final output (see non_ascii_replacements). Ensure final_html is ASCII-only.\n"
-            "6) Be explicit. For every changed sentence/list item, include: original_sentence, decision, reason, revised_sentence.\n"
-            "7) Never touch addresses or legally required info unless the claim text explicitly appears inside it.\n"
-            "8) If a claim is not found, set not_found=true for that claim and make NO changes due to it.\n"
-            "9) If ANY validation check fails, set validation.status='Fail' and explain exactly why. Otherwise 'Pass'.\n\n"
-    
-            "IMPLEMENTATION GUIDANCE (HOW TO THINK):\n"
-            "• Segment by HTML context: treat each <li> or sentence in <p>/<b>/<em> as a unit. Sentences end with . ! ? or </li> or </p> or a hard <br> boundary.\n"
-            "• When the claim is embedded in a list item with connective text (e.g., ' - for <claim>'), first attempt surgical removal including nearby connective tokens; if the remainder is awkward or content-free, remove the entire sentence/list item.\n"
-            "• Common ASCII normalisations to perform: curly quotes → straight, en/em dash → hyphen, ellipsis → '...', trademark/registered → ' TM'/' (R)'.\n"
-            "• After all removals, run the readability checks and HTML checks, repairing simple spacing/tag issues.\n\n"
+
+            "RULES (MUST FOLLOW ALL):\n"
+            "1) MULTI-CLAIM handling: 'claim_to_remove' may contain multiple claims delimited by '||'. Process them SEQUENTIALLY in the order given. Match case-insensitively; treat hyphens/dashes as equivalent; ignore extra internal spaces.\n"
+            "2) Context-aware removal per OCCURRENCE:\n"
+            "   • remove_phrase: Only if the remaining sentence/list item reads naturally with no ambiguity.\n"
+            "   • remove_sentence: If phrase removal leaves a dangling connector (e.g., 'and', 'or', 'for', 'with', 'to', 'of'), a stray dash, empty parentheses, or otherwise vague/unnatural text.\n"
+            "   • remove_element: If the entire <li>/<p> becomes empty or meaningless after edits.\n"
+            "3) CONNECTOR & DASH RULES (apply immediately after each phrase removal attempt):\n"
+            "   • If the claim is preceded by ' - for ' or '— for ' or '– for ' → remove the dash AND 'for' with it.\n"
+            "   • If the claim is preceded by ' for ' (no dash) → remove ' for ' with it; if that creates a double space or leaves connector at end of element, fix or escalate to remove_sentence.\n"
+            "   • If removing the claim leaves 'and/or/for/with/to/of' at the start or end of a sentence or right before punctuation or a closing tag → delete that connector; if sentence becomes content-free, use remove_sentence.\n"
+            "   • Remove any now-empty parentheses/brackets (e.g., '()' or '[]').\n"
+            "4) PUNCTUATION & WHITESPACE NORMALISATION (after each edit block):\n"
+            "   • Collapse multiple spaces to one.\n"
+            "   • Remove spaces before punctuation ( , . ; : ! ? ) and around closing/opening brackets.\n"
+            "   • Remove stray dashes immediately before punctuation or a closing tag.\n"
+            "   • Do NOT add new marketing claims or rephrase beyond what is required for grammaticality.\n"
+            "5) HTML STRUCTURE:\n"
+            "   • Keep original tag layout where possible. Balance tags; remove empty <li> or <p>; collapse <br> chains; avoid duplicate closing tags.\n"
+            "   • Never modify addresses or legal info unless the exact claim text appears inside them.\n"
+            "6) ASCII-SAFE OUTPUT: Perform non-ASCII replacement BEFORE searching/removal and BEFORE returning final_html. Ensure final_html is ASCII-only.\n"
+            "7) EXPLANATIONS: For EVERY changed sentence/list item include: original_sentence, decision, reason, revised_sentence in processing.detections[].\n"
+            "8) VALIDATION & REPAIR LOOP (MANDATORY):\n"
+            "   • Run readability_checks and html_checks. If ANY check would be false, perform a targeted repair pass and re-run the checks.\n"
+            "   • Up to 2 repair passes are allowed. Only return with validation.status='Pass' if ALL checks are true. If still failing after 2 passes, return 'Fail' and list exactly which invariants failed.\n\n"
+            
+            "IMPLEMENTATION GUIDANCE (ALGORITHM TO FOLLOW):\n"
+            "• STEP 0: Pre-normalise to ASCII using the provided map; use the ASCII text for all matching.\n"
+            "• STEP 1: Segment by HTML context: each <li> is a single unit; for <p>, split by . ! ? or <br> boundaries (but keep punctuation with its clause).\n"
+            "• STEP 2: For each claim (in order):\n"
+            "   a) Find all occurrences (case-insensitive, normalised hyphens). For each occurrence, decide remove_phrase/remove_sentence/remove_element using the Connector & Dash Rules.\n"
+            "   b) After each occurrence edit, immediately tidy punctuation/spacing and remove any empty parentheses; if the unit becomes vacuous, escalate to remove_sentence/remove_element.\n"
+            "   c) After finishing all occurrences of that claim, run a local quick check (no_dangling_conjunctions, no_double_spaces, no_consecutive_punctuation, no_empty_tags) and repair if needed.\n"
+            "• STEP 3: After all claims are processed, perform a GLOBAL tidy: collapse spaces, remove stray dashes before closing tags or punctuation, drop empty <li>/<p>, balance tags, collapse redundant <br>.\n"
+            "• STEP 4: Run the full validation checks. If any fail, perform targeted repairs and re-check (max 2 passes). Only then produce final_html.\n"
+            "• Maintain the detailed log in processing.detections and set validation.status accordingly.\n"
+
     
             "PRODUCT DATA:\n"
             "{{product_data}}\n"
@@ -1724,6 +1740,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
