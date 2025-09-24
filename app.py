@@ -507,82 +507,6 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
     # so the rest of the app behaves as before for all other prompts.
     st.stop()
 
-# ------------------------------------------------------------------
-# 🌿  Green Claims Checker (Language-aware)
-# ------------------------------------------------------------------
-if prompt_choice == GREEN_CLAIMS_PROMPT:
-    try:
-        # 1) Collect the row text from the user-selected columns
-        row_text = " ".join(str(row.get(c, "")) for c in cols_to_use if str(row.get(c, "")).strip()).strip()
-        if not row_text:
-            results.append({
-                "green_claims_any": False,
-                "green_claims_candidates": [],
-                "green_claims_ai": {},
-                "green_claims_language": gc_language,
-                "explanation": "No text found in selected columns."
-            })
-            continue
-
-        # 2) Local fuzzy + substring screen (language-specific)
-        lang_col = LANG_TO_COL[gc_language]
-        candidates = screen_candidates(
-            text=row_text,
-            db=GC_DB,
-            language_col=lang_col,
-            threshold=gc_threshold,
-            max_per_section=5
-        )
-
-        # 3) If no candidates, short-circuit
-        if not candidates:
-            results.append({
-                "green_claims_any": False,
-                "green_claims_candidates": [],
-                "green_claims_ai": {},
-                "green_claims_language": gc_language
-            })
-            continue
-
-        # 4) Ask GPT to adjudicate the candidates strictly to JSON
-        sys_txt, user_txt = build_green_claims_prompt(
-            candidates=candidates,
-            product_text=row_text,
-            language_name=gc_language
-        )
-
-        resp = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {"role": "system", "content": sys_txt},
-                {"role": "user",   "content": user_txt}
-            ],
-            temperature=temperature_val,
-            top_p=0
-        )
-        content = resp.choices[0].message.content.strip()
-        try:
-            parsed = json.loads(clean_gpt_json_block(content))
-        except Exception as e:
-            parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
-
-        # 5) Final per-row payload (easy to join & export)
-        matched_strings = sorted({c.get("evidence_snippet") for c in candidates if c.get("evidence_snippet")})  # unique snippets
-        results.append({
-            "green_claims_any": bool(parsed.get("overall", {}).get("any_green_claim_detected") in [True, "true", "True"]),
-            "green_claims_matched_strings": matched_strings,     # ← exact snippets if we found them
-            "green_claims_candidates": candidates,               # ← all candidates with scores/sources
-            "green_claims_ai": parsed,                           # ← GPT adjudication JSON
-            "green_claims_language": gc_language
-        })
-
-    except Exception as e:
-        failed_rows.append(idx)
-        results.append({"error": f"Row {idx} (Green Claims): {e}"})
-    finally:
-        continue  # make sure we don't fall through to other handlers
-
-
 if prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Warnings & Advisory")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_warnadv_auto")
@@ -1223,6 +1147,86 @@ if uploaded_file and (
                     })
                     continue  # ⛔ Skip rest of the loop for this row
 
+                # -------------------------------------------------------------
+                # 🌿 Green Claims Checker (Language-aware)
+                # -------------------------------------------------------------
+                if prompt_choice == GREEN_CLAIMS_PROMPT:
+                    try:
+                        # 1) Build the row text from selected cols
+                        row_text = " ".join(
+                            str(row.get(c, "")) for c in cols_to_use if str(row.get(c, "")).strip()
+                        ).strip()
+            
+                        if not row_text:
+                            results.append({
+                                "green_claims_any": False,
+                                "green_claims_candidates": [],
+                                "green_claims_ai": {},
+                                "green_claims_language": gc_language,
+                                "explanation": "No text found in selected columns."
+                            })
+                            continue  # next row
+            
+                        # 2) Candidate screen (language-specific)
+                        lang_col = LANG_TO_COL[gc_language]
+                        candidates = screen_candidates(
+                            text=row_text,
+                            db=GC_DB,
+                            language_col=lang_col,
+                            threshold=gc_threshold,
+                            max_per_section=5
+                        )
+            
+                        # 3) If no candidates, short-circuit
+                        if not candidates:
+                            results.append({
+                                "green_claims_any": False,
+                                "green_claims_candidates": [],
+                                "green_claims_ai": {},
+                                "green_claims_language": gc_language
+                            })
+                            continue  # next row
+            
+                        # 4) Ask GPT to adjudicate (strict JSON)
+                        sys_txt, user_txt = build_green_claims_prompt(
+                            candidates=candidates,
+                            product_text=row_text,
+                            language_name=gc_language
+                        )
+            
+                        resp = client.chat.completions.create(
+                            model=model_choice,
+                            messages=[
+                                {"role": "system", "content": sys_txt},
+                                {"role": "user",   "content": user_txt}
+                            ],
+                            temperature=temperature_val,
+                            top_p=0
+                        )
+                        content = resp.choices[0].message.content.strip()
+            
+                        try:
+                            parsed = json.loads(clean_gpt_json_block(content))
+                        except Exception as e:
+                            parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
+            
+                        matched_strings = sorted({
+                            s for s in (c.get("evidence_snippet") for c in candidates) if s
+                        })
+            
+                        results.append({
+                            "green_claims_any": str(parsed.get("overall", {}).get("any_green_claim_detected")).lower() == "true",
+                            "green_claims_matched_strings": matched_strings,
+                            "green_claims_candidates": candidates,
+                            "green_claims_ai": parsed,
+                            "green_claims_language": gc_language
+                        })
+            
+                    except Exception as e:
+                        failed_rows.append(idx)
+                        results.append({"error": f"Row {idx} (Green Claims): {e}"})
+            
+                    continue  # ✅ important: skip to next row after handling this branch
                 if prompt_choice == "HFSS Checker":
                     try:
                         # Pass 1 – extract structured nutrients
