@@ -1,0 +1,72 @@
+﻿Section,English Phrase/Word,French (FR),Belgian French (BE-FR),Dutch (NL)
+A) Generic / “Do-good” language,Eco-friendly,Éco-responsable,Respectueux de l’environnement,milieuvriendelijk
+A) Generic / “Do-good” language,Ecological,écologique,écologique,ecologisch
+A) Generic / “Do-good” language,Good for the planet,bon pour la planète,bon pour la planète,goed voor de planeet
+A) Generic / “Do-good” language,Climate / Carbon friendly,respectueux du climat / bas carbone,respectueux du climat,klimaatvriendelijk / koolstofarm
+A) Generic / “Do-good” language,Nature’s friend,ami de la nature,ami de la nature,natuurvriendelijk
+A) Generic / “Do-good” language,Kind to the planet,doux pour la planète,doux pour la planète,vriendelijk voor de planeet
+A) Generic / “Do-good” language,Ethical,éthique,éthique,ethisch
+A) Generic / “Do-good” language,Non-toxic,non toxique,non toxique,niet-toxisch / niet giftig
+A) Generic / “Do-good” language,Green,« vert » / écologique,vert,groen
+A) Generic / “Do-good” language,Eco,éco-,éco-,eco-
+A) Generic / “Do-good” language,Gentle on the environment,doux pour l’environnement,respectueux de l’environnement,zacht voor het milieu
+A) Generic / “Do-good” language,Safe for the environment,sans danger pour l’environnement,sûr pour l’environnement,veilig voor het milieu
+A) Generic / “Do-good” language,Environmentally correct,écologiquement correct,correct pour l’environnement,milieutechnisch correct
+A) Generic / “Do-good” language,Environmentally friendly,respectueux de l’environnement,respectueux de l’environnement,milieuvriendelijk
+A) Generic / “Do-good” language,Sustainable plant source,source végétale durable,source végétale durable,duurzame plantaardige bron
+A) Generic / “Do-good” language,Responsible,responsable,responsable,verantwoord
+A) Generic / “Do-good” language,Conscious,conscient / éco-conscient,conscient,bewust
+A) Generic / “Do-good” language,Sustainable,durable,durable,duurzaam
+A) Generic / “Do-good” language,Clean,propre,propre,schoon
+A) Generic / “Do-good” language,More sustainable,plus durable,plus durable,duurzamer
+A) Generic / “Do-good” language,Ethically and sustainably sourced,approvisionnement éthique et durable,issu d’une filière éthique et durable,ethisch en duurzaam ingekocht
+A) Generic / “Do-good” language,Sustainably sourced,issu d’un approvisionnement durable,issu d’une filière durable,duurzaam ingekocht
+B) Carbon & climate claims,Carbon neutral,neutre en carbone,neutre en carbone,CO₂-neutraal
+B) Carbon & climate claims,Climate neutral,neutre pour le climat,neutre pour le climat,klimaatneutraal
+B) Carbon & climate claims,Net zero,zéro émission nette,zéro émission nette,netto-nul (uitstoot)
+B) Carbon & climate claims,Carbon positive,à bilan carbone positif,à bilan carbone positif,CO₂-positief
+B) Carbon & climate claims,Climate positive,positif pour le climat,positif pour le climat,klimaatpositief
+B) Carbon & climate claims,Carbon negative,à empreinte carbone négative,à empreinte carbone négative,CO₂-negatief
+B) Carbon & climate claims,Low carbon,bas carbone,bas carbone,koolstofarm
+B) Carbon & climate claims,Carbon offset,compensation carbone,compensation carbone,CO₂-compensatie
+B) Carbon & climate claims,Carbon offsetting,compensation carbone,compensation carbone,CO₂-compensatie
+B) Carbon & climate claims,Carbon removal,élimination du carbone,élimination du carbone,CO₂/koolstofverwijdering
+C) Packaging & materials claims,Recyclable packaging,emballage recyclable,emballage recyclable,recyclebare verpakking
+C) Packaging & materials claims,Kerbside recyclable,recyclable en collecte municipale,recyclable en collecte publique,via huis-aan-huis inzameling recyclebaar
+C) Packaging & materials claims,Recycled content,contenu recyclé,contenu recyclé,aandeel gerecycled materiaal
+C) Packaging & materials claims,Made of recycled content,fabriqué à partir de contenu recyclé,fabriqué avec du contenu recyclé,gemaakt van gerecycled materiaal
+C) Packaging & materials claims,Refillable,rechargeable,réutilisable,navulbaar
+C) Packaging & materials claims,Refill,recharge,recharge,navulling
+C) Packaging & materials claims,Refill solution,solution de recharge,solution de réutilisation,navuloplossing
+C) Packaging & materials claims,Circular,circulaire,circulaire,circulair
+C) Packaging & materials claims,Biobased plastic,plastique biosourcé,plastique biosourcé,biobased plastic
+C) Packaging & materials claims,Plant-based plastic,plastique d’origine végétale,plastique végétal,plantaardig plastic
+C) Packaging & materials claims,Biodegradable packaging,emballage biodégradable,emballage biodégradable,biologisch afbreekbare verpakking
+C) Packaging & materials claims,Compostable packaging,emballage compostable,emballage compostable,composteerbare verpakking
+C) Packaging & materials claims,Home compostable,compostable à domicile,compostable à domicile,thuis composteerbaar
+C) Packaging & materials claims,Industrial compostability,compostable en milieu industriel,compostable industriel,industrieel composteerbaar
+C) Packaging & materials claims,Made of renewable materials,fabriqué à partir de matériaux renouvelables,fabriqué avec des matériaux renouvelables,gemaakt van hernieuwbare materialen
+C) Packaging & materials claims,Plastic free,sans plastique,sans plastique,plasticvrij
+D) Ingredient / composition claims,Natural,naturel,naturel,natuurlijk
+D) Ingredient / composition claims,100% natural,100 % naturel,100% naturel,100% natuurlijk
+D) Ingredient / composition claims,Naturally derived,d’origine naturelle,d’origine naturelle,van natuurlijke oorsprong
+D) Ingredient / composition claims,Natural origin,origine naturelle,origine naturelle,natuurlijke oorsprong
+D) Ingredient / composition claims,Made from plants,fabriqué à partir de plantes,fabriqué avec des plantes,gemaakt van planten
+D) Ingredient / composition claims,Plant-based,à base de plantes,à base de plantes,plantaardig
+D) Ingredient / composition claims,Reef friendly,respectueux des récifs,respectueux des récifs,rifvriendelijk
+D) Ingredient / composition claims,Reef safe,sans danger pour les récifs,sans danger pour les récifs,rifveilig
+"E) Ethics, animal & farming claims",Vegan,végan,vegan,veganistisch
+"E) Ethics, animal & farming claims",Vegetarian,végétarien,végétarien,vegetarisch
+"E) Ethics, animal & farming claims",Cruelty free,sans cruauté,cruelty free (anglais courant en BE),dierproefvrij
+"E) Ethics, animal & farming claims",No animal testing,non testé sur les animaux,non testé sur les animaux,niet op dieren getest
+"E) Ethics, animal & farming claims",Organic,biologique (« bio »),bio (seul mot souvent utilisé en BE),biologisch
+"E) Ethics, animal & farming claims",Certified Organic,certifié biologique,certifié bio,gecertificeerd biologisch
+"E) Ethics, animal & farming claims",% organic,% biologique,% bio,% biologisch
+"E) Ethics, animal & farming claims",Organic derived,d’origine biologique,d’origine bio,van biologische oorsprong
+"E) Ethics, animal & farming claims",Sourced from organic farms,provenant de fermes biologiques,issu de fermes bio,afkomstig van biologische boerderijen
+"E) Ethics, animal & farming claims",Fair Trade,commerce équitable,commerce équitable,eerlijke handel
+"E) Ethics, animal & farming claims",Fairtrade,Fairtrade,Fairtrade,Fairtrade
+"E) Ethics, animal & farming claims",RSPO,RSPO,RSPO,RSPO
+"E) Ethics, animal & farming claims",Roundtable on Sustainable Palm Oil,Table ronde sur l’huile de palme durable,Table ronde sur l’huile de palme durable,Ronde Tafel voor Duurzame Palmolie
+"E) Ethics, animal & farming claims",Responsibly sourced palm oil,huile de palme issue d’une filière responsable,huile de palme responsable,verantwoord ingekochte palmolie
+"E) Ethics, animal & farming claims",Palm oil-free,sans huile de palme,sans huile de palme,palmolievrij
