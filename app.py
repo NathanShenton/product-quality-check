@@ -44,6 +44,20 @@ from prompts.green_claims import (
     LANG_TO_COL
 )
 
+# --- Text normalisation helpers (HTML → plain; lowercase; tidy whitespace)
+import html, re, unicodedata
+
+def strip_html(s: str) -> str:
+    s = html.unescape(str(s or ""))
+    s = re.sub(r"<[^>]+>", " ", s)          # drop tags
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def norm_basic(s: str) -> str:
+    s = strip_html(s)
+    # remove accents: “biologisch” stays “biologisch” (no accent), but this helps across languages
+    s = ''.join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    return s.lower()
 
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
@@ -378,9 +392,10 @@ if prompt_choice == "Novel Food Checker (EU)":
     )
 
 if prompt_choice == GREEN_CLAIMS_PROMPT:
+    # Slider: Dutch works better a tad looser
     gc_threshold = st.slider(
         "Green-claims fuzzy threshold",
-        min_value=80, max_value=100, value=88,
+        min_value=70, max_value=100, value=85,
         help="Lower = catch more variants (but watch for false positives)."
     )
 
@@ -397,12 +412,43 @@ if prompt_choice == GREEN_CLAIMS_PROMPT:
         key="gc_db"
     )
 
+    # Load DB
     try:
         GC_DB = load_green_claims_db(uploaded_file=gc_upload)
-        st.caption(f"Green-claims DB loaded: {len(GC_DB):,} rows")
     except Exception as e:
         st.error(f"Could not load green-claims database: {e}")
         st.stop()
+
+    # ---- Validate the chosen language column has data ----
+    lang_col = LANG_TO_COL.get(gc_language)
+    if not lang_col:
+        st.error(f"No mapping found in LANG_TO_COL for '{gc_language}'.")
+        st.stop()
+
+    if lang_col not in GC_DB.columns:
+        st.error(
+            f"Language column '{lang_col}' not found in DB for {gc_language}. "
+            f"Available columns: {list(GC_DB.columns)}"
+        )
+        st.stop()
+
+    non_empty = (GC_DB[lang_col].astype(str).str.strip() != "").sum()
+    st.caption(
+        f"Green-claims DB loaded: {len(GC_DB):,} rows • "
+        f"{gc_language} column '{lang_col}' non-empty rows: {non_empty:,}"
+    )
+
+    if non_empty == 0:
+        st.warning(
+            f"No text present in '{lang_col}'. "
+            "If your CSV uses semicolons, ensure the loader detects the delimiter."
+        )
+        st.stop()
+
+    # Optional on-screen debug
+    gc_debug = st.checkbox("🔍 Show Green Claims matcher debug (first 10 rows)", value=False)
+    if gc_debug:
+        st.dataframe(GC_DB[[lang_col]].head(10))
 
 # Slider for the Banned/Restricted checker
 if prompt_choice == "Banned/Restricted Checker":
@@ -1152,11 +1198,12 @@ if uploaded_file and (
                 # -------------------------------------------------------------
                 if prompt_choice == GREEN_CLAIMS_PROMPT:
                     try:
-                        # 1) Build the row text from selected cols
-                        row_text = " ".join(
+                        # 1) Build the row text from selected cols (and normalise)
+                        row_text_raw = " ".join(
                             str(row.get(c, "")) for c in cols_to_use if str(row.get(c, "")).strip()
                         ).strip()
-            
+                        row_text = norm_basic(row_text_raw)
+                        
                         if not row_text:
                             results.append({
                                 "green_claims_any": False,
