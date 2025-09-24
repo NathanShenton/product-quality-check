@@ -37,6 +37,14 @@ from prompts.hfss import (
     build_pass_4_prompt
 )
 
+from prompts.green_claims import (
+    load_green_claims_db,
+    screen_candidates,
+    build_green_claims_prompt,
+    LANG_TO_COL
+)
+
+
 # ─── Streamlit page config ─────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
 
@@ -256,6 +264,8 @@ ARTWORK_SUPPLIER_PROMPT = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
 ARTWORK_RUN_ALL_PROMPT = "Artwork: Run ALL Packaging Pipelines (PDF/JPEG)"
 ARTWORK_WARNINGS_ADVISORY_PROMPT = "Artwork: Warnings & Advisory (PDF/JPEG)"
 
+GREEN_CLAIMS_PROMPT = "Green Claims Checker (Language-aware)"
+
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_AUTO_PROMPT,
     ARTWORK_DIRECTIONS_PROMPT,
@@ -264,6 +274,7 @@ prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_SUPPLIER_PROMPT,
     ARTWORK_WARNINGS_ADVISORY_PROMPT,
     ARTWORK_RUN_ALL_PROMPT,
+    GREEN_CLAIMS_PROMPT,
 ]
 
 prompt_choice = st.selectbox(
@@ -326,6 +337,13 @@ elif prompt_choice == ARTWORK_RUN_ALL_PROMPT:
         "Nutrition → Supplier in sequence. Choose a single combined JSON or a ZIP with five JSONs."
     )
     recommended_model    = "gpt-4o"
+elif prompt_choice == GREEN_CLAIMS_PROMPT:
+    selected_prompt_text = "SYSTEM MESSAGE: handled by green_claims module"
+    prompt_description   = (
+        "Checks product marketing text against a curated Green Claims library using fuzzy matching "
+        "and an AI adjudicator. Language selection filters candidates to the chosen variant only."
+    )
+    recommended_model    = "gpt-4.1-mini"  # cost/quality sweet spot; adjust if you prefer 4o-mini
 elif prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (warnings/advisory) module"
     prompt_description   = (
@@ -358,6 +376,33 @@ if prompt_choice == "Novel Food Checker (EU)":
         min_value=70, max_value=100, value=87,
         help="Lower = catch more variants (but watch for false positives)."
     )
+
+if prompt_choice == GREEN_CLAIMS_PROMPT:
+    gc_threshold = st.slider(
+        "Green-claims fuzzy threshold",
+        min_value=80, max_value=100, value=88,
+        help="Lower = catch more variants (but watch for false positives)."
+    )
+
+    gc_language = st.selectbox(
+        "Claim language",
+        options=list(LANG_TO_COL.keys()),
+        index=list(LANG_TO_COL.keys()).index("Dutch (NL)") if "Dutch (NL)" in LANG_TO_COL else 0,
+        help="Only candidates from this language column will be considered."
+    )
+
+    gc_upload = st.file_uploader(
+        "Optional: upload green-claims-database.csv (else the app will load it from product-quality-check/data)",
+        type=["csv"],
+        key="gc_db"
+    )
+
+    try:
+        GC_DB = load_green_claims_db(uploaded_file=gc_upload)
+        st.caption(f"Green-claims DB loaded: {len(GC_DB):,} rows")
+    except Exception as e:
+        st.error(f"Could not load green-claims database: {e}")
+        st.stop()
 
 # Slider for the Banned/Restricted checker
 if prompt_choice == "Banned/Restricted Checker":
@@ -461,6 +506,82 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
     # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
     # so the rest of the app behaves as before for all other prompts.
     st.stop()
+
+# ------------------------------------------------------------------
+# 🌿  Green Claims Checker (Language-aware)
+# ------------------------------------------------------------------
+if prompt_choice == GREEN_CLAIMS_PROMPT:
+    try:
+        # 1) Collect the row text from the user-selected columns
+        row_text = " ".join(str(row.get(c, "")) for c in cols_to_use if str(row.get(c, "")).strip()).strip()
+        if not row_text:
+            results.append({
+                "green_claims_any": False,
+                "green_claims_candidates": [],
+                "green_claims_ai": {},
+                "green_claims_language": gc_language,
+                "explanation": "No text found in selected columns."
+            })
+            continue
+
+        # 2) Local fuzzy + substring screen (language-specific)
+        lang_col = LANG_TO_COL[gc_language]
+        candidates = screen_candidates(
+            text=row_text,
+            db=GC_DB,
+            language_col=lang_col,
+            threshold=gc_threshold,
+            max_per_section=5
+        )
+
+        # 3) If no candidates, short-circuit
+        if not candidates:
+            results.append({
+                "green_claims_any": False,
+                "green_claims_candidates": [],
+                "green_claims_ai": {},
+                "green_claims_language": gc_language
+            })
+            continue
+
+        # 4) Ask GPT to adjudicate the candidates strictly to JSON
+        sys_txt, user_txt = build_green_claims_prompt(
+            candidates=candidates,
+            product_text=row_text,
+            language_name=gc_language
+        )
+
+        resp = client.chat.completions.create(
+            model=model_choice,
+            messages=[
+                {"role": "system", "content": sys_txt},
+                {"role": "user",   "content": user_txt}
+            ],
+            temperature=temperature_val,
+            top_p=0
+        )
+        content = resp.choices[0].message.content.strip()
+        try:
+            parsed = json.loads(clean_gpt_json_block(content))
+        except Exception as e:
+            parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
+
+        # 5) Final per-row payload (easy to join & export)
+        matched_strings = sorted({c.get("evidence_snippet") for c in candidates if c.get("evidence_snippet")})  # unique snippets
+        results.append({
+            "green_claims_any": bool(parsed.get("overall", {}).get("any_green_claim_detected") in [True, "true", "True"]),
+            "green_claims_matched_strings": matched_strings,     # ← exact snippets if we found them
+            "green_claims_candidates": candidates,               # ← all candidates with scores/sources
+            "green_claims_ai": parsed,                           # ← GPT adjudication JSON
+            "green_claims_language": gc_language
+        })
+
+    except Exception as e:
+        failed_rows.append(idx)
+        results.append({"error": f"Row {idx} (Green Claims): {e}"})
+    finally:
+        continue  # make sure we don't fall through to other handlers
+
 
 if prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Warnings & Advisory")
