@@ -4,10 +4,10 @@ import pandas as pd
 from rapidfuzz import fuzz
 
 LANG_TO_COL = {
-    "English": "English Phrase/Word",
+    "English (EN)": "English Phrase/Word",
+    "Dutch (NL)": "Dutch (NL)",
     "French (FR)": "French (FR)",
     "Belgian French (BE-FR)": "Belgian French (BE-FR)",
-    "Dutch (NL)": "Dutch (NL)",
 }
 
 def load_green_claims_db(uploaded_file=None, path_candidates=None) -> pd.DataFrame:
