@@ -5,11 +5,17 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from collections import defaultdict
 
 import pandas as pd
-from rapidfuzz import fuzz
+from rapidfuzz import process as rf_process, fuzz as rf_fuzz
 
-__all__ = ["load_banned_index", "find_banned_matches", "build_banned_prompt"]
+__all__ = [
+    "load_banned_index",
+    "find_banned_matches",
+    "bulk_find_banned_candidates",
+    "build_banned_prompt",
+]
 
 # -----------------------------------------------------------------------------
 # 1) CSV → variant index (cached)
@@ -111,7 +117,7 @@ def segment_ingredients(ingredients_text: str) -> List[str]:
     """
     Split an ingredient statement into smaller, meaningful segments.
     """
-    s = normalize(ingredients_text)
+    s = normalize(ingredients_text or "")
     parts = re.split(r"[;,/]| and |\(|\)", s)
     return [p.strip() for p in parts if p and len(p.strip()) >= 2]
 
@@ -128,7 +134,135 @@ def _whole_word_in_segment(variant_norm: str, seg: str) -> bool:
 
 
 # -----------------------------------------------------------------------------
-# 3) Core matcher
+# 3) Bulk candidate finder (fast pre-screen for many rows)
+# -----------------------------------------------------------------------------
+
+def bulk_find_banned_candidates(
+    texts: List[str],
+    threshold: int = 90,
+    max_chunk_variants: int = 800,   # chunk regex to avoid "too large" patterns
+    workers: int = -1                # -1 = use all cores
+) -> Dict[int, List[Dict]]:
+    """
+    Bulk candidate screen for many rows.
+    Returns: {row_index: [candidate_dict, ...]}
+    Candidate dicts are the same shape as find_banned_matches() items.
+    """
+    index = load_banned_index()  # cached
+
+    # --- 1) Segment all rows once; build reverse maps
+    row_segs: Dict[int, List[str]] = {}
+    seg_to_rows: Dict[str, List[int]] = defaultdict(list)
+    unique_segs: List[str] = []
+
+    seen = set()
+    for i, txt in enumerate(texts):
+        segs = segment_ingredients(txt or "")
+        row_segs[i] = segs
+        for s in segs:
+            if s not in seen:
+                seen.add(s)
+                unique_segs.append(s)
+            seg_to_rows[s].append(i)
+
+    # (Optional) prune ultra-short segments for fuzzy speed/noise
+    unique_segs = [s for s in unique_segs if len(s) >= 3]
+
+    # --- 2) Exact pass using one (or few) big regex alternations
+    # Build patterns like (?<!\w)(?:foo|bar|baz)(?!\w) with \s+ tolerant spaces
+    variants_exact = [v for v in index.keys() if len(v) >= 3]
+
+    def _pat(v: str) -> str:
+        return re.escape(v).replace(r"\ ", r"\s+")
+
+    exact_hits_per_seg: Dict[str, List[Tuple[str, Tuple[str, str, str, str]]]] = defaultdict(list)
+
+    for start in range(0, len(variants_exact), max_chunk_variants):
+        chunk = variants_exact[start : start + max_chunk_variants]
+        if not chunk:
+            break
+        alt = "|".join(_pat(v) for v in chunk)
+        rx = re.compile(rf"(?<!{_WORD})(?:{alt})(?!{_WORD})", re.I)
+
+        for seg in unique_segs:
+            for m in rx.finditer(seg):
+                variant_matched = m.group(0)
+                vn = normalize(variant_matched)
+                if vn in index:
+                    exact_hits_per_seg[seg].append((index[vn][3], index[vn]))  # (variant_raw, tuple)
+
+    # --- 3) Fuzzy pass (to supplement/upgrade)
+    fuzzy_variants = [v for v in index.keys() if len(v) >= 4]
+    # cdist returns matches per query when score_cutoff is given
+    fuzzy_results = rf_process.cdist(
+        unique_segs,
+        fuzzy_variants,
+        scorer=rf_fuzz.token_set_ratio,
+        score_cutoff=threshold,
+        workers=workers,
+    )
+
+    # --- 4) Aggregate best per canonical per row (prefer exact over fuzzy)
+    out: Dict[int, Dict[str, Dict]] = defaultdict(dict)  # row -> canonical -> best dict
+
+    def consider(row_id: int, canonical: str, e_number: str, ing_type: str,
+                 variant_raw: str, seg: str, score: int, source: str):
+        prev = out[row_id].get(canonical)
+        key = (1 if source == "exact" else 0, score)
+        prev_key = (1 if prev and prev["source"] == "exact" else 0, prev["score"] if prev else -1)
+        if (not prev) or (key > prev_key):
+            out[row_id][canonical] = {
+                "canonical": canonical,
+                "e_number": e_number,
+                "type": ing_type,
+                "score": int(score),
+                "source": source,
+                "variant": variant_raw,
+                "matched_segment": seg,
+            }
+
+    # 4a) exact → push to all rows containing that segment
+    for seg, hits in exact_hits_per_seg.items():
+        for variant_raw, (canonical, e_number, ing_type, _vr) in hits:
+            for row_id in seg_to_rows[seg]:
+                consider(row_id, canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
+
+    # 4b) fuzzy → push to all rows for that segment
+    # fuzzy_results[i] are matches for unique_segs[i]; entries are (choice_index, score, _)
+    for i, matches in enumerate(fuzzy_results):
+        seg = unique_segs[i]
+        if not matches:
+            continue
+
+        # track best per canonical for this seg
+        best_for_seg: Dict[str, Tuple[int, int, str]] = {}
+        for choice_idx, score, _ in matches:
+            variant_norm = fuzzy_variants[choice_idx]
+            canonical, e_number, ing_type, variant_raw = index[variant_norm]
+            prev = best_for_seg.get(canonical)
+            if (not prev) or (score > prev[1]):
+                best_for_seg[canonical] = (choice_idx, int(score), variant_raw)
+
+        for canonical, (choice_idx, score, variant_raw) in best_for_seg.items():
+            # Re-lookup once via normalized variant_raw to get e_number/type safely
+            tup = index.get(normalize(variant_raw))
+            if not tup:
+                continue
+            _canonical, e_number, ing_type, _vr = tup
+            for row_id in seg_to_rows[seg]:
+                consider(row_id, _canonical, e_number, ing_type, variant_raw, seg, score, "fuzzy")
+
+    # materialize output lists
+    results: Dict[int, List[Dict]] = {}
+    for row_id, can_map in out.items():
+        vals = list(can_map.values())
+        vals.sort(key=lambda d: (1 if d["source"] == "exact" else 0, d["score"]), reverse=True)
+        results[row_id] = vals
+    return results
+
+
+# -----------------------------------------------------------------------------
+# 4) Single-text matcher (kept for convenience / tests)
 # -----------------------------------------------------------------------------
 
 def find_banned_matches(
@@ -152,7 +286,7 @@ def find_banned_matches(
       "matched_segment": str
     }
     """
-    segments = segment_ingredients(ingredient_text)
+    segments = segment_ingredients(ingredient_text or "")
     if not segments:
         return []
 
@@ -194,8 +328,8 @@ def find_banned_matches(
         best = 0
         best_seg = ""
         for seg in segments:
-            s1 = fuzz.token_set_ratio(variant_norm, seg)
-            s2 = fuzz.partial_ratio(variant_norm, seg)
+            s1 = rf_fuzz.token_set_ratio(variant_norm, seg)
+            s2 = rf_fuzz.partial_ratio(variant_norm, seg)
             s = max(s1, s2)
             if s > best:
                 best, best_seg = s, seg
@@ -210,7 +344,7 @@ def find_banned_matches(
 
 
 # -----------------------------------------------------------------------------
-# 4) Prompt builder for GPT adjudication (JSON-only)
+# 5) Prompt builder for GPT adjudication (JSON-only)
 # -----------------------------------------------------------------------------
 
 def build_banned_prompt(
