@@ -231,7 +231,7 @@ def bulk_find_banned_candidates(
     # fuzzy_results[i] are matches for unique_segs[i]; entries are (choice_index, score, _)
     for i, matches in enumerate(fuzzy_results):
         seg = unique_segs[i]
-        if not matches:
+        if matches is None or (hasattr(matches, "size") and matches.size == 0) or (hasattr(matches, "__len__") and len(matches) == 0):
             continue
 
         # track best per canonical for this seg
@@ -418,3 +418,4 @@ OUTPUT RULES:
 """.strip()
 
     return f"{schema}\n\nCANDIDATES:\n{compact}\n\nINGREDIENT_TEXT:\n{ingredient_text}"
+
