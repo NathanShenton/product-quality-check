@@ -32,6 +32,7 @@ def load_banned_index(
     """
     Load the synonyms CSV and build a normalized variant index:
       { normalized_variant: (canonical, e_number, type, variant_raw) }
+
     Required CSV columns: Canonical, E-Number, Type, Synonym
     """
     global _BANNED_INDEX
@@ -46,17 +47,18 @@ def load_banned_index(
 
     index: Dict[str, Tuple[str, str, str, str]] = {}
     for _, row in df.iterrows():
-        canonical = row["Canonical"].strip()
-        e_number = row["E-Number"].strip()
-        ing_type = row["Type"].strip()
-        synonym = (row["Synonym"] or canonical).strip()
-
-        norm = normalize(synonym)
-        if not norm:
+        canonical = (row.get("Canonical", "") or "").strip()
+        e_number = (row.get("E-Number", "") or "").strip()
+        ing_type = (row.get("Type", "") or "").strip()
+        synonym = (row.get("Synonym", "") or canonical).strip()
+        if not canonical:
             continue
-        index[norm] = (canonical, e_number, ing_type, synonym)
 
-        # also index the canonical itself (if not already covered)
+        norm_syn = normalize(synonym)
+        if norm_syn:
+            index[norm_syn] = (canonical, e_number, ing_type, synonym)
+
+        # Also index the canonical itself for robustness
         can_norm = normalize(canonical)
         if can_norm and can_norm not in index:
             index[can_norm] = (canonical, e_number, ing_type, canonical)
@@ -78,7 +80,8 @@ _WIN1252_FIXES = {
     "â€�": '"',
 }
 
-_WORD = r"[A-Za-z0-9]"  # custom "word" class that excludes hyphen
+# Custom "word" class that excludes hyphen so we can token-boundary on hyphens too
+_WORD = r"[A-Za-z0-9]"
 
 
 def normalize(text: str) -> str:
@@ -92,15 +95,17 @@ def normalize(text: str) -> str:
     """
     if text is None:
         return ""
+    s = str(text)
     for bad, good in _WIN1252_FIXES.items():
-        text = text.replace(bad, good)
-    text = unicodedata.normalize("NFKD", str(text))
-    text = text.encode("ascii", errors="ignore").decode("ascii")
-    text = text.lower()
+        s = s.replace(bad, good)
+
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", errors="ignore").decode("ascii")
+    s = s.lower()
 
     # unify whitespace & hyphens
-    text = re.sub(r"[‐‒–—]", "-", text)  # various dashes → hyphen
-    text = re.sub(r"\s+", " ", text).strip()
+    s = re.sub(r"[‐‒–—]", "-", s)  # various dashes → hyphen
+    s = re.sub(r"\s+", " ", s).strip()
 
     # robust E-number normalisation:
     # capture "e" + 2-3 digits (allow leading zeros) + optional letter with optional space/hyphen
@@ -109,8 +114,8 @@ def normalize(text: str) -> str:
         letter = (m.group(2) or "").strip().replace("-", "")
         return f"e{digits}{letter}"
 
-    text = re.sub(r"\be\s*0*([0-9]{2,3})\s*[- ]?\s*([a-zA-Z]?)\b", _enorm_sub, text)
-    return text
+    s = re.sub(r"\be\s*0*([0-9]{2,3})\s*[- ]?\s*([a-zA-Z]?)\b", _enorm_sub, s)
+    return s
 
 
 def segment_ingredients(ingredients_text: str) -> List[str]:
@@ -118,6 +123,7 @@ def segment_ingredients(ingredients_text: str) -> List[str]:
     Split an ingredient statement into smaller, meaningful segments.
     """
     s = normalize(ingredients_text or "")
+    # split on common separators and bracket boundaries; keep reasonably-sized segments
     parts = re.split(r"[;,/]| and |\(|\)", s)
     return [p.strip() for p in parts if p and len(p.strip()) >= 2]
 
@@ -140,13 +146,20 @@ def _whole_word_in_segment(variant_norm: str, seg: str) -> bool:
 def bulk_find_banned_candidates(
     texts: List[str],
     threshold: int = 90,
-    max_chunk_variants: int = 800,   # chunk regex to avoid "too large" patterns
-    workers: int = -1                # -1 = use all cores
+    max_chunk_variants: int = 800,   # still used for exact pass regex chunking
+    workers: int = -1                # kept for API compatibility; unused by extract()
 ) -> Dict[int, List[Dict]]:
     """
     Bulk candidate screen for many rows.
     Returns: {row_index: [candidate_dict, ...]}
     Candidate dicts are the same shape as find_banned_matches() items.
+
+    Implementation:
+    1) Segment + dedupe across all rows.
+    2) Exact regex pass (token-boundary; multi-word with flexible whitespace).
+    3) Fuzzy pass per segment using RapidFuzz `process.extract`
+       (returns (choice, score, idx) tuples) — robustly unpacked.
+    4) For each row, keep the best evidence per canonical, preferring exact over fuzzy.
     """
     index = load_banned_index()  # cached
 
@@ -154,8 +167,8 @@ def bulk_find_banned_candidates(
     row_segs: Dict[int, List[str]] = {}
     seg_to_rows: Dict[str, List[int]] = defaultdict(list)
     unique_segs: List[str] = []
-
     seen = set()
+
     for i, txt in enumerate(texts):
         segs = segment_ingredients(txt or "")
         row_segs[i] = segs
@@ -165,11 +178,10 @@ def bulk_find_banned_candidates(
                 unique_segs.append(s)
             seg_to_rows[s].append(i)
 
-    # (Optional) prune ultra-short segments for fuzzy speed/noise
+    # prune ultra-short segments for fuzzy speed/noise
     unique_segs = [s for s in unique_segs if len(s) >= 3]
 
-    # --- 2) Exact pass using one (or few) big regex alternations
-    # Build patterns like (?<!\w)(?:foo|bar|baz)(?!\w) with \s+ tolerant spaces
+    # --- 2) Exact pass using chunked alternations
     variants_exact = [v for v in index.keys() if len(v) >= 3]
 
     def _pat(v: str) -> str:
@@ -189,18 +201,12 @@ def bulk_find_banned_candidates(
                 variant_matched = m.group(0)
                 vn = normalize(variant_matched)
                 if vn in index:
-                    exact_hits_per_seg[seg].append((index[vn][3], index[vn]))  # (variant_raw, tuple)
+                    # store (the human-readable variant string we think matched, and the index tuple)
+                    exact_hits_per_seg[seg].append((index[vn][3], index[vn]))
 
-    # --- 3) Fuzzy pass (to supplement/upgrade)
+    # --- 3) Fuzzy pass using process.extract per segment
+    # We match each segment (query) against the list of all normalized variants (choices)
     fuzzy_variants = [v for v in index.keys() if len(v) >= 4]
-    # cdist returns matches per query when score_cutoff is given
-    fuzzy_results = rf_process.cdist(
-        unique_segs,
-        fuzzy_variants,
-        scorer=rf_fuzz.token_set_ratio,
-        score_cutoff=threshold,
-        workers=workers,
-    )
 
     # --- 4) Aggregate best per canonical per row (prefer exact over fuzzy)
     out: Dict[int, Dict[str, Dict]] = defaultdict(dict)  # row -> canonical -> best dict
@@ -227,30 +233,39 @@ def bulk_find_banned_candidates(
             for row_id in seg_to_rows[seg]:
                 consider(row_id, canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
-    # 4b) fuzzy → push to all rows for that segment
-    # fuzzy_results[i] are matches for unique_segs[i]; entries are (choice_index, score, _)
-    for i, matches in enumerate(fuzzy_results):
-        seg = unique_segs[i]
-        if matches is None or (hasattr(matches, "size") and matches.size == 0) or (hasattr(matches, "__len__") and len(matches) == 0):
-            continue
-
-        # track best per canonical for this seg
-        best_for_seg: Dict[str, Tuple[int, int, str]] = {}
-        for choice_idx, score, _ in matches:
-            variant_norm = fuzzy_variants[choice_idx]
-            canonical, e_number, ing_type, variant_raw = index[variant_norm]
-            prev = best_for_seg.get(canonical)
-            if (not prev) or (score > prev[1]):
-                best_for_seg[canonical] = (choice_idx, int(score), variant_raw)
-
-        for canonical, (choice_idx, score, variant_raw) in best_for_seg.items():
-            # Re-lookup once via normalized variant_raw to get e_number/type safely
-            tup = index.get(normalize(variant_raw))
-            if not tup:
+    # 4b) fuzzy → best per canonical for the segment, then propagate to rows
+    if fuzzy_variants:
+        for seg in unique_segs:
+            # extract returns list of (choice, score, idx); we use score_cutoff=threshold
+            matches = rf_process.extract(
+                query=seg,
+                choices=fuzzy_variants,
+                scorer=rf_fuzz.token_set_ratio,
+                score_cutoff=threshold,
+                limit=None,
+            )
+            if not matches:
                 continue
-            _canonical, e_number, ing_type, _vr = tup
-            for row_id in seg_to_rows[seg]:
-                consider(row_id, _canonical, e_number, ing_type, variant_raw, seg, score, "fuzzy")
+
+            # track best per canonical for this segment
+            best_for_seg: Dict[str, Tuple[int, str]] = {}  # canonical -> (score, variant_raw)
+            for choice, score, idx in matches:
+                # choice is a normalized variant string
+                variant_norm = str(choice)
+                if variant_norm not in index:
+                    continue
+                canonical, e_number, ing_type, variant_raw = index[variant_norm]
+                prev = best_for_seg.get(canonical)
+                if (not prev) or (int(score) > prev[0]):
+                    best_for_seg[canonical] = (int(score), variant_raw)
+
+            for canonical, (score, variant_raw) in best_for_seg.items():
+                tup = index.get(normalize(variant_raw))
+                if not tup:
+                    continue
+                _canonical, e_number, ing_type, _vr = tup
+                for row_id in seg_to_rows[seg]:
+                    consider(row_id, _canonical, e_number, ing_type, variant_raw, seg, score, "fuzzy")
 
     # materialize output lists
     results: Dict[int, List[Dict]] = {}
@@ -315,13 +330,13 @@ def find_banned_matches(
     # 1) Exact (token-boundary) match by segment
     for seg in segments:
         for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
-            # skip ultra-short variants (too noisy)
             if len(variant_norm) < 3:
                 continue
             if _whole_word_in_segment(variant_norm, seg):
                 consider_hit(canonical, e_number, ing_type, variant_raw, seg, 100, "exact")
 
     # 2) Fuzzy (only to add/upgrade non-exact matches)
+    # Evaluate each normalized variant against all segments; keep the best segment score
     for variant_norm, (canonical, e_number, ing_type, variant_raw) in index.items():
         if len(variant_norm) < 4:
             continue
@@ -418,4 +433,3 @@ OUTPUT RULES:
 """.strip()
 
     return f"{schema}\n\nCANDIDATES:\n{compact}\n\nINGREDIENT_TEXT:\n{ingredient_text}"
-
