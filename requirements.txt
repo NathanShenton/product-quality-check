@@ -1,12 +1,20 @@
-streamlit>=1.32.0
-pandas>=2.2.2
-plotly>=5.20.0
-openai>=1.16.2
+# Core app
+streamlit>=1.32,<2
+pandas>=2.2,<3
+numpy>=1.26   # ok with Py3.12 and pandas 2.x
+
+# Visuals & UI
+plotly>=5.20,<6
 streamlit-cropper==0.2.0
-Pillow>=9.5.0
-requests>=2.0.0
-rapidfuzz>=3.0.0
-# NEW for artwork_processing.py
-pymupdf>=1.23.8        # PyMuPDF (import fitz) for PDF text & rendering
-pytesseract>=0.3.10    # word-level boxes + baseline OCR (optional but recommended)
-numpy>=1.26            # used by the module and common imaging ops
+Pillow>=9.5,<11
+
+# API & utils
+requests>=2.31,<3
+openai>=1.16,<2          # works with OpenAI(api_key=...) + chat.completions
+
+# Fuzzy matching
+rapidfuzz>=3.0,<4
+
+# Artwork processing / vision
+pymupdf>=1.23.8,<2       # provides `import fitz`
+pytesseract>=0.3.10,<1   # Python wrapper (binary installed separately)
