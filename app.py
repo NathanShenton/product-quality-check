@@ -1,4 +1,4 @@
-
+# app.py
 import streamlit as st
 import pandas as pd
 import json
@@ -51,6 +51,7 @@ from utils.durability import (                         # checkpoint + resume
     new_job_dir, write_json, append_csv, read_existing_results, heartbeat
 )
 import streamlit.components.v1 as components           # keep-awake
+from functools import partial
 
 # --- Text normalisation helpers (HTML → plain; lowercase; tidy whitespace)
 import html, re, unicodedata
@@ -128,19 +129,13 @@ def clean_gpt_json_block(text: str) -> str:
     """
     Strips markdown-style ``` wrappers and leading prose to return clean JSON string.
     """
-    import re
     text = text.strip()
-
-    # Remove triple-backtick wrappers (``` or ```json)
     if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"```$", "", text.strip(), flags=re.IGNORECASE)
-
-    # Remove any leading prose before first curly brace
     json_start = text.find("{")
     if json_start != -1:
         text = text[json_start:]
-
     return text.strip()
 
 def _flatten(x):
@@ -160,7 +155,7 @@ MODEL_OPTIONS = {
     "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
     "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
     "gpt-4o-mini":   "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o":        "Multimodal GPT‑4 (images + text).",
+    "gpt-4o":        "Multimodal GPT-4 (images + text).",
     "gpt-4-turbo":   "Powerful & pricier — use for complex tasks."
 }
 
@@ -171,7 +166,7 @@ st.markdown(
 )
 st.markdown(
     "<p style='text-align:center; font-size:16px; color:#4A4443;'>"
-    "Now with checkpointing, retries, resume, and keep‑awake for long runs."
+    "Now with checkpointing, retries, resume, and keep-awake for long runs."
     "</p>",
     unsafe_allow_html=True
 )
@@ -184,11 +179,12 @@ with col1:
     if not api_key_input:
         st.warning("Please enter your OpenAI API key to proceed.")
         st.stop()
-    # Initialize the OpenAI client (still useful for vision assets upload in your submodules)
+    # Initialize the OpenAI client and bind the retry helper
     client = OpenAI(api_key=api_key_input)
+    ai = partial(safe_chat_completion, client=client)  # <-- bind client ONCE
 
 # ------------------------------------------------------------------
-# Two/Three-pass image ingredient extractor
+# Two/Three-pass image ingredient extractor (uses bound `ai`)
 # ------------------------------------------------------------------
 def two_pass_extract(image_bytes: bytes, temperature_val: float = 0.0) -> str:
     """
@@ -206,7 +202,7 @@ def two_pass_extract(image_bytes: bytes, temperature_val: float = 0.0) -> str:
         "panel on a UK food label image. Preserve punctuation, %, brackets. "
         "If the section is unreadable, output IMAGE_UNREADABLE."
     )
-    content = safe_chat_completion(
+    content = ai(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": pass1_sys},
@@ -238,7 +234,7 @@ def two_pass_extract(image_bytes: bytes, temperature_val: float = 0.0) -> str:
         • Do NOT re-order, translate, or summarise.
         • Return the HTML string only – no markdown, no commentary.
     """).strip()
-    html_out = safe_chat_completion(
+    html_out = ai(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": pass2_sys},
@@ -254,7 +250,7 @@ def two_pass_extract(image_bytes: bytes, temperature_val: float = 0.0) -> str:
         "If any corrections are needed, return the corrected string, preserving original HTML formatting. "
         "Otherwise return the input unchanged."
     )
-    final_out = safe_chat_completion(
+    final_out = ai(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": pass3_sys},
@@ -742,7 +738,7 @@ if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
             })
 
             st.markdown("#### 🧩 Raw OCR lines considered")
-            st.code("\\n".join(parsed.get("raw_candidates") or []), language="text")
+            st.code("\n".join(parsed.get("raw_candidates") or []), language="text")
             st.markdown("#### 🪵 Raw text (crop OCR)")
             st.code(res.get("raw_text", ""), language="text")
             st.markdown("#### 🧪 QA signals")
@@ -889,7 +885,7 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
             else:
                 data_url = "data:image/jpeg;base64," + base64.b64encode(st.session_state["cropped_bytes"]).decode()
                 system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
-                content = safe_chat_completion(
+                content = ai(
                     model=model_choice,
                     messages=[
                         {"role": "system", "content": system_msg},
@@ -1025,7 +1021,7 @@ if (not is_image_prompt) and uploaded_file and (
                         if not encoded:
                             debug_notes_all.append(f"⚠️ Could not fetch image: {url}")
                             continue
-                        out = safe_chat_completion(
+                        out = ai(
                             model="gpt-4o",
                             messages=[
                                 {"role": "system", "content": selected_prompt_text},
@@ -1066,7 +1062,7 @@ if (not is_image_prompt) and uploaded_file and (
                             batch_rows.append(flat)
                         else:
                             sys_txt, user_txt = build_green_claims_prompt(candidates=candidates, product_text=row_text, language_name=gc_language)
-                            content = safe_chat_completion(
+                            content = ai(
                                 model=model_choice,
                                 messages=[{"role": "system", "content": sys_txt}, {"role": "user", "content": user_txt}],
                                 temperature=temperature_val, top_p=0, timeout=90
@@ -1089,20 +1085,20 @@ if (not is_image_prompt) and uploaded_file and (
 
                 elif prompt_choice == "HFSS Checker":
                     # Pass 1 – nutrients
-                    p1 = safe_chat_completion(model=model_choice, messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}], temperature=temperature_val, top_p=0, timeout=90)
+                    p1 = ai(model=model_choice, messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}], temperature=temperature_val, top_p=0, timeout=90)
                     parsed_1 = json.loads(clean_gpt_json_block(p1 or "{}"))
 
                     # Pass 2 – NPM score
-                    p2 = safe_chat_completion(model=model_choice, messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}], temperature=temperature_val, top_p=0, timeout=90)
+                    p2 = ai(model=model_choice, messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}], temperature=temperature_val, top_p=0, timeout=90)
                     parsed_2 = json.loads(clean_gpt_json_block(p2 or "{}"))
 
                     # Pass 3 – HFSS status
-                    p3 = safe_chat_completion(model=model_choice, messages=[{"role": "system", "content": build_pass_3_prompt({**parsed_2, "is_drink": parsed_1.get("is_drink", False)})}], temperature=temperature_val, top_p=0, timeout=90)
+                    p3 = ai(model=model_choice, messages=[{"role": "system", "content": build_pass_3_prompt({**parsed_2, "is_drink": parsed_1.get("is_drink", False)})}], temperature=temperature_val, top_p=0, timeout=90)
                     parsed_3 = json.loads(clean_gpt_json_block(p3 or "{}"))
 
                     # Pass 4 – validator
                     all_passes = {"parsed_nutrients": parsed_1, "npm_scoring": parsed_2, "hfss_classification": parsed_3}
-                    p4 = safe_chat_completion(model=model_choice, messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}], temperature=temperature_val, top_p=0, timeout=90)
+                    p4 = ai(model=model_choice, messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}], temperature=temperature_val, top_p=0, timeout=90)
                     parsed_4 = json.loads(clean_gpt_json_block(p4 or "{}"))
 
                     full_result = {**parsed_1, **parsed_2, **parsed_3, **parsed_4}
@@ -1121,7 +1117,7 @@ if (not is_image_prompt) and uploaded_file and (
                             batch_rows.append(flat)
                         else:
                             system_txt = build_banned_prompt(cands, ing_text)
-                            content = safe_chat_completion(
+                            content = ai(
                                 model=model_choice,
                                 messages=[{"role": "system", "content": system_txt}, {"role": "user", "content": ""}],
                                 temperature=temperature_val, top_p=0, timeout=90
@@ -1135,9 +1131,8 @@ if (not is_image_prompt) and uploaded_file and (
                             batch_rows.append(flat)
 
                 elif prompt_choice == "Competitor SKU Match":
-                    # NOTE: COMP_DB is loaded by user in the separate uploader; here we assume it's prepped in the prompt UI (omitted for brevity)
-                    st.warning("Competitor SKU Match branch requires pre-loaded COMP_DB in this simplified durable runner.")
-                    # You can integrate COMP_DB loading + safe_chat_completion here similarly to your original branch.
+                    # NOTE: For brevity, not fully wired in this durable demo.
+                    # If you want this branch active, load COMP_DB + use ai(...) to adjudicate exactly like your original flow.
                     flat = {"__row_index": idx, "error": "Competitor match not wired in durable demo"}
                     batch_rows.append(flat)
 
@@ -1149,7 +1144,7 @@ if (not is_image_prompt) and uploaded_file and (
                         encoded_img = fetch_image_as_base64(url)
                         if not encoded_img:
                             continue
-                        content = safe_chat_completion(
+                        content = ai(
                             model="gpt-4o",
                             messages=[
                                 {"role": "system", "content": selected_prompt_text},
@@ -1162,7 +1157,7 @@ if (not is_image_prompt) and uploaded_file and (
                         )
                         if content and "IMAGE_UNREADABLE" not in content.upper():
                             extracted.append(content.strip())
-                    combined_html = "\\n".join(extracted).strip()
+                    combined_html = "\n".join(extracted).strip()
                     reference = row.get("full_ingredients", "")
                     match_flag = "Pass" if combined_html in reference else "Needs Review"
 
@@ -1172,8 +1167,8 @@ if (not is_image_prompt) and uploaded_file and (
                         "and REFERENCE (expected full_ingredients). Identify differences and return JSON "
                         '{"severity":"Minor|Major","diff_explanation":"..."}'
                     )
-                    diff_user = f"OCR_OUTPUT:\\n{combined_html}\\n\\nREFERENCE:\\n{reference}"
-                    diff_content = safe_chat_completion(model="gpt-4.1-mini", messages=[{"role":"system","content":diff_sys},{"role":"user","content":diff_user}], temperature=temperature_val, top_p=0, timeout=90)
+                    diff_user = f"OCR_OUTPUT:\n{combined_html}\n\nREFERENCE:\n{reference}"
+                    diff_content = ai(model="gpt-4.1-mini", messages=[{"role":"system","content":diff_sys},{"role":"user","content":diff_user}], temperature=temperature_val, top_p=0, timeout=90)
                     try:
                         diff_json = json.loads(diff_content or "{}")
                     except Exception as e:
@@ -1190,9 +1185,9 @@ if (not is_image_prompt) and uploaded_file and (
                         system_txt, user_txt = user_prompt, ""
                     system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
                     user_txt = (user_txt or "").strip().format(**row_data)
-                    user_txt += f"\\n\\nSelected fields:\\n{json.dumps(row_data, ensure_ascii=False)}"
+                    user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                    content = safe_chat_completion(
+                    content = ai(
                         model=model_choice,
                         messages=[{"role": "system", "content": system_txt}, {"role": "user", "content": user_txt}],
                         temperature=temperature_val, top_p=0, timeout=90
@@ -1255,5 +1250,3 @@ if (not is_image_prompt) and uploaded_file and (
             st.download_button("⬇️ Download results.csv", data=open(results_path, "rb").read(), file_name="results.csv", mime="text/csv")
         if os.path.exists(failures_path):
             st.download_button("⬇️ Download failures.csv", data=open(failures_path, "rb").read(), file_name="failures.csv", mime="text/csv")
-
-
