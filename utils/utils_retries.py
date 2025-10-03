@@ -1,35 +1,50 @@
 # utils/utils_retries.py
-from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type
+import time
+from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
-client = OpenAI()  # you'll still pass api_key in your main app (OpenAI(api_key=...))
-
-class GPTRetryable(Exception):
-    """Used to mark transient errors for retry."""
-    pass
-
-@retry(
-    reraise=True,
-    stop=stop_after_attempt(6),                      # up to 6 tries
-    wait=wait_exponential_jitter(initial=1, max=30), # 1s → 30s with jitter
-    retry=retry_if_exception_type(GPTRetryable)
+RETRIABLE_SUBSTRINGS = (
+    "timeout", "temporarily unavailable", "overloaded", "rate limit",
+    "socket", "read timed out", "429", "5xx", "connection reset",
 )
-def safe_chat_completion(*, model, messages, temperature=0, top_p=0, timeout=90):
-    """OpenAI chat completion with timeouts + robust retries for transient failures."""
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            top_p=top_p,
-            timeout=timeout,
-        )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as e:
-        msg = str(e).lower()
-        transient = any(k in msg for k in [
-            "429", "rate", "timeout", "temporar", "overload", "bad gateway", "service", "5"
-        ])
-        if transient:
-            raise GPTRetryable(e)
-        raise
+
+def _is_retriable(err: Exception) -> bool:
+    s = str(err).lower()
+    return any(k in s for k in RETRIABLE_SUBSTRINGS)
+
+def safe_chat_completion(
+    client: OpenAI,
+    *,
+    messages: List[Dict[str, Any]],
+    model: str,
+    temperature: float = 0.0,
+    top_p: float = 0.0,
+    max_retries: int = 6,
+    base_delay: float = 1.5,
+    max_delay: float = 20.0,
+    **kwargs: Any,
+):
+    """
+    Call Chat Completions with exponential backoff and clear exceptions.
+    IMPORTANT: Pass an already-initialised `OpenAI(api_key=...)` client from app.py.
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                **kwargs,
+            )
+        except Exception as e:
+            last_err = e
+            if attempt >= max_retries or not _is_retriable(e):
+                # Bubble up the last error with context
+                raise RuntimeError(
+                    f"OpenAI call failed after {attempt}/{max_retries} attempts: {e}"
+                ) from e
+            # exponential backoff (jitterless to keep logs predictable)
+            delay = min(max_delay, base_delay ** attempt)
+            time.sleep(delay)
