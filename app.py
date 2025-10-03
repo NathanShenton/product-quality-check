@@ -31,10 +31,8 @@ from prompts.competitor_match import (
     # load_competitor_db,  # available if you need it later
 )
 
-from prompts.banningredients import (
-    bulk_find_banned_candidates,
-    build_banned_prompt
-)
+import prompts.banningredients as banningredients
+from prompts.banningredients import build_banned_prompt  # keep if you need it elsewhere
 
 from prompts.hfss import (
     build_pass_1_prompt,
@@ -53,45 +51,6 @@ from prompts.green_claims import (
 # at the top of the file (if not already)
 import numpy as np
 import pandas as pd
-
-def bulk_find_banned_candidates(texts: list[str], threshold: int) -> dict[int, list[dict]]:
-    out: dict[int, list[dict]] = {}
-
-    for i, raw in enumerate(texts):
-        s = (raw or "").strip()
-        if not s:
-            out[i] = []
-            continue
-
-        # whatever logic you already have to compute `matches`
-        matches = your_internal_matcher(s, threshold=threshold)  # placeholder for your current code
-
-        # --- normalize to a list ---
-        if matches is None:
-            matches = []
-        elif isinstance(matches, (np.ndarray, pd.Series)):
-            matches = matches.tolist()
-
-        # --- safe emptiness check (no boolean array pitfalls) ---
-        if len(matches) == 0:
-            out[i] = []
-            continue
-
-        # if your matcher returns objects, coerce to dicts
-        normalized = []
-        for m in matches:
-            if isinstance(m, dict):
-                normalized.append(m)
-            else:
-                # try a gentle conversion; adjust to your actual object type
-                try:
-                    normalized.append(m.to_dict())
-                except Exception:
-                    normalized.append({"value": str(m)})
-
-        out[i] = normalized
-
-    return out
 
 
 # --- Text normalisation helpers (HTML → plain; lowercase; tidy whitespace)
@@ -207,9 +166,9 @@ with col1:
     client = OpenAI(api_key=api_key_input)
 
 @st.cache_data(show_spinner=False)
-def _bulk_prescreen_banned(texts, threshold: int):
-    """Vectorized prescreener: returns {row_index: [candidate dicts]}"""
-    return bulk_find_banned_candidates(texts=texts, threshold=threshold)
+def _bulk_prescreen_banned(texts: list[str], threshold: int) -> dict[int, list[dict]]:
+    # texts should be a plain list of strings; threshold is your slider value
+    return banningredients.bulk_find_banned_candidates(texts=texts, threshold=threshold)
 
 # ------------------------------------------------------------------
 # Three-pass image ingredients extractor (OCR → Allergen HTML → QC)
