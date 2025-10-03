@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import json
-import os
 import requests
 import base64
 import plotly.graph_objects as go
@@ -9,6 +8,13 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 import io
 from openai import OpenAI
+
+# ── Project modules ────────────────────────────────────────────────────────────
+from sidebar import render_sidebar
+from style import inject_css
+
+from prompts.prompts import PROMPT_OPTIONS
+
 from prompts.artwork_processing_ingredients import process_artwork
 from prompts.artwork_processing_directions import process_artwork_directions
 from prompts.artwork_processing_warnings_advisory import process_artwork_warnings_advisory
@@ -16,18 +22,18 @@ from prompts.artwork_processing_packsize_nutrition import (
     process_artwork_packsize,
     process_artwork_nutrition,
 )
-from rapidfuzz import fuzz
-from sidebar import render_sidebar
-from style import inject_css
-from prompts.bannedingredients import find_banned_matches, build_banned_prompt
 from prompts.artwork_processing_supplier_addresses import process_artwork as process_artwork_suppliers
 
-from prompts.prompts import PROMPT_OPTIONS
 from prompts.competitor_match import (
     parse_sku,
     top_candidates,
     build_match_prompt,
-    load_competitor_db,   # if you need it
+    # load_competitor_db,  # available if you need it later
+)
+
+from prompts.banningredients import (
+    bulk_find_banned_candidates,
+    build_banned_prompt
 )
 
 from prompts.hfss import (
@@ -56,9 +62,8 @@ def norm_basic(s: str) -> str:
     s = ''.join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     return s.lower()
 
-# ─── Streamlit page config ─────────────────────
+# ─── Streamlit page config ─────────────────────────────────────────────────────
 st.set_page_config(page_title="Flexible AI Product Data Checker", layout="wide")
-
 inject_css()
 render_sidebar()
 
@@ -66,7 +71,7 @@ render_sidebar()
 #   Helper: Approx. Tokens  #
 #############################
 def approximate_tokens(text: str) -> int:
-    """Approximate the number of tokens based on text length."""
+    """Approximate token count from text length."""
     return max(1, len(text) // 4)
 
 #############################
@@ -74,19 +79,17 @@ def approximate_tokens(text: str) -> int:
 #############################
 def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: list) -> float:
     """
-    Estimate cost based on the chosen model, number of rows,
-    approximate tokens in user prompt, and row data.
+    Estimate cost based on the chosen model, #rows, approximate tokens in prompt + row data.
+    Costs are per 1k tokens (input, output).
     """
     model_costs_per_1k = {
         "gpt-3.5-turbo": (0.0005, 0.002),
         "gpt-4.1-mini":  (0.0004, 0.0016),
         "gpt-4.1-nano":  (0.0001, 0.0004),
         "gpt-4o-mini":   (0.00015, 0.0006),
-        "gpt-4o":        (0.005,  0.015),  # Correct cost as of May 2024
+        "gpt-4o":        (0.005,  0.015),  # baseline as of 2024-05
         "gpt-4-turbo":   (0.01,   0.03)
     }
-
-    # Default fallback costs
     cost_in, cost_out = model_costs_per_1k.get(model, (0.001, 0.003))
     total_input_tokens = 0
     total_output_tokens = 0
@@ -97,38 +100,30 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
         row_json_str = json.dumps(row_dict, ensure_ascii=False)
         prompt_tokens = approximate_tokens(user_prompt) + approximate_tokens(row_json_str)
         total_input_tokens += (system_tokens + prompt_tokens)
-        # Estimate ~100 tokens output per row
+        # Rough output per row
         total_output_tokens += 100
 
     input_ktokens = total_input_tokens / 1000
     output_ktokens = total_output_tokens / 1000
     return (input_ktokens * cost_in) + (output_ktokens * cost_out)
 
-# JSON CLEANER #
-
+# ─── JSON Cleaner ──────────────────────────────────────────────────────────────
 def clean_gpt_json_block(text: str) -> str:
     """
-    Strips markdown-style ``` wrappers and leading prose to return clean JSON string.
+    Strip ``` wrappers and any preamble before the first '{' so json.loads() doesn't choke.
     """
-    import re
     text = text.strip()
-
-    # Remove triple-backtick wrappers (``` or ```json)
     if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"```$", "", text.strip(), flags=re.IGNORECASE)
-
-    # Remove any leading prose before first curly brace
     json_start = text.find("{")
     if json_start != -1:
         text = text[json_start:]
-
     return text.strip()
 
 def _flatten(x):
     """
-    Turn any list/dict/tuple into a JSON string (so PyArrow can serialize),
-    otherwise leave the value alone.
+    Turn lists/dicts/tuples into JSON strings so PyArrow can serialize.
     """
     if isinstance(x, (list, dict, tuple)):
         try:
@@ -145,42 +140,42 @@ MODEL_OPTIONS = {
     "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
     "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
     "gpt-4o-mini":   "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o":        "The latest and fastest multimodal GPT-4 model. Supports image + text input.",
+    "gpt-4o":        "The latest multimodal GPT-4 (vision + text).",
     "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases."
 }
 
 # ---- Main Page Layout ----
-st.markdown(
-    "<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>",
-    unsafe_allow_html=True
-)
+st.markdown("<h1>📄 Flexible AI Product Data Checker With Cost Estimate</h1>", unsafe_allow_html=True)
 st.markdown(
     "<p style='text-align:center; font-size:16px; color:#4A4443;'>"
-    "Process your CSV row by row with OpenAI's GPT. Configure your columns, select (or write) a prompt, and choose a model."
+    "Process your CSV row by row with OpenAI. Configure your columns, select (or write) a prompt, and choose a model."
     "</p>",
     unsafe_allow_html=True
 )
 
-# Using columns to separate the API key entry and file upload
+# ── API key ────────────────────────────────────────────────────────────────────
 col1, col2 = st.columns(2)
 with col1:
-    # 1. API Key Entry
     api_key_input = st.text_input("🔑 Enter your OpenAI API Key", type="password")
     if not api_key_input:
         st.warning("Please enter your OpenAI API key to proceed.")
         st.stop()
-    # Initialize the new OpenAI client
     client = OpenAI(api_key=api_key_input)
-    
-    # ------------------------------------------------------------------
-# Two-pass image ingredient extractor (add right after client = OpenAI(...))
+
+@st.cache_data(show_spinner=False)
+def _bulk_prescreen_banned(texts, threshold: int):
+    """Vectorized prescreener: returns {row_index: [candidate dicts]}"""
+    return bulk_find_banned_candidates(texts=texts, threshold=threshold)
+
 # ------------------------------------------------------------------
-def two_pass_extract(image_bytes: bytes) -> str:
+# Three-pass image ingredients extractor (OCR → Allergen HTML → QC)
+# ------------------------------------------------------------------
+def three_pass_extract(image_bytes: bytes) -> str:
     """
     Run GPT-4o three times:
-      • Pass-1: OCR of ingredients panel
-      • Pass-2: Format and bold allergens
-      • Pass-3: Double-check and correct OCR misreads
+      • Pass-1: OCR the ingredients panel (verbatim)
+      • Pass-2: Format to HTML + <b>bold</b> allergens (UK list)
+      • Pass-3: Correct obvious OCR misreads, keep HTML
     """
     import base64, textwrap
     data_url = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
@@ -214,8 +209,7 @@ def two_pass_extract(image_bytes: bytes) -> str:
     )
     pass2_sys = textwrap.dedent(f"""
         You are a food-label compliance agent. Format the INGREDIENT string
-        provided by the user exactly as HTML and bold (**<b>…</b>**) every word
-        that matches this UK-FIC allergen list:
+        exactly as HTML and bold (<b>…</b>) every word that matches this UK-FIC allergen list:
 
         {allergens}
 
@@ -236,9 +230,8 @@ def two_pass_extract(image_bytes: bytes) -> str:
     # ---- PASS 3 ----
     pass3_sys = (
         "You previously extracted an ingredient list from a UK food label image. "
-        "Please double-check for spelling errors or OCR misreads in these items. "
-        "If any corrections are needed, return the corrected string, preserving original HTML formatting. "
-        "Otherwise return the input unchanged."
+        "Double-check for spelling errors/OCR misreads. If corrections are needed, return the corrected string, "
+        "preserving existing HTML. Otherwise return the input unchanged."
     )
     resp3 = client.chat.completions.create(
         model="gpt-4o",
@@ -250,32 +243,28 @@ def two_pass_extract(image_bytes: bytes) -> str:
     )
     return resp3.choices[0].message.content.strip()
 
-def fetch_image_as_base64(url: str) -> str:
-    """
-    Fetch an image from a URL and return it as a base64-encoded string.
-    Returns None if the image cannot be fetched.
-    """
+def fetch_image_as_base64(url: str) -> str | None:
+    """Fetch an image and return it base64-encoded. Returns None on failure."""
     try:
-        if not url.startswith("https"):
+        if not url.startswith("http"):
             url = "https://" + url.strip().lstrip("/")
-        response = requests.get(url)
+        response = requests.get(url, timeout=20)
         response.raise_for_status()
         return base64.b64encode(response.content).decode("utf-8")
     except Exception:
         return None
 
-# 4. Choose a Pre-Written Prompt
+# ── Prompt picker ──────────────────────────────────────────────────────────────
 st.subheader("💬 Choose a Prompt")
 
-ARTWORK_AUTO_PROMPT = "Artwork: Ingredient Statement (PDF/JPEG)"
-ARTWORK_DIRECTIONS_PROMPT = "Artwork: Directions for Use (PDF/JPEG)"
-ARTWORK_PACKSIZE_PROMPT = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
-ARTWORK_NUTRITION_PROMPT = "Artwork: Nutrition Facts (PDF/JPEG)"
-ARTWORK_SUPPLIER_PROMPT = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
-ARTWORK_RUN_ALL_PROMPT = "Artwork: Run ALL Packaging Pipelines (PDF/JPEG)"
-ARTWORK_WARNINGS_ADVISORY_PROMPT = "Artwork: Warnings & Advisory (PDF/JPEG)"
-
-GREEN_CLAIMS_PROMPT = "Green Claims Checker (Language-aware)"
+ARTWORK_AUTO_PROMPT                = "Artwork: Ingredient Statement (PDF/JPEG)"
+ARTWORK_DIRECTIONS_PROMPT          = "Artwork: Directions for Use (PDF/JPEG)"
+ARTWORK_PACKSIZE_PROMPT            = "Artwork: Pack Size / Net & Gross Weight (PDF/JPEG)"
+ARTWORK_NUTRITION_PROMPT           = "Artwork: Nutrition Facts (PDF/JPEG)"
+ARTWORK_SUPPLIER_PROMPT            = "Artwork: Supplier Addresses (UK/EU) (PDF/JPEG)"
+ARTWORK_RUN_ALL_PROMPT             = "Artwork: Run ALL Packaging Pipelines (PDF/JPEG)"
+ARTWORK_WARNINGS_ADVISORY_PROMPT   = "Artwork: Warnings & Advisory (PDF/JPEG)"
+GREEN_CLAIMS_PROMPT                = "Green Claims Checker (Language-aware)"
 
 prompt_names = list(PROMPT_OPTIONS.keys()) + [
     ARTWORK_AUTO_PROMPT,
@@ -288,21 +277,12 @@ prompt_names = list(PROMPT_OPTIONS.keys()) + [
     GREEN_CLAIMS_PROMPT,
 ]
 
-prompt_choice = st.selectbox(
-    "Select a pre-written prompt or 'Custom':",
-    prompt_names,
-    index=0
-)
+prompt_choice = st.selectbox("Select a pre-written prompt or 'Custom':", prompt_names, index=0)
 
-# 5. If they picked Competitor SKU Match, ask for a competitor CSV
-# — Initialize COMP_DB only when needed —
+# ── Competitor DB upload (only if needed) ──────────────────────────────────────
 COMP_DB = None
 if prompt_choice == "Competitor SKU Match":
-    comp_file = st.file_uploader(
-        "🔍 Upload competitor CSV",
-        type=["csv"],
-        key="comp_csv"
-    )
+    comp_file = st.file_uploader("🔍 Upload competitor CSV", type=["csv"], key="comp_csv")
     if comp_file:
         comp_df = pd.read_csv(comp_file, dtype=str).fillna("")
         COMP_DB = [
@@ -312,55 +292,38 @@ if prompt_choice == "Competitor SKU Match":
     else:
         st.warning("Please upload a competitor CSV to enable SKU matching.")
 
-
-
-# ─ Extract chosen prompt details ─
+# ── Prompt metadata → default model & description ──────────────────────────────
 if prompt_choice == ARTWORK_AUTO_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing module"
-    prompt_description   = "Upload PDF/JPG/PNG label artwork. Auto-finds the Ingredients panel, returns exact text + HTML with allergens bolded."
+    prompt_description   = "Auto-finds Ingredients panel; returns exact text + HTML with allergens bolded."
     recommended_model    = "gpt-4o"
 elif prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (directions) module"
-    prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-finds Directions/Usage/Preparation, extracts exact text, structures steps/timings/temps/volumes, and tags pictograms."
+    prompt_description   = "Auto-finds Directions/Usage/Preparation; extracts text, structures steps, tags pictograms."
     recommended_model    = "gpt-4o"
-elif prompt_choice == ARTWORK_PACKSIZE_PROMPT:  # ← NEW
+elif prompt_choice == ARTWORK_PACKSIZE_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (pack size/weights) module"
-    prompt_description   = (
-        "Upload PDF/JPG/PNG artwork. Auto-finds the main net quantity/pack-size statement, "
-        "parses Number of items, Base quantity, Unit of measure, and extracts Net/Gross/Drained weight + ℮ if present."
-    )
+    prompt_description   = "Parses net quantity/pack size; extracts No. items, base quantity, UoM, net/gross/drained weight, ℮."
     recommended_model    = "gpt-4o"
 elif prompt_choice == ARTWORK_NUTRITION_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (nutrition) module"
-    prompt_description   = "Upload PDF/JPG/PNG artwork. Auto-locates the nutrition panel and returns structured JSON + flat key/value rows."
+    prompt_description   = "Auto-locates nutrition panel → structured JSON + flat rows."
     recommended_model    = "gpt-4o"
 elif prompt_choice == ARTWORK_SUPPLIER_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (supplier addresses) module"
-    prompt_description   = (
-        "Upload PDF/JPG/PNG artwork. Auto-finds Supplier/Responsible Person blocks and "
-        "extracts exact text for **UK** and **EU** addresses separately, plus bounding boxes."
-    )
+    prompt_description   = "Extract UK/EU supplier/responsible person blocks + bboxes."
     recommended_model    = "gpt-4o"
 elif prompt_choice == ARTWORK_RUN_ALL_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by run-all packaging pipelines module"
-    prompt_description   = (
-        "Upload PDF/JPG/PNG artwork. Runs Ingredients → Directions → Pack Size → "
-        "Nutrition → Supplier in sequence. Choose a single combined JSON or a ZIP with five JSONs."
-    )
+    prompt_description   = "Runs Ingredients → Directions → Pack Size → Nutrition → Supplier → Warnings in sequence."
     recommended_model    = "gpt-4o"
 elif prompt_choice == GREEN_CLAIMS_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by green_claims module"
-    prompt_description   = (
-        "Checks product marketing text against a curated Green Claims library using fuzzy matching "
-        "and an AI adjudicator. Language selection filters candidates to the chosen variant only."
-    )
-    recommended_model    = "gpt-4.1-mini"  # cost/quality sweet spot; adjust if you prefer 4o-mini
+    prompt_description   = "Matches text to a Green Claims library using fuzzy screen + AI adjudicator (language-aware)."
+    recommended_model    = "gpt-4.1-mini"
 elif prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
     selected_prompt_text = "SYSTEM MESSAGE: handled by artwork_processing (warnings/advisory) module"
-    prompt_description   = (
-        "Upload PDF/JPG/PNG artwork. Auto-locates warnings/safety/advisory text and returns two verbatim lists: "
-        "'warning_info' (prohibitions/risks) and 'advisory_info' (guidance/disclaimers)."
-    )
+    prompt_description   = "Finds warnings/advisory statements; outputs two verbatim lists + QA."
     recommended_model    = "gpt-4o"
 else:
     selected = PROMPT_OPTIONS[prompt_choice]
@@ -370,7 +333,7 @@ else:
 
 st.markdown(f"**Prompt Info:** {prompt_description}")
 
-# ─ Session‐state to reset crops when the prompt changes ─
+# ── Session state for crop resets ──────────────────────────────────────────────
 if "last_prompt" not in st.session_state:
     st.session_state["last_prompt"] = prompt_choice
 if "cropped_bytes" not in st.session_state:
@@ -379,71 +342,50 @@ if st.session_state["last_prompt"] != prompt_choice:
     st.session_state["last_prompt"] = prompt_choice
     st.session_state["cropped_bytes"] = None
 
-# ─ Ensure fuzzy_threshold always exists ─
+# ── Prompt-specific controls ───────────────────────────────────────────────────
 fuzzy_threshold = 87
 if prompt_choice == "Novel Food Checker (EU)":
-    fuzzy_threshold = st.slider(
-        "Novel-food fuzzy threshold",
-        min_value=70, max_value=100, value=87,
-        help="Lower = catch more variants (but watch for false positives)."
-    )
+    fuzzy_threshold = st.slider("Novel-food fuzzy threshold", 70, 100, 87,
+                                help="Lower = catch more variants (but more false positives).")
 
 if prompt_choice == GREEN_CLAIMS_PROMPT:
-    gc_threshold = st.slider(
-        "Green-claims fuzzy threshold",
-        min_value=70, max_value=100, value=85,
-        help="Lower = catch more variants (but watch for false positives)."
-    )
+    gc_threshold = st.slider("Green-claims fuzzy threshold", 70, 100, 85,
+                             help="Lower = catch more variants (but more false positives).")
 
     gc_language = st.selectbox(
         "Claim language",
         options=list(LANG_TO_COL.keys()),
-        index=list(LANG_TO_COL.keys()).index("Dutch (NL)") if "Dutch (NL)" in LANG_TO_COL else 0,
+        index=(list(LANG_TO_COL.keys()).index("Dutch (NL)") if "Dutch (NL)" in LANG_TO_COL else 0),
         help="Only candidates from this language column will be considered."
     )
 
-    gc_upload = st.file_uploader(
-        "Upload your green-claims-database.csv (⚠️ not your product CSV)",
-        type=["csv"],
-        key="gc_db"
-    )
+    gc_upload = st.file_uploader("Upload your green-claims-database.csv (⚠️ not your product CSV)", type=["csv"], key="gc_db")
 
-    # Load DB (your load_green_claims_db can stay as-is)
     try:
         GC_DB = load_green_claims_db(uploaded_file=gc_upload)
     except Exception as e:
         st.error(f"Could not load green-claims database: {e}")
         st.stop()
 
-    # ---- Detect if the user accidentally uploaded the product CSV ----
+    # Catch wrong file
     PRODUCT_MARKERS = {"SKU ID", "SKU Name", "Product Name"}
     if PRODUCT_MARKERS.issubset(set(GC_DB.columns)):
-        st.error("It looks like you uploaded your PRODUCT CSV into the Green-Claims DB uploader. "
-                 "Please upload green-claims-database.csv here instead.")
+        st.error("Looks like you uploaded a PRODUCT CSV. Please upload green-claims-database.csv here instead.")
         st.stop()
 
-    # ---- Validate the chosen language column ----
     lang_col = LANG_TO_COL.get(gc_language)
     if not lang_col:
         st.error(f"No mapping found in LANG_TO_COL for '{gc_language}'.")
         st.stop()
 
     if lang_col not in GC_DB.columns:
-        st.error(
-            f"Language column '{lang_col}' not found in DB for {gc_language}. "
-            f"Available columns: {list(GC_DB.columns)}"
-        )
+        st.error(f"Column '{lang_col}' not found for {gc_language}. Available: {list(GC_DB.columns)}")
         st.stop()
 
     non_empty = (GC_DB[lang_col].astype(str).str.strip() != "").sum()
-    st.caption(
-        f"Green-claims DB loaded: {len(GC_DB):,} rows • "
-        f"{gc_language} column '{lang_col}' non-empty rows: {non_empty:,}"
-    )
+    st.caption(f"Green-claims DB: {len(GC_DB):,} rows • {gc_language} '{lang_col}' non-empty: {non_empty:,}")
     if non_empty == 0:
-        st.warning(
-            f"No text present in '{lang_col}'. If your CSV uses semicolons, make sure the loader detects it."
-        )
+        st.warning(f"No text in '{lang_col}'. If your CSV uses semicolons, ensure the loader detected it.")
         st.stop()
 
     gc_debug = st.checkbox("🔍 Show Green Claims matcher debug (first 10 rows)", value=False)
@@ -452,21 +394,16 @@ if prompt_choice == GREEN_CLAIMS_PROMPT:
 
 # Slider for the Banned/Restricted checker
 if prompt_choice == "Banned/Restricted Checker":
-    banned_fuzzy_threshold = st.slider(
-        "Banned/Restricted fuzzy threshold",
-        min_value=80, max_value=100, value=90,
-        help="Lower = catch more variants (but watch false positives)."
-    )
+    banned_fuzzy_threshold = st.slider("Banned/Restricted fuzzy threshold", 80, 100, 90,
+                                       help="Lower = catch more variants (but more false positives).")
 
-# --- Determine if image-based (single-image cropping prompts only) ---
+# --- Determine if image-based (manual crop prompts only) ---
 single_image_prompts = {
     "Image: Ingredient Scrape (HTML)",
     "Image: Directions for Use",
     "Image: Storage Instructions",
     "Image: Warnings and Advisory (JSON)",
-    # add any other single-image crop prompts here
 }
-
 multi_image_url_prompts = {
     "Image: Multi-Image Ingredient Extract & Compare",
     "GHS Pictogram Detector"
@@ -476,62 +413,39 @@ is_image_prompt = prompt_choice in single_image_prompts
 uploaded_image = None
 uploaded_file = None
 
-# Force gpt-4o if image prompt is selected
+# Force gpt-4o for image prompts
 if is_image_prompt:
     recommended_model = "gpt-4o"
 
-# 5. Model & Temperature Selector (default model comes from the prompt metadata)
-all_model_keys  = list(MODEL_OPTIONS.keys())
-default_index   = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
-
-model_choice = st.selectbox(
-    "🧠 Choose GPT model",
-    all_model_keys,
-    index=default_index
-)
-
+# 5) Model & Temperature
+all_model_keys = list(MODEL_OPTIONS.keys())
+default_index = all_model_keys.index(recommended_model) if recommended_model in all_model_keys else 0
+model_choice = st.selectbox("🧠 Choose GPT model", all_model_keys, index=default_index)
 st.markdown(f"**Model Info:** {MODEL_OPTIONS[model_choice]}")
-
-# 🔥 Temperature slider – default 0.00 (fully deterministic)
-temperature_val = st.slider(
-    "🎛️ Model temperature (0 = deterministic, 1 = very creative)",
-    min_value=0.0, max_value=1.0, value=0.0, step=0.05
-)
-
+temperature_val = st.slider("🎛️ Temperature (0 = deterministic)", 0.0, 1.0, 0.0, 0.05)
 st.markdown("---")
 
-# 6. User Prompt Text Area
-user_prompt = st.text_area(
-    "✍️ Your prompt for GPT",
-    value=selected_prompt_text,
-    height=200
-)
+# 6) Prompt textarea
+user_prompt = st.text_area("✍️ Your prompt for GPT", value=selected_prompt_text, height=200)
 
-# =========================================
-# NEW: Fully automatic Artwork processing
-# =========================================
+# ===========================
+#   AUTO ARTWORK FLOWS
+# ===========================
+def _auto_artwork_gate():
+    st.stop()  # used to short-circuit after these flows
+
 if prompt_choice == ARTWORK_AUTO_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – no manual crop")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_auto")
-
-    # Enforce correct model visually (user can still change later, but we’ll warn)
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    run_auto = st.button("🚀 Extract Ingredients (Auto)")
-    if art_file and run_auto:
-        with st.spinner("Locating INGREDIENTS panel and extracting…"):
+    if art_file and st.button("🚀 Extract Ingredients (Auto)"):
+        with st.spinner("Locating INGREDIENTS…"):
             try:
-                res = process_artwork(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"  # force correct model regardless of UI selection
-                )
+                res = process_artwork(client=client, file_bytes=art_file.read(), filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
-
         if not res.get("ok"):
             st.error(res.get("error", "Failed"))
         else:
@@ -541,39 +455,23 @@ if prompt_choice == ARTWORK_AUTO_PROMPT:
             st.code(res["ingredients_text"], language="text")
             st.code(res["ingredients_html"], language="html")
             st.json(res["qa"])
-
-            st.download_button(
-                "⬇️ Download JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="ingredients_result.json",
-                mime="application/json"
-            )
-
-    # IMPORTANT: for this new prompt, bail out before showing image-crop or CSV flows
-    # so the rest of the app behaves as before for all other prompts.
-    st.stop()
+            st.download_button("⬇️ Download JSON", data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="ingredients_result.json", mime="application/json")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Warnings & Advisory")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_warnadv_auto")
-
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    run_auto = st.button("🚀 Extract Warnings & Advisory (Auto)")
-    if art_file and run_auto:
-        with st.spinner("Locating WARNINGS/ADVISORY text and extracting…"):
+    if art_file and st.button("🚀 Extract Warnings & Advisory (Auto)"):
+        with st.spinner("Locating WARNINGS/ADVISORY…"):
             try:
-                res = process_artwork_warnings_advisory(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"
-                )
+                res = process_artwork_warnings_advisory(client=client, file_bytes=art_file.read(),
+                                                        filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
-
         if not res.get("ok"):
             st.error(res.get("error", "Failed"))
         else:
@@ -581,85 +479,55 @@ if prompt_choice == ARTWORK_WARNINGS_ADVISORY_PROMPT:
             st.write(f"**Page:** {res.get('page_index')}")
             if res.get("bbox_pixels"):
                 st.write(f"**BBox (pixels):** {res.get('bbox_pixels')}")
-
             st.markdown("#### ⚠️ Warnings")
             if res.get("warning_info"):
                 for w in res["warning_info"]:
                     st.markdown(f"- {w}")
             else:
                 st.info("No warnings detected.")
-
             st.markdown("#### ℹ️ Advisory")
             if res.get("advisory_info"):
                 for a in res["advisory_info"]:
                     st.markdown(f"- {a}")
             else:
                 st.info("No advisory statements detected.")
-
             st.markdown("#### 🧪 QA")
             st.json(res.get("qa", {}))
-
-            st.download_button(
-                "⬇️ Download JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="warnings_advisory_result.json",
-                mime="application/json"
-            )
-
-    st.stop()
-
+            st.download_button("⬇️ Download JSON", data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="warnings_advisory_result.json", mime="application/json")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
-    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – run **all** packaging pipelines in sequence")
+    st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – run **all** packaging pipelines")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_run_all")
-
-    # This flow requires vision
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    output_mode = st.radio(
-        "Output format",
-        options=["Single JSON (everything together)", "6 JSONs (zipped)"],
-        index=0
-    )
+    output_mode = st.radio("Output format", ["Single JSON (everything together)", "6 JSONs (zipped)"], index=0)
 
-    run_all = st.button("🚀 Run ALL Pipelines (Ingredients → Directions → Pack Size → Nutrition → Supplier)")
-    if art_file and run_all:
+    if art_file and st.button("🚀 Run ALL Pipelines (Ingredients → Directions → Pack Size → Nutrition → Supplier → Warnings)"):
         file_bytes = art_file.read()
         filename   = art_file.name
 
-        # Small helper to wrap each call with consistent error handling
         def run_step(fn, label):
             try:
                 with st.spinner(f"Running {label}…"):
-                    res = fn(
-                        client=client,
-                        file_bytes=file_bytes,
-                        filename=filename,
-                        render_dpi=350,
-                        model="gpt-4o"
-                    )
-                ok = bool(res.get("ok", True))  # some of your funcs set ok; default True if absent
-                if ok:
-                    st.success(f"✅ {label} complete")
-                else:
-                    st.error(f"❌ {label} failed: {res.get('error','Unknown error')}")
+                    res = fn(client=client, file_bytes=file_bytes, filename=filename, render_dpi=350, model="gpt-4o")
+                ok = bool(res.get("ok", True))
+                st.success(f"✅ {label} complete" if ok else f"❌ {label} failed: {res.get('error','Unknown error')}")
                 return res
             except Exception as e:
                 err = {"ok": False, "error": f"{label} exception: {e}"}
                 st.error(f"❌ {label} crashed: {e}")
                 return err
 
-        # Run in your preferred order
-        ingredients_res = run_step(process_artwork,               "Ingredients")
-        directions_res  = run_step(process_artwork_directions,    "Directions")
-        packsize_res    = run_step(process_artwork_packsize,      "Pack Size / Weights")
-        nutrition_res   = run_step(process_artwork_nutrition,     "Nutrition")
-        supplier_res    = run_step(process_artwork_suppliers,     "Supplier Addresses")
-        warnings_adv_res = run_step(process_artwork_warnings_advisory, "Warnings & Advisory")
+        ingredients_res   = run_step(process_artwork,                 "Ingredients")
+        directions_res    = run_step(process_artwork_directions,      "Directions")
+        packsize_res      = run_step(process_artwork_packsize,        "Pack Size / Weights")
+        nutrition_res     = run_step(process_artwork_nutrition,       "Nutrition")
+        supplier_res      = run_step(process_artwork_suppliers,       "Supplier Addresses")
+        warnings_adv_res  = run_step(process_artwork_warnings_advisory,"Warnings & Advisory")
 
-
-        # Build combined payload
         combined = {
             "source_file": filename,
             "model": "gpt-4o",
@@ -673,71 +541,49 @@ if prompt_choice == ARTWORK_RUN_ALL_PROMPT:
             }
         }
 
-        # Preview a minimal summary
         st.markdown("#### 🧭 Run summary")
         st.json({
-            "ingredients_ok": bool(ingredients_res.get("ok", True)),
-            "directions_ok":  bool(directions_res.get("ok", True)),
-            "packsize_ok":    bool(packsize_res.get("ok", True)),
-            "nutrition_ok":   bool(nutrition_res.get("ok", True)),
-            "suppliers_ok":   bool(supplier_res.get("ok", True)),
-            "warnings_advisory_ok": bool(warnings_adv_res.get("ok", True)),
+            "ingredients_ok":        bool(ingredients_res.get("ok", True)),
+            "directions_ok":         bool(directions_res.get("ok", True)),
+            "packsize_ok":           bool(packsize_res.get("ok", True)),
+            "nutrition_ok":          bool(nutrition_res.get("ok", True)),
+            "suppliers_ok":          bool(supplier_res.get("ok", True)),
+            "warnings_advisory_ok":  bool(warnings_adv_res.get("ok", True)),
         })
 
-        # Downloads
         if output_mode.startswith("Single"):
             data = json.dumps(combined, ensure_ascii=False, indent=2).encode("utf-8")
-            st.download_button(
-                "⬇️ Download Combined JSON",
-                data=data,
-                file_name="packaging_pipelines_all.json",
-                mime="application/json"
-            )
+            st.download_button("⬇️ Download Combined JSON", data=data,
+                               file_name="packaging_pipelines_all.json", mime="application/json")
         else:
-            import io, zipfile
+            import zipfile
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr("ingredients_result.json", json.dumps(ingredients_res, ensure_ascii=False, indent=2))
-                zf.writestr("directions_result.json",  json.dumps(directions_res,  ensure_ascii=False, indent=2))
-                zf.writestr("packsize_result.json",    json.dumps(packsize_res,    ensure_ascii=False, indent=2))
-                zf.writestr("nutrition_result.json",   json.dumps(nutrition_res,   ensure_ascii=False, indent=2))
-                zf.writestr("supplier_addresses_result.json", json.dumps(supplier_res, ensure_ascii=False, indent=2))
+                zf.writestr("ingredients_result.json",        json.dumps(ingredients_res, ensure_ascii=False, indent=2))
+                zf.writestr("directions_result.json",         json.dumps(directions_res,  ensure_ascii=False, indent=2))
+                zf.writestr("packsize_result.json",           json.dumps(packsize_res,    ensure_ascii=False, indent=2))
+                zf.writestr("nutrition_result.json",          json.dumps(nutrition_res,   ensure_ascii=False, indent=2))
+                zf.writestr("supplier_addresses_result.json", json.dumps(supplier_res,    ensure_ascii=False, indent=2))
                 zf.writestr("warnings_advisory_result.json",  json.dumps(warnings_adv_res,ensure_ascii=False, indent=2))
-                # Optional: also include the combined
-                zf.writestr("packaging_pipelines_all.json", json.dumps(combined, ensure_ascii=False, indent=2))
+                zf.writestr("packaging_pipelines_all.json",   json.dumps(combined,        ensure_ascii=False, indent=2))
             buf.seek(0)
-            st.download_button(
-                "⬇️ Download ZIP (5 JSONs + combined)",
-                data=buf.getvalue(),
-                file_name="packaging_pipelines_all.zip",
-                mime="application/zip"
-            )
-
-    # Keep behaviour consistent with your other auto flows
-    st.stop()
-
+            st.download_button("⬇️ Download ZIP (5 JSONs + combined)",
+                               data=buf.getvalue(), file_name="packaging_pipelines_all.zip", mime="application/zip")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_SUPPLIER_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Supplier/Responsible Person addresses")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_supplier_auto")
-
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    run_auto = st.button("🚀 Extract Supplier Addresses (Auto)")
-    if art_file and run_auto:
-        with st.spinner("Locating supplier/Responsible Person address blocks and extracting…"):
+    if art_file and st.button("🚀 Extract Supplier Addresses (Auto)"):
+        with st.spinner("Locating supplier/Responsible Person…"):
             try:
-                res = process_artwork_suppliers(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"  # force correct model regardless of UI selection
-                )
+                res = process_artwork_suppliers(client=client, file_bytes=art_file.read(),
+                                                filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
-
         if not res.get("ok"):
             st.error(res.get("error", "Failed"))
         else:
@@ -749,45 +595,29 @@ if prompt_choice == ARTWORK_SUPPLIER_PROMPT:
                 st.write(f"**UK BBox (pixels):** {res.get('uk_bbox_pixels')}")
             else:
                 st.info("No UK address detected.")
-
             st.markdown("#### 🇪🇺 EU Address")
             if res.get("eu_address_text"):
                 st.code(res["eu_address_text"], language="text")
                 st.write(f"**EU BBox (pixels):** {res.get('eu_bbox_pixels')}")
             else:
                 st.info("No EU address detected.")
-
             st.markdown("#### 🧪 QA signals")
             st.json(res.get("qa", {}))
-
-            st.download_button(
-                "⬇️ Download JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="supplier_addresses_result.json",
-                mime="application/json"
-            )
-
-    # Keep behaviour consistent: stop before crop/CSV flows
-    st.stop()
+            st.download_button("⬇️ Download JSON", data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="supplier_addresses_result.json", mime="application/json")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Pack Size / Weights")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_packsize_auto")
-
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    run_auto = st.button("🚀 Extract Pack Size / Weights (Auto)")
-    if art_file and run_auto:
-        with st.spinner("Locating PACK SIZE / NET QUANTITY and extracting…"):
+    if art_file and st.button("🚀 Extract Pack Size / Weights (Auto)"):
+        with st.spinner("Locating PACK SIZE / NET QUANTITY…"):
             try:
-                res = process_artwork_packsize(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"  # force the correct model regardless of UI selection
-                )
+                res = process_artwork_packsize(client=client, file_bytes=art_file.read(),
+                                               filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
 
@@ -797,9 +627,7 @@ if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
             st.success("✅ Extracted Pack Size / Weights")
             st.write(f"**Page:** {res.get('page_index')}")
             st.write(f"**BBox (pixels):** {res.get('bbox_pixels')}")
-
             parsed = (res.get("parsed") or {})
-            # Pretty summary card
             st.markdown("#### 🧾 Parsed Summary")
             colA, colB, colC = st.columns(3)
             with colA:
@@ -807,10 +635,8 @@ if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
             with colB:
                 st.metric("Base quantity", str(parsed.get("base_quantity") or "—"))
             with colC:
-                uom = parsed.get("unit_of_measure") or "—"
-                st.metric("Unit of measure", uom)
+                st.metric("Unit of measure", parsed.get("unit_of_measure") or "—")
 
-            # Weights table-style display
             st.markdown("#### ⚖️ Weights")
             nw = parsed.get("net_weight") or {}
             gw = parsed.get("gross_weight") or {}
@@ -825,22 +651,13 @@ if prompt_choice == ARTWORK_PACKSIZE_PROMPT:
 
             st.markdown("#### 🧩 Raw OCR lines considered")
             st.code("\n".join(parsed.get("raw_candidates") or []), language="text")
-
             st.markdown("#### 🪵 Raw text (crop OCR)")
             st.code(res.get("raw_text", ""), language="text")
-
             st.markdown("#### 🧪 QA signals")
             st.json(res.get("qa", {}))
-
-            st.download_button(
-                "⬇️ Download JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="packsize_result.json",
-                mime="application/json"
-            )
-    
-    # Bail out to keep behaviour consistent with other auto flows
-    st.stop()
+            st.download_button("⬇️ Download JSON", data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="packsize_result.json", mime="application/json")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_NUTRITION_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Nutrition panel")
@@ -848,18 +665,12 @@ if prompt_choice == ARTWORK_NUTRITION_PROMPT:
     if model_choice != "gpt-4o":
         st.warning("This prompt is designed for **gpt-4o**.")
     if art_file and st.button("🚀 Extract Nutrition (Auto)"):
-        with st.spinner("Finding nutrition table and extracting…"):
+        with st.spinner("Finding nutrition table…"):
             try:
-                res = process_artwork_nutrition(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"
-                )
+                res = process_artwork_nutrition(client=client, file_bytes=art_file.read(),
+                                                filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
-
         if not res.get("ok"):
             st.error(res.get("error","Failed"))
         else:
@@ -872,175 +683,106 @@ if prompt_choice == ARTWORK_NUTRITION_PROMPT:
             st.json(res.get("parsed", {}))
             st.markdown("#### QA")
             st.json(res.get("qa", {}))
-            st.download_button(
-                "⬇️ Download Nutrition JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="nutrition_result.json",
-                mime="application/json"
-            )
-    st.stop()
+            st.download_button("⬇️ Download Nutrition JSON",
+                               data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="nutrition_result.json", mime="application/json")
+    _auto_artwork_gate()
 
 if prompt_choice == ARTWORK_DIRECTIONS_PROMPT:
     st.markdown("### 📄 Upload artwork (PDF/JPG/PNG) – auto-locate Directions/Usage/Preparation")
     art_file = st.file_uploader("Choose file", type=["pdf","jpg","jpeg","png"], key="art_directions_auto")
-
     if model_choice != "gpt-4o":
-        st.warning("This prompt is designed for **gpt-4o** (vision). Please switch the model above.")
+        st.warning("This prompt is designed for **gpt-4o** (vision).")
 
-    run_auto = st.button("🚀 Extract Directions (Auto)")
-    if art_file and run_auto:
-        with st.spinner("Locating DIRECTIONS/USAGE/PREPARATION panel and extracting…"):
+    if art_file and st.button("🚀 Extract Directions (Auto)"):
+        with st.spinner("Locating DIRECTIONS/USAGE/PREPARATION…"):
             try:
-                res = process_artwork_directions(
-                    client=client,
-                    file_bytes=art_file.read(),
-                    filename=art_file.name,
-                    render_dpi=350,
-                    model="gpt-4o"  # force the correct model regardless of UI selection
-                )
+                res = process_artwork_directions(client=client, file_bytes=art_file.read(),
+                                                 filename=art_file.name, render_dpi=350, model="gpt-4o")
             except Exception as e:
                 res = {"ok": False, "error": f"Processing failed: {e}"}
-
         if not res.get("ok"):
             st.error(res.get("error", "Failed"))
         else:
             st.success("✅ Extracted DIRECTIONS/USAGE/PREPARATION")
             st.write(f"**Page:** {res['page_index']}")
             st.write(f"**BBox (pixels):** {res['bbox_pixels']}")
-
             st.markdown("**Raw directions text (exact OCR):**")
             st.code(res["directions_text"], language="text")
-
             st.markdown("**Steps (HTML):**")
             if res.get("steps_html"):
                 st.markdown(res["steps_html"], unsafe_allow_html=True)
             else:
                 st.info("No ordered steps found.")
-
             st.markdown("**Structured extraction:**")
             st.json(res.get("structured", {}))
-
             st.markdown("**Pictograms (icons):**")
             st.json(res.get("pictograms", {}))
-
             st.markdown("**QA signals:**")
             st.json(res.get("qa", {}))
+            st.download_button("⬇️ Download JSON", data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="directions_result.json", mime="application/json")
+    _auto_artwork_gate()
 
-            st.download_button(
-                "⬇️ Download JSON",
-                data=json.dumps(res, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name="directions_result.json",
-                mime="application/json"
-            )
-
-    # IMPORTANT: bail out so the rest of the app (cropper/CSV flows) doesn't render for this prompt
-    st.stop()
-
-
-# -------------------------------
-# Image uploader and crop logic
-# -------------------------------
+# ------------------------------------------------------------------------------
+# Manual crop (single-image prompts)
+# ------------------------------------------------------------------------------
 if is_image_prompt:
     st.markdown("### 🖼️ Upload Product Image & crop just the relevant panel")
-    uploaded_image = st.file_uploader(
-        "Choose JPG or PNG",
-        type=["jpg", "jpeg", "png"]
-    )
+    uploaded_image = st.file_uploader("Choose JPG or PNG", type=["jpg", "jpeg", "png"])
 
     if uploaded_image:
         img = Image.open(uploaded_image).convert("RGB")
         st.markdown("### ✂️ Crop the label to the relevant section below:")
-
         with st.spinner("🖼️ Loading crop tool..."):
             cropped_img = st_cropper(
-                img,
-                box_color="#C2EA46",  # Lime Green crop box
-                realtime_update=True,
-                aspect_ratio=None,
-                return_type="image"
+                img, box_color="#C2EA46", realtime_update=True, aspect_ratio=None, return_type="image"
             )
-
-            # Ensure competitor DB exists before running match
-            if prompt_choice == "Competitor SKU Match" and COMP_DB is None:
-                st.error("Cannot run SKU match—no competitor CSV uploaded.")
-                st.stop()
-
         if st.button("✅ Use this crop →"):
             buf = io.BytesIO()
             cropped_img.save(buf, format="PNG")
             st.session_state["cropped_bytes"] = buf.getvalue()
             st.session_state["cropped_preview"] = cropped_img
-
             st.success("✅ Crop captured! Preview below:")
-            st.image(
-                cropped_img,
-                use_container_width=True,
-                caption="Cropped Area Sent to GPT"
-            )
+            st.image(cropped_img, use_container_width=True, caption="Cropped Area Sent to GPT")
+            st.download_button("⬇️ Download Cropped Image Sent to GPT",
+                               data=st.session_state["cropped_bytes"], file_name="cropped_label.png", mime="image/png")
 
-            st.download_button(
-                label="⬇️ Download Cropped Image Sent to GPT",
-                data=st.session_state["cropped_bytes"],
-                file_name="cropped_label.png",
-                mime="image/png"
-            )
-
-# ────────────────────────────────────────────────
-# Non-image prompts always get the product-CSV uploader
-# ────────────────────────────────────────────────
+# Non-image prompts → CSV uploader
 if not is_image_prompt:
-    uploaded_file = st.file_uploader(
-        "📁 Upload your product CSV",
-        type=["csv"],
-        key="data_csv"
-    )
+    uploaded_file = st.file_uploader("📁 Upload your product CSV", type=["csv"], key="data_csv")
 
-# ---------------------------------------------------------------
-# Image-prompt flow – two-pass high-accuracy extraction (single-image)
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Image-prompt processing (manual crop)
+# ------------------------------------------------------------------------------
 if is_image_prompt and st.session_state.get("cropped_bytes"):
     st.markdown("### 📤 Processing image…")
-    with st.spinner("Running high-accuracy two-pass extraction"):
-        # Enforce the correct model
+    with st.spinner("Running high-accuracy image extraction"):
         if model_choice != "gpt-4o":
-            st.error(
-                "🛑  Image prompts require the **gpt-4o** model. "
-                "Please choose it above and try again."
-            )
+            st.error("🛑 Image prompts require the **gpt-4o** model. Please select it and try again.")
             st.stop()
 
         try:
             if "Ingredient Scrape" in prompt_choice:
-                html_out = two_pass_extract(st.session_state["cropped_bytes"])
+                html_out = three_pass_extract(st.session_state["cropped_bytes"])
             else:
-                data_url = (
-                    "data:image/jpeg;base64,"
-                    + base64.b64encode(
-                        st.session_state["cropped_bytes"]
-                    ).decode()
-                )
+                data_url = "data:image/jpeg;base64," + base64.b64encode(st.session_state["cropped_bytes"]).decode()
                 system_msg = user_prompt.replace("SYSTEM MESSAGE:", "").strip()
                 response = client.chat.completions.create(
                     model=model_choice,
                     messages=[
                         {"role": "system", "content": system_msg},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Cropped label image below."},
-                                {"type": "image_url", "image_url": {"url": data_url}}
-                            ]
-                        }
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "Cropped label image below."},
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        ]}
                     ],
-                    temperature=temperature_val,
-                    top_p=0
+                    temperature=temperature_val, top_p=0
                 )
                 html_out = response.choices[0].message.content.strip()
 
             if html_out == "IMAGE_UNREADABLE":
-                st.error(
-                    "🛑  The image was unreadable or missing the required section."
-                )
+                st.error("🛑 The image was unreadable or missing the required section.")
             else:
                 st.success("✅ GPT image processing complete!")
                 output_type = "html"
@@ -1049,25 +791,21 @@ if is_image_prompt and st.session_state.get("cropped_bytes"):
                 elif "Warnings and Advisory" in prompt_choice:
                     output_type = "json"
                 st.code(html_out, language=output_type)
-
         except Exception as e:
             st.error(f"Image processing failed: {e}")
 
-# ---------- Main Execution Logic ----------
+# ------------------------------------------------------------------------------
+# CSV-driven processing
+# ------------------------------------------------------------------------------
 if uploaded_file and (
     user_prompt.strip() or
-    prompt_choice in {
-        "Novel Food Checker (EU)",
-        "Competitor SKU Match",
-        "GHS Pictogram Detector",
-        "Banned/Restricted Checker"
-    }
+    prompt_choice in {"Novel Food Checker (EU)", "Competitor SKU Match", "GHS Pictogram Detector", "Banned/Restricted Checker"}
 ):
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
     st.dataframe(df.head())
-    
-    # 3. Dynamic Column Selector (up to 10 columns)
+
+    # Dynamic Column Selector (up to 10)
     st.subheader("📊 Select up to 10 CSV columns to pass to GPT")
     selected_columns = st.multiselect(
         "Use in Processing",
@@ -1076,7 +814,6 @@ if uploaded_file and (
         help="Pick between 1 and 10 columns."
     )
 
-    # Enforce user picks
     if not selected_columns:
         st.error("⚠️ Please select at least one column.")
         st.stop()
@@ -1084,83 +821,76 @@ if uploaded_file and (
         st.error("⚠️ You can select at most 10 columns. Please deselect some.")
         st.stop()
 
-    cols_to_use = selected_columns          # ← existing line
-    # ──────────────────────────────────────────────────────────────
-    #  NEW: ask **only** for Competitor-match prompt
-    # ──────────────────────────────────────────────────────────────
+    cols_to_use = selected_columns
+
+    # Prompt-specific extra selectors
     if prompt_choice == "Competitor SKU Match":
         sku_col = st.selectbox(
             "Which column contains *your* product name / volume?",
-            options=cols_to_use,            # user may pick only among those already passed to GPT
+            options=cols_to_use,
             help="e.g. 'Product_Name' or 'SKU Title'"
         )
 
-    # ──────────────────────────────────────────────────────────────
-    #  NEW: ask **only** for Banned/Restricted Checker
-    # ──────────────────────────────────────────────────────────────
     if prompt_choice == "Banned/Restricted Checker":
         banned_ing_col = st.selectbox(
             "Which column contains the full ingredients text?",
             options=cols_to_use,
             help="Pick the column with the product’s ingredient statement."
         )
+        banned_texts = df[banned_ing_col].fillna("").astype(str).tolist() if banned_ing_col in df.columns else ["" for _ in range(len(df))]
+        with st.spinner("Pre-screening banned/restricted candidates across all rows…"):
+            prescreen_map = _bulk_prescreen_banned(banned_texts, banned_fuzzy_threshold)
+        rows_with_candidates = sum(1 for v in prescreen_map.values() if v)
+        st.info(f"Prescreen found candidates in {rows_with_candidates} of {len(df)} rows. "
+                "Only those rows will be sent to GPT for adjudication.")
 
-    # Display estimated cost (dark background card with white text)
+    # Prescreen-aware cost estimate
+    est_df = df
+    if prompt_choice == "Banned/Restricted Checker" and isinstance(globals().get('prescreen_map'), dict):
+        rows_to_send = [i for i, c in prescreen_map.items() if c]
+        est_df = df.iloc[rows_to_send] if rows_to_send else df.iloc[0:0]
+
     st.markdown(
         f"""
-        <div style='
-            padding:10px; 
-            background-color:#FFFFFF;  /* Grey */
-            color:#4A4443; 
-            border-radius:5px;
-            margin-bottom:1rem;
-        '>
-            <strong>Estimated Cost:</strong> ${estimate_cost(model_choice, df, user_prompt, cols_to_use):0.4f} (rough estimate based on token usage)
+        <div style='padding:10px; background-color:#FFFFFF; color:#4A4443; border-radius:5px; margin-bottom:1rem;'>
+            <strong>Estimated Cost:</strong> ${estimate_cost(model_choice, est_df, user_prompt, cols_to_use):0.4f}
+            <br/>(rows counted: {len(est_df)}/{len(df)})
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    # Create gauge placeholder before starting the loop
     gauge_placeholder = st.empty()
 
-    # Button to run GPT
     if st.button("🚀 Run GPT on CSV"):
-        # Immediately stop if they chose SKU match but never loaded a competitor DB
         if prompt_choice == "Competitor SKU Match" and not COMP_DB:
             st.error("Cannot run SKU match—no competitor CSV uploaded.")
             st.stop()
-    
+
         with st.spinner("Processing with GPT..."):
             progress_bar = st.progress(0)
             progress_text = st.empty()
             n_rows = len(df)
             results = []
             failed_rows = []
-            rolling_log = []
             log_placeholder = st.empty()
             status_placeholder = st.empty()
-            
-            # ---------- Processing loop ----------
+
             for idx, row in df.iterrows():
                 row_data = {c: row.get(c, "") for c in cols_to_use}
                 content = ""
 
-                # -------------------------------------------------------------
-                # 🔍 GHS Pictogram Detector logic (for rows with image URLs)
-                # -------------------------------------------------------------
+                # GHS pictogram detector
                 if prompt_choice == "GHS Pictogram Detector":
                     image_urls = row_data.get("image_link", "")
                     image_list = [image_urls.strip()] if image_urls.strip() else []
                     pictograms_found = set()
                     debug_notes_all = []
-                
                     for url in image_list:
                         encoded = fetch_image_as_base64(url)
                         if not encoded:
                             debug_notes_all.append(f"⚠️ Could not fetch image: {url}")
                             continue
-                
                         try:
                             gpt_response = client.chat.completions.create(
                                 model="gpt-4o",
@@ -1171,37 +901,48 @@ if uploaded_file and (
                                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
                                     ]}
                                 ],
-                                temperature=temperature_val,
-                                top_p=0
+                                temperature=temperature_val, top_p=0
                             )
                             result = json.loads(gpt_response.choices[0].message.content.strip())
                             icons = [i.strip() for i in result.get("pictograms", "").split(",") if i.strip()]
                             pictograms_found.update(icons)
                             debug_notes_all.append(result.get("debug_notes", ""))
-                
                         except Exception as e:
                             failed_rows.append(idx)
-                            results.append({
-                                "error": f"Error in GPT call for image: {url}",
-                                "debug_notes": str(e)
-                            })
-                            break  # Skip to next row
-                
-                    results.append({
-                        "pictograms": ", ".join(sorted(pictograms_found)),
-                        "debug_notes": " | ".join(debug_notes_all)
-                    })
-                    continue  # ⛔ Skip rest of the loop for this row
+                            results.append({"error": f"Error in GPT call for image: {url}", "debug_notes": str(e)})
+                            break
+                    results.append({"pictograms": ", ".join(sorted(pictograms_found)), "debug_notes": " | ".join(debug_notes_all)})
+                    # progress + gauge update for this row
+                    progress = (idx + 1) / n_rows
+                    progress_bar.progress(progress)
+                    progress_text.markdown(
+                        f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                        unsafe_allow_html=True
+                    )
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=progress * 100,
+                        number={'font': {'color': '#4A4443'}},
+                        title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                        gauge={
+                            'axis': {'range': [0, 100], 'tickcolor': '#4A4443', 'tickfont': {'color': '#4A4443'},
+                                     'tickwidth': 2, 'ticklen': 8},
+                            'bar': {'color': "#C2EA46"},
+                            'bgcolor': "#E1FAD1",
+                            'borderwidth': 1,
+                            'steps': [{'range': [0, 50], 'color': "#E1FAD1"},
+                                      {'range': [50, 100], 'color': "#F2FAF4"}]
+                        },
+                        domain={'x': [0, 1], 'y': [0, 1]}
+                    ))
+                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                    continue
 
-                # -------------------------------------------------------------
-                # 🌿 Green Claims Checker (Language-aware)
-                # -------------------------------------------------------------
+                # Green Claims
                 if prompt_choice == GREEN_CLAIMS_PROMPT:
                     try:
-                        # 1) Build the row text from selected cols (and normalise)
                         row_text_raw = " ".join(str(row.get(c, "")) for c in cols_to_use if str(row.get(c, "")).strip()).strip()
                         row_text = norm_basic(row_text_raw)
-                        
                         if not row_text:
                             results.append({
                                 "green_claims_any": False,
@@ -1210,171 +951,125 @@ if uploaded_file and (
                                 "green_claims_language": gc_language,
                                 "explanation": "No text found in selected columns."
                             })
-                            continue  # next row
-            
-                        # 2) Candidate screen (language-specific)
-                        lang_col = LANG_TO_COL[gc_language]
-                        candidates = screen_candidates(
-                            text=row_text,
-                            db=GC_DB,
-                            language_col=lang_col,
-                            threshold=gc_threshold,
-                            max_per_section=5
-                        )
-            
-                        # 3) If no candidates, short-circuit
-                        if not candidates:
-                            results.append({
-                                "green_claims_any": False,
-                                "green_claims_candidates": [],
-                                "green_claims_ai": {},
-                                "green_claims_language": gc_language
-                            })
-                            continue  # next row
-            
-                        # 4) Ask GPT to adjudicate (strict JSON)
-                        sys_txt, user_txt = build_green_claims_prompt(
-                            candidates=candidates,
-                            product_text=row_text,
-                            language_name=gc_language
-                        )
-            
-                        resp = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[
-                                {"role": "system", "content": sys_txt},
-                                {"role": "user",   "content": user_txt}
-                            ],
-                            temperature=temperature_val,
-                            top_p=0
-                        )
-                        content = resp.choices[0].message.content.strip()
-            
-                        try:
-                            parsed = json.loads(clean_gpt_json_block(content))
-                        except Exception as e:
-                            parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
-            
-                        matched_strings = sorted({
-                            s for s in (c.get("evidence_snippet") for c in candidates) if s
-                        })
-            
-                        results.append({
-                            "green_claims_any": str(parsed.get("overall", {}).get("any_green_claim_detected")).lower() == "true",
-                            "green_claims_matched_strings": matched_strings,
-                            "green_claims_candidates": candidates,
-                            "green_claims_ai": parsed,
-                            "green_claims_language": gc_language
-                        })
-            
+                            pass
+                        else:
+                            lang_col = LANG_TO_COL[gc_language]
+                            candidates = screen_candidates(
+                                text=row_text, db=GC_DB, language_col=lang_col,
+                                threshold=gc_threshold, max_per_section=5
+                            )
+                            if not candidates:
+                                results.append({
+                                    "green_claims_any": False,
+                                    "green_claims_candidates": [],
+                                    "green_claims_ai": {},
+                                    "green_claims_language": gc_language
+                                })
+                            else:
+                                sys_txt, user_txt = build_green_claims_prompt(
+                                    candidates=candidates, product_text=row_text, language_name=gc_language
+                                )
+                                resp = client.chat.completions.create(
+                                    model=model_choice,
+                                    messages=[{"role": "system", "content": sys_txt},
+                                              {"role": "user",   "content": user_txt}],
+                                    temperature=temperature_val, top_p=0
+                                )
+                                content = resp.choices[0].message.content.strip()
+                                try:
+                                    parsed = json.loads(clean_gpt_json_block(content))
+                                except Exception as e:
+                                    parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
+
+                                matched_strings = sorted({s for s in (c.get("evidence_snippet") for c in candidates) if s})
+                                results.append({
+                                    "green_claims_any": str(parsed.get("overall", {}).get("any_green_claim_detected")).lower() == "true",
+                                    "green_claims_matched_strings": matched_strings,
+                                    "green_claims_candidates": candidates,
+                                    "green_claims_ai": parsed,
+                                    "green_claims_language": gc_language
+                                })
                     except Exception as e:
                         failed_rows.append(idx)
                         results.append({"error": f"Row {idx} (Green Claims): {e}"})
-            
-                    continue  # ✅ important: skip to next row after handling this branch
+                    # progress update
+                    progress = (idx + 1) / n_rows
+                    progress_bar.progress(progress)
+                    progress_text.markdown(
+                        f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                        unsafe_allow_html=True
+                    )
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number", value=progress*100,
+                        number={'font': {'color': '#4A4443'}},
+                        title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                        gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                               'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                               'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                        domain={'x':[0,1],'y':[0,1]}
+                    ))
+                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                    continue
+
+                # HFSS Checker
                 if prompt_choice == "HFSS Checker":
                     try:
-                        # Pass 1 – extract structured nutrients
                         p1 = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}]
+                            model=model_choice, messages=[{"role": "system", "content": build_pass_1_prompt(row_data)}]
                         ).choices[0].message.content
                         parsed_1 = json.loads(clean_gpt_json_block(p1))
-                
-                        # Pass 2 – compute NPM score
+
                         p2 = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}]
+                            model=model_choice, messages=[{"role": "system", "content": build_pass_2_prompt(parsed_1)}]
                         ).choices[0].message.content
                         parsed_2 = json.loads(clean_gpt_json_block(p2))
-                
-                        # Pass 3 – determine HFSS status
+
                         p3 = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[{"role": "system", "content": build_pass_3_prompt({
+                            model=model_choice, messages=[{"role": "system", "content": build_pass_3_prompt({
                                 **parsed_2, "is_drink": parsed_1.get("is_drink", False)
                             })}]
                         ).choices[0].message.content
                         parsed_3 = json.loads(clean_gpt_json_block(p3))
-                
-                        # Pass 4 – final validator
-                        all_passes = {
-                            "parsed_nutrients": parsed_1,
-                            "npm_scoring": parsed_2,
-                            "hfss_classification": parsed_3
-                        }
+
+                        all_passes = {"parsed_nutrients": parsed_1, "npm_scoring": parsed_2, "hfss_classification": parsed_3}
                         p4 = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}]
+                            model=model_choice, messages=[{"role": "system", "content": build_pass_4_prompt(all_passes)}]
                         ).choices[0].message.content
                         parsed_4 = json.loads(clean_gpt_json_block(p4))
-                
-                        # Combine all into one dict for export
-                        full_result = {
-                            **parsed_1,
-                            **parsed_2,
-                            **parsed_3,
-                            **parsed_4
-                        }
+
+                        full_result = {**parsed_1, **parsed_2, **parsed_3, **parsed_4}
                         results.append(full_result)
-                        manual_debug_logged = True
-                
-                        # ─── Live log and progress ───────────────────────────────
-                        if not manual_debug_logged:
-                            if "rolling_log_dicts" not in st.session_state:
-                                st.session_state.rolling_log_dicts = []
-                            st.session_state.rolling_log_dicts.append(full_result)
-                            st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
-                
-                            log_placeholder.empty()
-                            log_placeholder.markdown(
-                                "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
-                                unsafe_allow_html=True
-                            )
-                
-                            for entry in st.session_state.rolling_log_dicts[-3:]:
-                                log_placeholder.json(entry)
-                
-                            for i, entry in enumerate(st.session_state.rolling_log_dicts[:-3]):
-                                row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
-                                with log_placeholder.expander(f"Row {row_num} output", expanded=False):
-                                    st.json(entry)
-                
-                            with log_placeholder.expander(f"Row {idx+1} | Pass-by-pass breakdown", expanded=False):
-                                st.json({
-                                    "Pass 1 – Nutrients": parsed_1,
-                                    "Pass 2 – NPM Score": parsed_2,
-                                    "Pass 3 – HFSS Status": parsed_3,
-                                    "Pass 4 – Validator": parsed_4
-                                })
-                
-                        progress = (idx + 1) / n_rows
-                        progress_bar.progress(progress)
-                        progress_text.markdown(
-                            f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
-                            unsafe_allow_html=True
-                        )
-                
                     except Exception as e:
                         failed_rows.append(idx)
-                        results.append({
-                            "error": f"Row {idx}: {e}",
-                            "raw_output": "Check individual passes for debug info"
-                        })
+                        results.append({"error": f"Row {idx}: {e}", "raw_output": "Check individual passes for debug info"})
+                    # progress update
+                    progress = (idx + 1) / n_rows
+                    progress_bar.progress(progress)
+                    progress_text.markdown(
+                        f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                        unsafe_allow_html=True
+                    )
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number", value=progress*100,
+                        number={'font': {'color': '#4A4443'}},
+                        title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                        gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                               'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                               'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                        domain={'x':[0,1],'y':[0,1]}
+                    ))
+                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                    continue
 
-                
-                # Handle multi-image ingredient extract
+                # Multi-image ingredient extract & compare
                 if prompt_choice == "Image: Multi-Image Ingredient Extract & Compare":
                     image_urls = row.get("image URLs", "")
                     image_list = [url.strip().replace('"', '') for url in image_urls.split(",") if url.strip()]
                     extracted = []
-
-                    # 1) Run OCR on each URL
                     for url in image_list:
                         encoded_img = fetch_image_as_base64(url)
                         if not encoded_img:
                             continue
-
                         try:
                             response = client.chat.completions.create(
                                 model="gpt-4o",
@@ -1395,55 +1090,23 @@ if uploaded_file and (
 
                     combined_html = "\n".join(extracted).strip()
                     reference = row.get("full_ingredients", "")
-
-                    # 2) Simple containment check to give a quick Pass/Needs Review
                     match_flag = "Pass" if combined_html in reference else "Needs Review"
 
-                    # 3) Ask GPT to compare combined_html vs. reference in detail
                     diff_prompt = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a detailed comparison assistant for UK food label ingredients. "
-                                "You will be given two strings:\n"
-                                "  • OCR_OUTPUT (HTML-bolded ingredients from the image)\n"
-                                "  • REFERENCE (the expected 'full_ingredients' text from our CSV).\n\n"
-                                "Your task:\n"
-                                "1. Identify any differences in wording, order, punctuation, or missing/extra ingredients.\n"
-                                "2. Pay special attention to allergen tokens (bolded HTML tags in OCR_OUTPUT) and flag if any allergen is missing or incorrect.\n"
-                                "3. For each difference, decide if it is “Minor” (typos, small punctuation/ordering) or “Major” (missing allergen, wrong ingredient, or substantial content changes).\n\n"
-                                "Return exactly one JSON object (no extra commentary) with these fields:\n"
-                                "{\n"
-                                "  \"severity\": \"Minor\" | \"Major\",   # overall severity of all differences\n"
-                                "  \"diff_explanation\": \"<a few sentences explaining what changed and why you chose that severity>\"\n"
-                                "}"
-                            )
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                "OCR_OUTPUT:\n"
-                                + combined_html
-                                + "\n\nREFERENCE:\n"
-                                + reference
-                            )
-                        }
+                        {"role": "system", "content":
+                            "You compare two ingredient strings (OCR vs. reference). "
+                            "Return JSON only: {\"severity\":\"Minor|Major\",\"diff_explanation\":\"...\"} "
+                            "Flag missing/incorrect allergens if present (<b> tags in OCR)."},
+                        {"role": "user", "content": f"OCR_OUTPUT:\n{combined_html}\n\nREFERENCE:\n{reference}"}
                     ]
-
                     try:
-                        diff_resp = client.chat.completions.create(
-                            model="gpt-4.1-mini",
-                            messages=diff_prompt,
-                            temperature=temperature_val
-                        )
+                        diff_resp = client.chat.completions.create(model="gpt-4.1-mini",
+                                                                    messages=diff_prompt,
+                                                                    temperature=temperature_val)
                         diff_content = diff_resp.choices[0].message.content.strip()
-                        # Parse GPT output (JSON)
                         diff_json = json.loads(diff_content)
                     except Exception as e:
-                        diff_json = {
-                            "severity": "Major",
-                            "diff_explanation": f"[Error comparing: {e}]"
-                        }
+                        diff_json = {"severity": "Major", "diff_explanation": f"[Error comparing: {e}]"}
 
                     results.append({
                         "extracted_ingredients": combined_html,
@@ -1451,160 +1114,176 @@ if uploaded_file and (
                         "severity": diff_json.get("severity", ""),
                         "diff_explanation": diff_json.get("diff_explanation", "")
                     })
+                    # progress update
+                    progress = (idx + 1) / n_rows
+                    progress_bar.progress(progress)
+                    progress_text.markdown(
+                        f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                        unsafe_allow_html=True
+                    )
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number", value=progress*100,
+                        number={'font': {'color': '#4A4443'}},
+                        title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                        gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                               'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                               'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                        domain={'x':[0,1],'y':[0,1]}
+                    ))
+                    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                    continue
 
-                else:
-                    try:
-                        # ------------------------------------------------------------------
-                        # 🚀  Competitor SKU Match
-                        # ------------------------------------------------------------------
-                        if prompt_choice == "Competitor SKU Match":
-                            try:
-                                my_sku      = parse_sku(row[sku_col])
-                                cands_raw   = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
-                                cand_list   = [c for c, _ in cands_raw]                 # strip scores
-                                status_placeholder.info(f"Row {idx+1}/{n_rows}: running fuzzy match…")
-                                cands_raw   = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
-                                status_placeholder.success(f"Row {idx+1}/{n_rows}: found {len(cands_raw)} candidate(s)")
-                        
-                                # guard clause: nothing plausible
-                                if not cand_list:
-                                    results.append({
-                                        "match_found": "No",
-                                        "best_match_uid": "",
-                                        "best_match_name": "",
-                                        "confidence_pct": 0,
-                                        "reason": "No candidate met minimum fuzzy+size rules"
-                                    })
-                                    continue
-                        
-                                system_prompt = build_match_prompt(my_sku, cand_list)
-                                status_placeholder.info(f"Row {idx+1}/{n_rows}: calling GPT to pick best match…")
-                                resp = client.chat.completions.create(
-                                    model=model_choice,
-                                    messages=[{"role": "system", "content": system_prompt}],
-                                    temperature=temperature_val,
-                                    top_p=0
-                                )
-                                gpt_json = json.loads(resp.choices[0].message.content)
-                                status_placeholder.success(f"Row {idx+1}/{n_rows}: GPT done (match_found={gpt_json.get('match_found')})")
-                        
-                                resp = client.chat.completions.create(
-                                    model=model_choice,
-                                    messages=[{"role": "system", "content": system_prompt}],
-                                    temperature=temperature_val,
-                                    top_p=0
-                                )
-                                gpt_json = json.loads(resp.choices[0].message.content)
-                        
-                                # enrich with UID so you can JOIN later or show hyperlink
-                                best = next((c for c in cand_list
-                                             if c.uid == gpt_json.get("best_match_uid")), None)
-                        
+                # ── General CSV branches ─────────────────────────────────────
+                try:
+                    # Competitor SKU Match
+                    if prompt_choice == "Competitor SKU Match":
+                        try:
+                            my_sku    = parse_sku(row[sku_col])
+                            cands_raw = top_candidates(my_sku, db=COMP_DB, k=8)   # [(ParsedSKU, score)]
+                            cand_list = [c for c, _ in cands_raw]
+                            status_placeholder.info(f"Row {idx+1}/{n_rows}: running fuzzy match…")
+                            status_placeholder.success(f"Row {idx+1}/{n_rows}: found {len(cands_raw)} candidate(s)")
+
+                            if not cand_list:
                                 results.append({
-                                    **gpt_json,
-                                    "best_match_uid": getattr(best, "uid", ""),
-                                    "best_match_name": getattr(best, "raw_name", ""),
-                                    "candidate_debug": [(c.raw_name, s) for c, s in cands_raw]
+                                    "match_found": "No",
+                                    "best_match_uid": "",
+                                    "best_match_name": "",
+                                    "confidence_pct": 0,
+                                    "reason": "No candidate met minimum fuzzy+size rules"
                                 })
-                        
-                            except Exception as e:
-                                failed_rows.append(idx)
-                                results.append({"error": f"Row {idx}: {e}"})
-                            finally:
-                                continue  # skip the rest of the loop body
-
-                        # ------------------------------------------------------------------
-                        # 🚫  Banned/Restricted Checker
-                        # ------------------------------------------------------------------
-                        if prompt_choice == "Banned/Restricted Checker":
-                            try:
-                                ing_text = row_data.get(banned_ing_col, "")
-                                if not ing_text.strip():
-                                    results.append({
-                                        "overall": {"banned_present": False, "restricted_present": False},
-                                        "items": [],
-                                        "explanation": f"No ingredients in '{banned_ing_col}'",
-                                        "candidates_debug": []
-                                    })
-                                    continue
-                        
-                                # 1) Local fuzzy + exact screen
-                                cands = find_banned_matches(
-                                    ing_text,
-                                    threshold=banned_fuzzy_threshold,
-                                    return_details=True
+                                # progress update
+                                progress = (idx + 1) / n_rows
+                                progress_bar.progress(progress)
+                                progress_text.markdown(
+                                    f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                                    unsafe_allow_html=True
                                 )
-                        
+                                fig = go.Figure(go.Indicator(
+                                    mode="gauge+number", value=progress*100,
+                                    number={'font': {'color': '#4A4443'}},
+                                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                                    gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                                           'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                                           'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                                    domain={'x':[0,1],'y':[0,1]}
+                                ))
+                                gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                                continue
+
+                            system_prompt = build_match_prompt(my_sku, cand_list)
+                            status_placeholder.info(f"Row {idx+1}/{n_rows}: calling GPT to pick best match…")
+                            resp = client.chat.completions.create(
+                                model=model_choice,
+                                messages=[{"role": "system", "content": system_prompt}],
+                                temperature=temperature_val, top_p=0
+                            )
+                            gpt_json = json.loads(resp.choices[0].message.content)
+                            status_placeholder.success(f"Row {idx+1}/{n_rows}: GPT done (match_found={gpt_json.get('match_found')})")
+
+                            best = next((c for c in cand_list if c.uid == gpt_json.get("best_match_uid")), None)
+                            results.append({
+                                **gpt_json,
+                                "best_match_uid": getattr(best, "uid", ""),
+                                "best_match_name": getattr(best, "raw_name", ""),
+                                "candidate_debug": [(c.raw_name, s) for c, s in cands_raw]
+                            })
+                        except Exception as e:
+                            failed_rows.append(idx)
+                            results.append({"error": f"Row {idx}: {e}"})
+                        # progress update
+                        progress = (idx + 1) / n_rows
+                        progress_bar.progress(progress)
+                        progress_text.markdown(
+                            f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                            unsafe_allow_html=True
+                        )
+                        fig = go.Figure(go.Indicator(
+                            mode="gauge+number", value=progress*100,
+                            number={'font': {'color': '#4A4443'}},
+                            title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                            gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                                   'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                                   'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                            domain={'x':[0,1],'y':[0,1]}
+                        ))
+                        gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                        continue
+
+                    # Banned/Restricted Checker (prescreened)
+                    if prompt_choice == "Banned/Restricted Checker":
+                        try:
+                            ing_text = str(row_data.get(banned_ing_col, "") or "").strip()
+                            if not ing_text:
+                                results.append({
+                                    "overall": {"banned_present": False, "restricted_present": False},
+                                    "items": [],
+                                    "explanation": f"No ingredients in '{banned_ing_col}'",
+                                    "candidates_debug": []
+                                })
+                            else:
+                                cands = prescreen_map.get(idx, []) if isinstance(globals().get('prescreen_map'), dict) else []
                                 if not cands:
                                     results.append({
                                         "overall": {"banned_present": False, "restricted_present": False},
                                         "items": [],
-                                        "explanation": "No candidates found via substring/fuzzy screen.",
+                                        "explanation": "No candidates found via substring/fuzzy pre-screen.",
                                         "candidates_debug": []
                                     })
-                                    continue
-                        
-                                # 2) Build strict JSON system prompt for GPT adjudication
-                                system_txt = build_banned_prompt(cands, ing_text)
-                                user_txt   = ""
-                        
-                                # 3) GPT call (expects JSON)
-                                resp = client.chat.completions.create(
-                                    model=model_choice,  # default comes from PROMPT_OPTIONS; can override in UI
-                                    messages=[
-                                        {"role": "system", "content": system_txt},
-                                        {"role": "user",   "content": user_txt}
-                                    ],
-                                    temperature=temperature_val,
-                                    top_p=0
-                                )
-                                content = resp.choices[0].message.content.strip()
+                                else:
+                                    system_txt = build_banned_prompt(cands, ing_text)
+                                    resp = client.chat.completions.create(
+                                        model=model_choice,
+                                        messages=[{"role": "system", "content": system_txt}, {"role": "user", "content": ""}],
+                                        temperature=temperature_val, top_p=0
+                                    )
+                                    content = resp.choices[0].message.content.strip()
+                                    try:
+                                        parsed = json.loads(clean_gpt_json_block(content))
+                                    except Exception as e:
+                                        parsed = {"error": f"JSON parse failed: {e}", "raw_output": content}
+                                    parsed["candidates_debug"] = cands
+                                    results.append(parsed)
+                        except Exception as e:
+                            failed_rows.append(idx)
+                            results.append({"error": f"Row {idx} (Banned/Restricted): {e}"})
+                        # progress update
+                        progress = (idx + 1) / n_rows
+                        progress_bar.progress(progress)
+                        progress_text.markdown(
+                            f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                            unsafe_allow_html=True
+                        )
+                        fig = go.Figure(go.Indicator(
+                            mode="gauge+number", value=progress*100,
+                            number={'font': {'color': '#4A4443'}},
+                            title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                            gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                                   'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                                   'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                            domain={'x':[0,1],'y':[0,1]}
+                        ))
+                        gauge_placeholder.plotly_chart(fig, use_container_width=True)
+                        continue
 
-                                # Parse JSON safely
-                                try:
-                                    parsed = json.loads(clean_gpt_json_block(content))
-                                except Exception as e:
-                                    parsed = {
-                                        "error": f"JSON parse failed: {e}",
-                                        "raw_output": content
-                                    }
-                        
-                                # Attach local-screening debug so you can tune the threshold & synonyms
-                                parsed["candidates_debug"] = cands
-                                results.append(parsed)
-                        
-                            except Exception as e:
-                                failed_rows.append(idx)
-                                results.append({"error": f"Row {idx} (Banned/Restricted): {e}"})
-                            finally:
-                                continue  # important: skip the rest of the loop for this row
-                        
-                        if prompt_choice == "Novel Food Checker (EU)":
-                            from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
-
-                            ing_text = row_data.get("full_ingredients", "")
-                            if not ing_text:
-                                results.append({
-                                    "novel_food_flag": "No",
-                                    "confirmed_matches": [],
-                                    "explanation": "No 'full_ingredients' field provided.",
-                                    "fuzzy_debug_matches": []
-                                })
-                                continue
-
-                            # run substring + fuzzy with dynamic threshold, capture scores
-                            matches_with_scores = find_novel_matches(
-                                ing_text,
-                                threshold=fuzzy_threshold,
-                                return_scores=True
-                            )
-                            # unpack into candidates + debug list
+                    # Novel Food Checker (EU)
+                    if prompt_choice == "Novel Food Checker (EU)":
+                        from prompts.novel_check_utils import find_novel_matches, build_novel_food_prompt
+                        ing_text = row_data.get("full_ingredients", "")
+                        if not ing_text:
+                            results.append({
+                                "novel_food_flag": "No",
+                                "confirmed_matches": [],
+                                "explanation": "No 'full_ingredients' field provided.",
+                                "fuzzy_debug_matches": []
+                            })
+                        else:
+                            matches_with_scores = find_novel_matches(ing_text, threshold=fuzzy_threshold, return_scores=True)
                             candidate_matches = [term for term, _ in matches_with_scores]
-                            debug_scores      = matches_with_scores
-
+                            debug_scores = matches_with_scores
                             if candidate_matches:
                                 system_txt = build_novel_food_prompt(candidate_matches, ing_text)
-                                user_txt   = ""
+                                user_txt = ""
                             else:
                                 results.append({
                                     "novel_food_flag": "No",
@@ -1612,165 +1291,120 @@ if uploaded_file and (
                                     "explanation": "No potential matches found via fuzzy/substring match.",
                                     "fuzzy_debug_matches": debug_scores
                                 })
+                                # progress update
+                                progress = (idx + 1) / n_rows
+                                progress_bar.progress(progress)
+                                progress_text.markdown(
+                                    f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
+                                    unsafe_allow_html=True
+                                )
+                                fig = go.Figure(go.Indicator(
+                                    mode="gauge+number", value=progress*100,
+                                    number={'font': {'color': '#4A4443'}},
+                                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
+                                    gauge={'axis': {'range': [0,100], 'tickcolor':'#4A4443','tickfont':{'color':'#4A4443'},'tickwidth':2,'ticklen':8},
+                                           'bar': {'color': "#C2EA46"}, 'bgcolor': "#E1FAD1", 'borderwidth':1,
+                                           'steps':[{'range':[0,50],'color':"#E1FAD1"},{'range':[50,100],'color':"#F2FAF4"}]},
+                                    domain={'x':[0,1],'y':[0,1]}
+                                ))
+                                gauge_placeholder.plotly_chart(fig, use_container_width=True)
                                 continue
 
-                        else:
-                            # your existing USER MESSAGE split logic
-                            if "USER MESSAGE:" in user_prompt:
-                                system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
-                            else:
-                                system_txt, user_txt = user_prompt, ""
+                            # fallthrough to common call below
+                    # Common JSON prompt (incl. Novel Food if candidate_matches exist)
+                    if "USER MESSAGE:" in user_prompt:
+                        system_txt, user_txt = user_prompt.split("USER MESSAGE:", 1)
+                    else:
+                        system_txt, user_txt = user_prompt, ""
+                    system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
+                    user_txt = user_txt.strip().format(**row_data)
+                    user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                            system_txt = system_txt.replace("SYSTEM MESSAGE:", "").strip()
-                            user_txt = user_txt.strip().format(**row_data)
-                            user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
+                    response = client.chat.completions.create(
+                        model=model_choice,
+                        messages=[{"role": "system", "content": system_txt},
+                                  {"role": "user",   "content": user_txt}],
+                        temperature=temperature_val, top_p=0
+                    )
+                    content = response.choices[0].message.content.strip()
+                    if content.startswith("```"):
+                        parts = content.split("```", maxsplit=2)
+                        content = parts[1].lstrip("json").strip().split("```")[0].strip()
 
-                        # GPT call remains unchanged
-                        response = client.chat.completions.create(
-                            model=model_choice,
-                            messages=[
-                                {"role": "system", "content": system_txt},
-                                {"role": "user",   "content": user_txt}
-                            ],
-                            temperature=temperature_val,
-                            top_p=0
-                        )
-                        content = response.choices[0].message.content.strip()
+                    parsed = json.loads(content)
+                    if prompt_choice == "Novel Food Checker (EU)":
+                        # Attach debug scores if they exist in scope
+                        try:
+                            parsed["fuzzy_debug_matches"] = debug_scores  # noqa
+                        except Exception:
+                            pass
+                    results.append(parsed)
 
-                        if content.startswith("```"):
-                            parts = content.split("```", maxsplit=2)
-                            content = parts[1].lstrip("json").strip().split("```")[0].strip()
+                except Exception as e:
+                    failed_rows.append(idx)
+                    results.append({"error": f"Failed to process row {idx}: {e}", "raw_output": content or "No content returned"})
 
-                        parsed = json.loads(content)
-                        # attach debug scores to your parsed result if you like
-                        if prompt_choice == "Novel Food Checker (EU)":
-                            parsed["fuzzy_debug_matches"] = debug_scores
-
-                        results.append(parsed)
-
-                    except Exception as e:
-                        failed_rows.append(idx)
-                        error_result = {
-                            "error": f"Failed to process row {idx}: {e}",
-                            "raw_output": content if content else "No content returned"
-                        }
-                        results.append(error_result)
-
-
-
-                # 6 – update progress UI
+                # ── progress + rolling log/gauge ───────────────────────────
                 progress = (idx + 1) / n_rows
                 progress_bar.progress(progress)
                 progress_text.markdown(
                     f"<h4 style='text-align:center; color:#4A4443;'>Processed {idx + 1} of {n_rows} rows ({progress*100:.1f}%)</h4>",
                     unsafe_allow_html=True
                 )
-
-                # collect up to the last 20 raw result dicts
                 if "rolling_log_dicts" not in st.session_state:
                     st.session_state.rolling_log_dicts = []
                 st.session_state.rolling_log_dicts.append(results[-1])
                 st.session_state.rolling_log_dicts = st.session_state.rolling_log_dicts[-20:]
 
-                # clear out the previous widget
                 log_placeholder.empty()
-                # render a header
-                log_placeholder.markdown(
-                    "<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>",
-                    unsafe_allow_html=True
-                )
-
-                # first, always show the last few outright
-                num_always_show = 3
-                always_show = st.session_state.rolling_log_dicts[-num_always_show:]
-                for entry in always_show:
+                log_placeholder.markdown("<h4 style='color:#4A4443;'>📝 Recent Outputs (Last 20)</h4>", unsafe_allow_html=True)
+                for entry in st.session_state.rolling_log_dicts[-3:]:
                     log_placeholder.json(entry)
-
-                # then render each in an expander, expanded by default
                 for i, entry in enumerate(st.session_state.rolling_log_dicts):
-                    # compute the original row number
                     row_num = (idx + 1) - (len(st.session_state.rolling_log_dicts) - i)
                     with log_placeholder.expander(f"Row {row_num} output", expanded=True):
                         st.json(entry)
 
-                # … inside your row‐processing loop, after updating progress_text and rolling_log …
-
-                # Build a Plotly gauge that uses our brand colours:
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=progress * 100,
-                    number={
-                        'font': {'color': '#4A4443'}
-                    },
-                    title={
-                        'text': "Progress",
-                        'font': {'color': '#4A4443'}
-                    },
+                    number={'font': {'color': '#4A4443'}},
+                    title={'text': "Progress", 'font': {'color': '#4A4443'}},
                     gauge={
-                        'axis': {
-                            'range': [0, 100],
-                            'tickcolor': '#4A4443',
-                            'tickfont': {'color': '#4A4443'},
-                            'tickwidth': 2,
-                            'ticklen': 8
-                        },
-                        'bar': {
-                            'color': "#C2EA46"
-                        },
+                        'axis': {'range': [0, 100], 'tickcolor': '#4A4443', 'tickfont': {'color': '#4A4443'},
+                                 'tickwidth': 2, 'ticklen': 8},
+                        'bar': {'color': "#C2EA46"},
                         'bgcolor': "#E1FAD1",
                         'borderwidth': 1,
-                        'steps': [
-                            {'range': [0, 50], 'color': "#E1FAD1"},
-                            {'range': [50, 100], 'color': "#F2FAF4"}
-                        ]
+                        'steps': [{'range': [0, 50], 'color': "#E1FAD1"},
+                                  {'range': [50, 100], 'color': "#F2FAF4"}]
                     },
                     domain={'x': [0, 1], 'y': [0, 1]}
                 ))
                 gauge_placeholder.plotly_chart(fig, use_container_width=True)
 
-
-            # ---------- end for loop ----------
-            # Combine original CSV with GPT results
+            # ---------- end loop ----------
             results_df = pd.DataFrame(results)
             final_df   = pd.concat([df.reset_index(drop=True), results_df], axis=1)
             st.success("✅ GPT processing complete!")
 
-            st.markdown(
-                "<h3 style='color:#005A3F;'>🔍 Final Result</h3>",
-                unsafe_allow_html=True
-            )
-            # 1. Flatten every cell so PyArrow can serialize
-            final_df = final_df.applymap(_flatten)
-            # 2. Cast all columns to string to avoid any unsupported types
-            final_df = final_df.astype(str)
+            st.markdown("<h3 style='color:#005A3F;'>🔍 Final Result</h3>", unsafe_allow_html=True)
+            final_df = final_df.applymap(_flatten).astype(str)
 
-            # 3. Let the user choose how many rows to preview
             max_preview = st.number_input(
                 "How many rows would you like to preview?",
-                min_value=1,
-                max_value=min(1000, len(final_df)),
-                value=min(20, len(final_df)),
-                step=1
+                min_value=1, max_value=min(1000, len(final_df)), value=min(20, len(final_df)), step=1
             )
-
-            # 4. Display only the first N rows
             preview_df = final_df.head(int(max_preview))
             st.dataframe(preview_df)
 
-            # Download buttons
-            st.download_button(
-                "⬇️ Download Full Results CSV",
-                final_df.to_csv(index=False).encode("utf-8"),
-                "gpt_output.csv",
-                "text/csv"
-            )
+            st.download_button("⬇️ Download Full Results CSV",
+                               final_df.to_csv(index=False).encode("utf-8"),
+                               "gpt_output.csv", "text/csv")
 
             if failed_rows:
                 failed_df = df.iloc[failed_rows].copy()
                 st.warning(f"{len(failed_rows)} rows failed to process. You can download them and retry.")
-                st.download_button(
-                    "⬇️ Download Failed Rows CSV",
-                    failed_df.to_csv(index=False).encode("utf-8"),
-                    "gpt_failed_rows.csv",
-                    "text/csv"
-                )
+                st.download_button("⬇️ Download Failed Rows CSV",
+                                   failed_df.to_csv(index=False).encode("utf-8"),
+                                   "gpt_failed_rows.csv", "text/csv")
