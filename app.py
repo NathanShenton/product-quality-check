@@ -50,6 +50,50 @@ from prompts.green_claims import (
     LANG_TO_COL
 )
 
+# at the top of the file (if not already)
+import numpy as np
+import pandas as pd
+
+def bulk_find_banned_candidates(texts: list[str], threshold: int) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+
+    for i, raw in enumerate(texts):
+        s = (raw or "").strip()
+        if not s:
+            out[i] = []
+            continue
+
+        # whatever logic you already have to compute `matches`
+        matches = your_internal_matcher(s, threshold=threshold)  # placeholder for your current code
+
+        # --- normalize to a list ---
+        if matches is None:
+            matches = []
+        elif isinstance(matches, (np.ndarray, pd.Series)):
+            matches = matches.tolist()
+
+        # --- safe emptiness check (no boolean array pitfalls) ---
+        if len(matches) == 0:
+            out[i] = []
+            continue
+
+        # if your matcher returns objects, coerce to dicts
+        normalized = []
+        for m in matches:
+            if isinstance(m, dict):
+                normalized.append(m)
+            else:
+                # try a gentle conversion; adjust to your actual object type
+                try:
+                    normalized.append(m.to_dict())
+                except Exception:
+                    normalized.append({"value": str(m)})
+
+        out[i] = normalized
+
+    return out
+
+
 # --- Text normalisation helpers (HTML → plain; lowercase; tidy whitespace)
 import html, re, unicodedata
 def strip_html(s: str) -> str:
