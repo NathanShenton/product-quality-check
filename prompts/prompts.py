@@ -67,7 +67,218 @@ PROMPT_OPTIONS = {
         ),
         "recommended_model": "gpt-4.1-mini",
         "description": "Detects nutrition-style claims (High in/Rich in/Source of/% Daily Value) in product data. Applies context exclusions, generates a debug log, and validates matches with a final context check."
-    },
+    },"COMPLETE: Ingredient Presence Checker": {
+    "prompt": (
+        """SYSTEM MESSAGE:
+            You are a JSON-producing assistant that determines whether a set of target ingredients are present in a product. Base your answer **only** on the supplied product data and the synonym rules below. Never hallucinate.
+            
+            GENERAL ANALYSIS INSTRUCTIONS (read carefully):
+            • Treat {{product_data}} as a dictionary that may contain fields such as name, description, ingredients, nutrition_table, directions, warnings, claims, and packaging_size.
+            • **Search ALL fields case-insensitively**; do not rely on just one field. Prefer the explicit ingredient list if present.
+            • **Normalise text** before matching:
+              – Lowercase; remove diacritics; collapse repeated whitespace.
+              – Replace unicode dashes (– — −) with "-"; map Greek letters: ω→"omega", α→"alpha", β→"beta".
+              – Remove trademark symbols (®, ™) and punctuation unless integral to names (e.g., "5-HTP", "co-q10").
+            • **Synonyms & typos**:
+              – For each canonical ingredient, match any listed synonyms (below). Generate simple variants automatically (spaces vs hyphens vs no-space); e.g., "co q 10" ↔ "co-q10" ↔ "coq10".
+              – Tolerate minor typos (Levenshtein distance ≤1) **only for tokens ≥5 chars** and only when a unique, unambiguous near-match exists (e.g., "gingko" → "ginkgo").
+            • **Overlaps & precedence**:
+              – Treat each target as **independent** booleans. A specific match may imply a broader one **only where stated** in Special Rules.
+              – Do **not** infer one ingredient from another unless explicitly instructed.
+            • Be strict about ambiguous abbreviations (see Special Rules). If uncertain, set the boolean to false and add a debug note.
+            
+            SPECIAL RULES & DISAMBIGUATION:
+            • Alpha Lipoic Acid: Only count "ALA" when nearby context contains "lipoic" or "thioctic"; do **not** treat "ALA" as omega-3 (alpha-linolenic acid).
+            • Soy Lecithin: Count only if the word "soy"/"soya" appears within 3 tokens of "lecithin"/"lecithins". "Sunflower lecithin" ≠ soy.
+            • Omega-3 (children): Set omega_3_children = true only if an omega-3 synonym is present **and** the text includes any of {"child", "children", "kids", "junior"} within a reasonable window (same sentence/label line).
+            • Omega-3 (vegan): Set omega_3_vegan = true only if an omega-3 synonym is present and it is clearly **algal/microalgae** based (e.g., "algal oil", "schizochytrium").
+            • Honey & Manuka: If manuka_honey is true, also set honey = true. The reverse is not implied.
+            • Garlic variants: "black garlic" and "aged garlic" are distinct from generic "garlic extract"; do not auto-map between them.
+            • Blueberry vs Bilberry: Treat them as distinct species; do not cross-match.
+            • Sea kelp: Do not count "bladderwrack" alone as sea kelp.
+            
+            RESPONSE FORMAT — return **valid JSON ONLY** in exactly this shape:
+            {
+            "ingredients_presence": {
+                "turmeric": true|false,
+                "turmeric_extract": true|false,
+                "curcumin": true|false,
+                "co_q10": true|false,
+                "milk_thistle": true|false,
+                "bovine_collagen": true|false,
+                "marine_collagen": true|false,
+                "chicken_collagen_uc_ii": true|false,
+                "apple_cider_vinegar": true|false,
+                "ashwagandha": true|false,
+                "omega_3": true|false,
+                "omega_3_children": true|false,
+                "omega_3_vegan": true|false,
+                "ginkgo_biloba": true|false,
+                "glucosamine": true|false,
+                "maca": true|false,
+                "cranberry_extract": true|false,
+                "chondroitin": true|false,
+                "blueberry": true|false,
+                "bilberry": true|false,
+                "tribulus_terrestris": true|false,
+                "rose_hips": true|false,
+                "black_seed_oil": true|false,
+                "pumpkin_seed_oil": true|false,
+                "korean_ginseng": true|false,
+                "american_ginseng": true|false,
+                "siberian_ginseng": true|false,
+                "beetroot_extract": true|false,
+                "hyaluronic_acid": true|false,
+                "flaxseed_oil": true|false,
+                "soya_isoflavones": true|false,
+                "primrose_oil": true|false,
+                "starflower_oil": true|false,
+                "inulin": true|false,
+                "aloe_vera": true|false,
+                "ginger_root": true|false,
+                "echinacea": true|false,
+                "artichoke_extract": true|false,
+                "chlorella": true|false,
+                "acai_berry": true|false,
+                "cinnamon": true|false,
+                "alpha_lipoic_acid": true|false,
+                "bee_pollen": true|false,
+                "sea_kelp": true|false,
+                "black_garlic": true|false,
+                "aged_garlic": true|false,
+                "garlic_extract": true|false,
+                "pycnogenol": true|false,
+                "glucomannan": true|false,
+                "chromium": true|false,
+                "rutin": true|false,
+                "lycopene": true|false,
+                "matcha_tea": true|false,
+                "guarana": true|false,
+                "spirulina": true|false,
+                "boswellia": true|false,
+                "horny_goat_weed": true|false,
+                "soy_lecithin": true|false,
+                "pomegranate_extract": true|false,
+                "resveratrol": true|false,
+                "red_clover_extract": true|false,
+                "fenugreek": true|false,
+                "activated_charcoal": true|false,
+                "lutein": true|false,
+                "saw_palmetto": true|false,
+                "five_htp": true|false,
+                "saffron": true|false,
+                "psyllium_husk": true|false,
+                "shilajit": true|false,
+                "lactase_enzyme": true|false,
+                "valerian": true|false,
+                "plant_sterols": true|false,
+                "black_cohosh": true|false,
+                "grapeseed_extract": true|false,
+                "bromelain": true|false,
+                "oregano_oil": true|false,
+                "manuka_honey": true|false,
+                "honey": true|false,
+                "msm": true|false,
+                "quercetin": true|false
+              },
+            "debug_matches": {"<ingredient_key>": ["<verbatim matches from text>"]}
+            }
+            
+            TARGET INGREDIENTS & SYNONYMS (canonical_key: [synonyms]):
+            {
+            "turmeric": ["turmeric", "curcuma longa", "turmeric root", "turmeric powder"],
+            "turmeric_extract": ["turmeric extract", "curcuma longa extract", "turmeric root extract", "turmeric oleoresin"],
+            "curcumin": ["curcumin", "curcuminoid", "curcuminoids"],
+            "co_q10": ["coq10", "co-q10", "co q10", "co q 10", "coenzyme q10", "co-enzyme q10", "q10", "ubiquinone", "ubiquinone-10", "ubidecarenone"],
+            "milk_thistle": ["milk thistle", "silybum marianum", "silymarin", "silybin"],
+            "bovine_collagen": ["bovine collagen", "hydrolysed bovine collagen", "hydrolyzed bovine collagen", "bovine type i collagen", "bovine type iii collagen", "beef collagen"],
+            "marine_collagen": ["marine collagen", "fish collagen", "type i fish collagen", "collagen from fish", "cod collagen", "tilapia collagen"],
+            "chicken_collagen_uc_ii": ["uc-ii", "uc ii", "ucii", "undenatured type ii collagen", "chicken collagen", "chicken sternum cartilage", "type ii collagen (undenatured)"],
+            "apple_cider_vinegar": ["apple cider vinegar", "acv", "cider vinegar", "apple vinegar"],
+            "ashwagandha": ["ashwagandha", "withania somnifera", "ksm-66", "sensoril"],
+            "omega_3": ["omega-3", "omega 3", "ω-3", "n-3", "epa", "dha", "fish oil", "cod liver oil", "omega3"],
+            "omega_3_children": ["children's omega-3", "kids omega-3", "junior omega 3", "child omega 3"],
+            "omega_3_vegan": ["vegan omega-3", "algal oil", "algae oil", "microalgae oil", "schizochytrium", "schizochytrium sp.", "algal dha", "algal epa"],
+              "ginkgo_biloba": ["ginkgo biloba", "gingko biloba", "ginkgo", "gingko"],
+              "glucosamine": ["glucosamine", "glucosamine sulfate", "glucosamine sulphate", "glucosamine hcl", "n-acetyl-d-glucosamine", "nag"],
+              "maca": ["maca", "lepidium meyenii", "peruvian ginseng"],
+              "cranberry_extract": ["cranberry", "cranberry extract", "vaccinium macrocarpon"],
+              "chondroitin": ["chondroitin", "chondroitin sulfate", "chondroitin sulphate"],
+              "blueberry": ["blueberry", "blueberries", "vaccinium corymbosum"],
+              "bilberry": ["bilberry", "bilberries", "vaccinium myrtillus"],
+              "tribulus_terrestris": ["tribulus terrestris", "tribulus", "puncture vine", "puncturevine"],
+              "rose_hips": ["rose hips", "rosehip", "rosa canina", "rosehip extract"],
+              "black_seed_oil": ["black seed oil", "nigella sativa", "black cumin seed oil", "black cumin oil", "kalonji oil"],
+              "pumpkin_seed_oil": ["pumpkin seed oil", "cucurbita pepo seed oil", "pepita oil"],
+              "korean_ginseng": ["korean ginseng", "panax ginseng", "red ginseng", "asian ginseng"],
+              "american_ginseng": ["american ginseng", "panax quinquefolius"],
+              "siberian_ginseng": ["siberian ginseng", "eleutherococcus senticosus", "eleuthero"],
+              "beetroot_extract": ["beetroot", "beet root", "beetroot extract", "beta vulgaris"],
+              "hyaluronic_acid": ["hyaluronic acid", "sodium hyaluronate", "hyaluronan"],
+              "flaxseed_oil": ["flaxseed oil", "linseed oil", "linseed", "flax oil"],
+              "soya_isoflavones": ["soya isoflavones", "soy isoflavones", "isoflavones (soy)", "genistein", "daidzein"],
+              "primrose_oil": ["evening primrose oil", "primrose oil", "oenothera biennis oil", "epo"],
+              "starflower_oil": ["starflower oil", "borage oil", "borago officinalis seed oil", "gla from borage"],
+              "inulin": ["inulin", "oligofructose", "fructooligosaccharides", "fos", "chicory root fiber", "chicory inulin"],
+              "aloe_vera": ["aloe vera", "aloe barbadensis", "aloe gel", "aloe juice"],
+              "ginger_root": ["ginger", "ginger root", "zingiber officinale"],
+              "echinacea": ["echinacea", "echiflu", "echinacea purpurea", "echinacea angustifolia"],
+              "artichoke_extract": ["artichoke extract", "cynara scolymus", "artichoke leaf extract"],
+              "chlorella": ["chlorella", "chlorella pyrenoidosa", "chlorella vulgaris", "chinese chlorella"],
+              "acai_berry": ["acai", "açai", "euterpe oleracea", "acai berry"],
+              "cinnamon": ["cinnamon", "cinnamomum verum", "cinnamomum zeylanicum", "cassia"],
+              "alpha_lipoic_acid": ["alpha lipoic acid", "α-lipoic acid", "lipoic acid", "thioctic acid", "ala (lipoic)"],
+              "bee_pollen": ["bee pollen", "pollen (bee)"],
+              "sea_kelp": ["sea kelp", "kelp", "ascophyllum nodosum", "laminaria", "kombu"],
+              "black_garlic": ["black garlic"],
+              "aged_garlic": ["aged garlic", "aged garlic extract", "kyolic"],
+              "garlic_extract": ["garlic extract", "allium sativum extract"],
+              "pycnogenol": ["pycnogenol", "french maritime pine bark extract", "pinus pinaster bark extract"],
+              "glucomannan": ["glucomannan", "konjac", "amorphophallus konjac"],
+              "chromium": ["chromium", "chromium picolinate", "chromium chloride", "chromium polynicotinate", "chromium(iii)"],
+              "rutin": ["rutin", "rutoside", "quercetin-3-rutinoside"],
+              "lycopene": ["lycopene", "tomato extract (lycopene)"],
+              "matcha_tea": ["matcha", "matcha tea", "green tea powder"],
+              "guarana": ["guarana", "paullinia cupana"],
+              "spirulina": ["spirulina", "arthrospira platensis"],
+              "boswellia": ["boswellia", "boswellia serrata", "indian frankincense", "akba"],
+              "horny_goat_weed": ["horny goat weed", "epimedium", "icariin"],
+              "soy_lecithin": ["soy lecithin", "soya lecithin", "lecithin (soya)", "lecithins (soy)", "lecithin - soya"],
+              "pomegranate_extract": ["pomegranate", "pomegranate extract", "punica granatum"],
+              "resveratrol": ["resveratrol", "trans-resveratrol", "polygonum cuspidatum", "japanese knotweed"],
+              "red_clover_extract": ["red clover", "red clover extract", "trifolium pratense"],
+              "fenugreek": ["fenugreek", "trigonella foenum-graecum", "methi"],
+              "activated_charcoal": ["activated charcoal", "activated carbon", "vegetable carbon (e153)"],
+              "lutein": ["lutein", "marigold extract", "tagetes erecta (lutein)"],
+              "saw_palmetto": ["saw palmetto", "serenoa repens"],
+              "five_htp": ["5-htp", "5 htp", "5htp", "5-htp", "5 hydroxytryptophan", "5-hydroxytryptophan", "griffonia simplicifolia"],
+              "saffron": ["saffron", "crocus sativus", "safranal", "saffron extract"],
+              "psyllium_husk": ["psyllium", "psyllium husk", "ispaghula husk", "plantago ovata"],
+              "shilajit": ["shilajit", "mumijo", "mumiyo", "asphaltum", "mineral pitch"],
+              "lactase_enzyme": ["lactase", "lactase enzyme", "β-galactosidase", "beta-galactosidase"],
+              "valerian": ["valerian", "valeriana officinalis", "valerian root"],
+              "plant_sterols": ["plant sterols", "phytosterols", "beta-sitosterol", "sitosterol", "campesterol", "stigmasterol", "plant stanols", "phytostanols"],
+              "black_cohosh": ["black cohosh", "cimicifuga racemosa", "actaea racemosa"],
+              "grapeseed_extract": ["grapeseed extract", "grape seed extract", "vitis vinifera seed extract", "opc"],
+              "bromelain": ["bromelain", "bromelin", "bromelains"],
+              "oregano_oil": ["oregano oil", "origanum vulgare oil", "carvacrol"],
+              "manuka_honey": ["manuka honey", "leptospermum scoparium", "mgo", "umf"],
+              "honey": ["honey", "acacia honey", "forest honey"],
+              "msm": ["msm", "methylsulfonylmethane", "dimethyl sulfone", "dmso2"],
+              "quercetin": ["quercetin", "quercetin dihydrate", "quercetin anhydrous"]
+            }
+            
+            DEBUGGING:
+            • Populate debug_matches with the exact substrings that triggered each true flag. Use [] for ingredients not found.
+            • If the product data lacks an ingredient list, still scan all text fields and note this in debug_matches under a special key "_notes".
+            
+            PRODUCT DATA:
+            {{product_data}}
+            """
+    ),
+    "recommended_model": "gpt-4o-mini",
+    "description": "Returns a boolean map (and evidence) for ~75 targeted botanicals/actives using synonyms, minor-typo tolerance, and conservative disambiguation."
+},
     "INCOMPLETE: Gluten Free Contextual Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -1709,6 +1920,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
