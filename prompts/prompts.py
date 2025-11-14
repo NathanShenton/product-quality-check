@@ -7,6 +7,107 @@ PROMPT_OPTIONS = {
         "recommended_model": "gpt-3.5-turbo",
         "description": "No pre-written prompt selected."
     },
+    "COMPLETE: Age Restriction Contextual Compliance (UK & ROI)": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant that reviews product data from Holland & Barrett "
+            "and determines whether each SKU should carry an age restriction in the **UK or ROI** markets.\n"
+            "Your analysis must combine contextual reasoning with strict adherence to the provided policy rules. "
+            "Never hallucinate or infer rules beyond those listed.\n\n"
+    
+            "GENERAL INSTRUCTIONS:\n"
+            "• Treat {{product_data}} as a dictionary that may contain fields like:\n"
+            "  sku_id, sku_name, brand_name, category_fpna_l2_name, category_fpna_l3_name, "
+            "  full_ingredients, variants_description, warning_info, nutritionals_info, otc.\n"
+            "• Parse and interpret all fields **holistically** – including HTML, structured nutrition data, "
+            "  and text signals from descriptions and warnings.\n"
+            "• Use natural language understanding to interpret context such as marketing tone, intended use, "
+            "  or dietary positioning (e.g., 'diet tea', 'pre-workout', 'high caffeine', 'weight management').\n"
+            "• Apply numeric reasoning where required (e.g., caffeine thresholds). When caffeine mg/100ml "
+            "  or mg/serving cannot be precisely derived, mark as 'ambiguous' and lower confidence.\n"
+            "• Prioritise **UK & ROI** legal rules first, then apply **H&B voluntary restrictions**, then "
+            "  propose a **best-practice** recommendation based on common sense or safety perception.\n"
+            "• Treat advisory text such as 'Not suitable for under 18s' as **guidance only**, not a legal or policy gate.\n\n"
+    
+            "ALLOWED OUTPUT FORMAT (valid JSON only):\n"
+            "{\n"
+            "  \"sku_id\": \"<id>\",\n"
+            "  \"assessment\": {\n"
+            "    \"age_restriction_policy\": \"LEGAL_18 | LEGAL_16 | LEGAL_12 | LEGAL_AS_LABELLED | NONE\",\n"
+            "    \"voluntary_restriction\": \"VOLUNTARY_18 | VOLUNTARY_16 | NONE\",\n"
+            "    \"best_practice_gate\": \"RESTRICT_18 | RESTRICT_16 | NO_EXTRA_RESTRICTION\",\n"
+            "    \"final_recommendation\": \"KEEP_RESTRICTION | LOWER_RESTRICTION | REMOVE_RESTRICTION\"\n"
+            "  },\n"
+            "  \"no_obvious_reason\": true | false,\n"
+            "  \"confidence\": <float between 0 and 1>,\n"
+            "  \"policy_rules_triggered\": [{\"rule_id\": \"<string>\", \"market\": \"UK or ROI\"}],\n"
+            "  \"evidence\": [{\"type\": \"ingredient|claim|warning|nutrition|category|other\", \"text\": \"<string>\"}],\n"
+            "  \"debug_log\": {\n"
+            "     \"steps\": [{\"step\": \"<summary>\", \"rule_id\": \"<string>\", \"match_reason\": \"<text>\", \"result\": \"<string>\"}],\n"
+            "     \"notes\": [\"<contextual observations or ambiguity flags>\"],\n"
+            "     \"policy_revision_reference\": \"POL-10 (04/09/2025)\"\n"
+            "  }\n"
+            "}\n\n"
+    
+            "RULE PACK (UK & ROI):\n"
+            "1️⃣ LEGAL RESTRICTIONS:\n"
+            "• Aerosol spray paints ⇒ 16+ (UK/ROI; NI 18+)\n"
+            "• Alcohol ≥0.5% ABV ⇒ 18+; Liqueur confection (Scotland) ⇒ 16+\n"
+            "• Lottery ⇒ 18+\n"
+            "• Tobacco/NRT/e-cigs/butane refills ⇒ 18+\n"
+            "• Knives/razor blades/sharply pointed articles ⇒ 18+\n"
+            "• Fireworks ⇒ UK: F1 16+, F2/F3 18+; ROI: F1 12+, others licence only\n"
+            "• Christmas crackers ⇒ 12+\n"
+            "• Corrosive substances ⇒ 18+\n"
+            "• Sunbeds, Botox & fillers (England) ⇒ 18+\n"
+            "• Media (films, games) ⇒ as per label\n"
+            "• Razor cartridges <2 mm exposed blade ⇒ not restricted\n\n"
+    
+            "2️⃣ VOLUNTARY RESTRICTIONS (H&B policy):\n"
+            "• OTC or GSL medicines ⇒ 16+\n"
+            "• THR/medical devices ⇒ age per usage guidance\n"
+            "• Restricted CBD ingredients ⇒ 18+ (only explicit CBD/cannabinoid terms; hemp seed oil/protein exempt)\n"
+            "• Energy drinks ≥15 mg caffeine/100 ml ⇒ 18+\n"
+            "• High-caffeine foods ≥150 mg caffeine/serving ⇒ 18+\n"
+            "• Creatine products (non-topical) ⇒ 18+\n"
+            "• Weight-loss/appetite suppressant language ⇒ 18+\n"
+            "• Sexual vitality/performance claims ⇒ 16+\n"
+            "• CLP-regulated chemicals ⇒ 18+\n"
+            "• Advisory age statements alone ⇒ guidance only\n\n"
+    
+            "EVALUATION LOGIC:\n"
+            "• Detect entities and quantities: extract caffeine, creatine, CBD, weight-loss, sexual vitality cues.\n"
+            "• Match against policy in the order: Legal → Voluntary → Best-practice.\n"
+            "• Choose the **highest** age threshold if multiple apply.\n"
+            "• Compute caffeine thresholds:\n"
+            "   – For drinks, normalise all caffeine values to mg/100 ml (80 mg/330 ml → 24.24 mg/100 ml).\n"
+            "   – For food/tablet/shot, use mg/serving threshold 150 mg.\n"
+            "• If quantity ambiguous, mention in debug_log and lower confidence.\n"
+            "• Best-practice examples:\n"
+            "   – Products with adult marketing tone (e.g. pre-workout, fat-burner) even if below thresholds.\n"
+            "   – Herbal teas with 'diet' language or appetite claims ⇒ consider RESTRICT_18.\n"
+            "• Set `no_obvious_reason=true` only when neither policy nor context suggests any age concern.\n\n"
+    
+            "CONFLICT RESOLUTION:\n"
+            "• If a legal rule fires ⇒ KEEP_RESTRICTION (cannot lower).\n"
+            "• If only voluntary rules fire ⇒ KEEP_RESTRICTION unless clear reason to lower.\n"
+            "• If no rules fire but product is adult-coded ⇒ LOWER_RESTRICTION or KEEP per context.\n"
+            "• If no policy or context found ⇒ REMOVE_RESTRICTION.\n\n"
+    
+            "OUTPUT POLICY:\n"
+            "• Return **only JSON**, no prose.\n"
+            "• All strings must be double-quoted and valid JSON.\n"
+            "• Always include at least one `debug_log.step` explaining how you reached the conclusion.\n\n"
+    
+            "PRODUCT DATA:\n"
+            "{{product_data}}\n"
+        ),
+        "recommended_model": "gpt-4o",
+        "description": (
+            "Performs contextual age-restriction assessment for UK/ROI SKUs using H&B Age Restricted Sales Policy POL-10. "
+            "Balances policy logic with holistic reasoning, numeric caffeine checks, and a full debug trail."
+    )
+},
     "COMPLETE: CLASSIFY: Nutrition Claim Detection": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
@@ -1920,6 +2021,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
