@@ -124,42 +124,63 @@ def clean_gpt_json_block(text: str) -> str:
         text = text[json_start:]
     return text.strip()
 
-# ─── Arrow-safe DataFrame helper (hardened) ───────────────────────────────────
-from pandas.api.types import is_datetime64_any_dtype, is_object_dtype
+# ─── Arrow-safe DataFrame helper (with unique-columns + dtype guards) ─────────
+from pandas.api.types import (
+    is_datetime64_any_dtype, is_object_dtype, is_bool_dtype, is_integer_dtype
+)
+
+def _dedupe_columns(cols):
+    seen = {}
+    out = []
+    for c in map(str, cols):
+        if c not in seen:
+            seen[c] = 1
+            out.append(c)
+        else:
+            out.append(f"{c}.{seen[c]}")
+            seen[c] += 1
+    return out
 
 def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
     """Coerce df into Arrow/Streamlit-friendly types with per-column guards."""
     df = df.copy()
 
-    # 0) Ensure string column names
+    # 0) Ensure unique, string column names (critical for Arrow)
     try:
-        df.columns = df.columns.map(str)
+        df.columns = _dedupe_columns(df.columns)
     except Exception:
-        df.columns = [str(c) for c in df.columns]
+        df.columns = _dedupe_columns([str(c) for c in df.columns])
 
-    # 1) Per-column sanitation
+    # 1) Normalize index (Arrow doesn't need fancy indexes)
+    df = df.reset_index(drop=True)
+
+    # 2) Per-column sanitation
     for c in list(df.columns):
-        try:
-            s = df[c]            # always Series (we loop concrete names)
-        except Exception:
-            # If something very odd happens, stringify the whole column name access
-            df[c] = df[c].astype(str)
-            continue
+        s = df[c]
 
-        # 1a) Datetimes → tz-naive
+        # 2a) Datetimes → tz-naive
         try:
             if is_datetime64_any_dtype(s):
                 df[c] = pd.to_datetime(s, errors="coerce").dt.tz_localize(None)
-            else:
-                # Some tz-aware timestamps hide in object dtype — try/except only if any Timestamps
-                if is_object_dtype(s) and s.map(lambda x: isinstance(x, pd.Timestamp) and getattr(x, "tz", None) is not None if pd.notna(x) else False).any():
-                    df[c] = pd.to_datetime(s, errors="coerce").dt.tz_localize(None)
+            elif is_object_dtype(s) and s.map(
+                lambda x: isinstance(x, pd.Timestamp) and getattr(x, "tz", None) is not None
+                if pd.notna(x) else False
+            ).any():
+                df[c] = pd.to_datetime(s, errors="coerce").dt.tz_localize(None)
         except Exception:
-            # Fallback: stringify on failure
             df[c] = s.astype(str)
             continue
 
-        # 1b) Container/bytes → JSON/string
+        # 2b) Nullable ints/bools → plain or string (Arrow sometimes chokes on extension dtypes)
+        try:
+            if is_integer_dtype(df[c].dtype) and str(df[c].dtype).startswith("Int"):  # Pandas nullable Int64/Int32
+                df[c] = df[c].astype("float64")  # safe preview; preserves NaN
+            elif is_bool_dtype(df[c].dtype) and str(df[c].dtype) == "boolean":        # Pandas nullable BooleanDtype
+                df[c] = df[c].astype("object").astype(str)
+        except Exception:
+            df[c] = df[c].astype(str)
+
+        # 2c) Container/bytes → JSON/string
         if is_object_dtype(df[c]):
             def _to_serializable(x):
                 try:
@@ -177,7 +198,7 @@ def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
             try:
                 needs_map = df[c].map(lambda v: isinstance(v, (dict, list, tuple, set, bytes, bytearray))).any()
             except Exception:
-                needs_map = True  # be conservative if inspection fails
+                needs_map = True
 
             if needs_map:
                 try:
@@ -185,7 +206,7 @@ def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
                 except Exception:
                     df[c] = df[c].astype(str)
 
-        # 1c) Mixed-type object columns → string
+        # 2d) Mixed-type object → string
         if is_object_dtype(df[c]):
             try:
                 types = df[c].dropna().map(lambda v: type(v).__name__).unique()
@@ -194,8 +215,9 @@ def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
             except Exception:
                 df[c] = df[c].astype(str)
 
-    # 2) NaN → None (cleaner for Arrow)
+    # 3) Inf/NaN → None (nicer for Arrow)
     try:
+        df = df.replace([np.inf, -np.inf], np.nan)
         df = df.where(pd.notna(df), None)
     except Exception:
         pass
@@ -1483,6 +1505,10 @@ if uploaded_file and (
             preview_df = final_df.head(int(max_preview))
             st_dataframe_safe(preview_df, use_container_width=True)
 
+            # After building preview_df but before st_dataframe_safe()
+            if len(set(preview_df.columns)) != len(preview_df.columns):
+                st.warning("Detected duplicate column names; suffixes have been added for display.")
+            
             st.download_button("⬇️ Download Full Results CSV",
                                final_df.to_csv(index=False).encode("utf-8"),
                                "gpt_output.csv", "text/csv")
