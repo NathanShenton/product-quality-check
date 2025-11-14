@@ -124,6 +124,59 @@ def clean_gpt_json_block(text: str) -> str:
         text = text[json_start:]
     return text.strip()
 
+# ─── Arrow-safe DataFrame helper ───────────────────────────────────────────────
+import numpy as np
+import json
+import pandas as pd
+
+def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce df into Arrow/Streamlit-friendly types (no dict/list/bytes/mixed tz)."""
+    df = df.copy()
+    # 0) Ensure string column names
+    df.columns = df.columns.map(str)
+
+    # 1) Normalise datetimes (tz-naive)
+    for c in df.columns:
+        if np.issubdtype(getattr(df[c], "dtype", object), np.datetime64):
+            df[c] = pd.to_datetime(df[c], errors="coerce").dt.tz_localize(None)
+        elif df[c].dtype == "object":
+            # object col might hide tz-aware timestamps
+            has_tz = df[c].map(lambda x: isinstance(x, pd.Timestamp) and x.tz is not None if pd.notna(x) else False).any()
+            if has_tz:
+                df[c] = pd.to_datetime(df[c], errors="coerce").dt.tz_localize(None)
+
+    # 2) JSON-encode containers; decode bytes
+    def _to_serializable(x):
+        if isinstance(x, (dict, list, tuple, set)):
+            return json.dumps(x, ensure_ascii=False)
+        if isinstance(x, (bytes, bytearray)):
+            try:
+                return x.decode("utf-8", "ignore")
+            except Exception:
+                return str(x)
+        return x
+
+    for c in df.columns:
+        if df[c].dtype == "object":
+            if df[c].map(lambda v: isinstance(v, (dict, list, tuple, set, bytes, bytearray))).any():
+                df[c] = df[c].map(_to_serializable)
+
+    # 3) Collapse mixed-type object cols to string
+    for c in df.columns:
+        if df[c].dtype == "object":
+            types = df[c].dropna().map(lambda v: type(v).__name__).unique()
+            if len(types) > 1:
+                df[c] = df[c].astype(str)
+
+    # 4) NaN → None (cleaner for Arrow)
+    df = df.where(pd.notna(df), None)
+    return df
+
+def st_dataframe_safe(df: pd.DataFrame, **kwargs):
+    """Small wrapper so you never forget to sanitize."""
+    return st.dataframe(make_arrow_safe(df), **kwargs)
+
+
 def _flatten(x):
     """
     Turn lists/dicts/tuples into JSON strings so PyArrow can serialize.
@@ -681,7 +734,7 @@ if prompt_choice == ARTWORK_NUTRITION_PROMPT:
             st.write(f"**Page:** {res['page_index']}")
             st.write(f"**BBox (pixels):** {res['bbox_pixels']}")
             st.markdown("#### Flat rows (easy export)")
-            st.dataframe(pd.DataFrame(res.get("flat", [])))
+            st_dataframe_safe(pd.DataFrame(res.get("flat", [])), use_container_width=True)
             st.markdown("#### Structured JSON")
             st.json(res.get("parsed", {}))
             st.markdown("#### QA")
@@ -806,7 +859,7 @@ if uploaded_file and (
 ):
     df = pd.read_csv(uploaded_file, dtype=str)
     st.markdown("### 📄 CSV Preview")
-    st.dataframe(df.head())
+    st_dataframe_safe(df.head(), use_container_width=True)
 
     # Dynamic Column Selector (up to 10)
     st.subheader("📊 Select up to 10 CSV columns to pass to GPT")
@@ -1399,7 +1452,7 @@ if uploaded_file and (
                 min_value=1, max_value=min(1000, len(final_df)), value=min(20, len(final_df)), step=1
             )
             preview_df = final_df.head(int(max_preview))
-            st.dataframe(preview_df)
+            st_dataframe_safe(preview_df, use_container_width=True)
 
             st.download_button("⬇️ Download Full Results CSV",
                                final_df.to_csv(index=False).encode("utf-8"),
