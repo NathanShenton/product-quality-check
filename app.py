@@ -124,56 +124,85 @@ def clean_gpt_json_block(text: str) -> str:
         text = text[json_start:]
     return text.strip()
 
-# ─── Arrow-safe DataFrame helper ───────────────────────────────────────────────
-import numpy as np
-import json
-import pandas as pd
+# ─── Arrow-safe DataFrame helper (hardened) ───────────────────────────────────
+from pandas.api.types import is_datetime64_any_dtype, is_object_dtype
 
 def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
-    """Coerce df into Arrow/Streamlit-friendly types (no dict/list/bytes/mixed tz)."""
+    """Coerce df into Arrow/Streamlit-friendly types with per-column guards."""
     df = df.copy()
+
     # 0) Ensure string column names
-    df.columns = df.columns.map(str)
+    try:
+        df.columns = df.columns.map(str)
+    except Exception:
+        df.columns = [str(c) for c in df.columns]
 
-    # 1) Normalise datetimes (tz-naive)
-    for c in df.columns:
-        if np.issubdtype(getattr(df[c], "dtype", object), np.datetime64):
-            df[c] = pd.to_datetime(df[c], errors="coerce").dt.tz_localize(None)
-        elif df[c].dtype == "object":
-            # object col might hide tz-aware timestamps
-            has_tz = df[c].map(lambda x: isinstance(x, pd.Timestamp) and x.tz is not None if pd.notna(x) else False).any()
-            if has_tz:
-                df[c] = pd.to_datetime(df[c], errors="coerce").dt.tz_localize(None)
+    # 1) Per-column sanitation
+    for c in list(df.columns):
+        try:
+            s = df[c]            # always Series (we loop concrete names)
+        except Exception:
+            # If something very odd happens, stringify the whole column name access
+            df[c] = df[c].astype(str)
+            continue
 
-    # 2) JSON-encode containers; decode bytes
-    def _to_serializable(x):
-        if isinstance(x, (dict, list, tuple, set)):
-            return json.dumps(x, ensure_ascii=False)
-        if isinstance(x, (bytes, bytearray)):
+        # 1a) Datetimes → tz-naive
+        try:
+            if is_datetime64_any_dtype(s):
+                df[c] = pd.to_datetime(s, errors="coerce").dt.tz_localize(None)
+            else:
+                # Some tz-aware timestamps hide in object dtype — try/except only if any Timestamps
+                if is_object_dtype(s) and s.map(lambda x: isinstance(x, pd.Timestamp) and getattr(x, "tz", None) is not None if pd.notna(x) else False).any():
+                    df[c] = pd.to_datetime(s, errors="coerce").dt.tz_localize(None)
+        except Exception:
+            # Fallback: stringify on failure
+            df[c] = s.astype(str)
+            continue
+
+        # 1b) Container/bytes → JSON/string
+        if is_object_dtype(df[c]):
+            def _to_serializable(x):
+                try:
+                    if isinstance(x, (dict, list, tuple, set)):
+                        return json.dumps(x, ensure_ascii=False)
+                    if isinstance(x, (bytes, bytearray)):
+                        try:
+                            return x.decode("utf-8", "ignore")
+                        except Exception:
+                            return str(x)
+                    return x
+                except Exception:
+                    return str(x)
+
             try:
-                return x.decode("utf-8", "ignore")
+                needs_map = df[c].map(lambda v: isinstance(v, (dict, list, tuple, set, bytes, bytearray))).any()
             except Exception:
-                return str(x)
-        return x
+                needs_map = True  # be conservative if inspection fails
 
-    for c in df.columns:
-        if df[c].dtype == "object":
-            if df[c].map(lambda v: isinstance(v, (dict, list, tuple, set, bytes, bytearray))).any():
-                df[c] = df[c].map(_to_serializable)
+            if needs_map:
+                try:
+                    df[c] = df[c].map(_to_serializable)
+                except Exception:
+                    df[c] = df[c].astype(str)
 
-    # 3) Collapse mixed-type object cols to string
-    for c in df.columns:
-        if df[c].dtype == "object":
-            types = df[c].dropna().map(lambda v: type(v).__name__).unique()
-            if len(types) > 1:
+        # 1c) Mixed-type object columns → string
+        if is_object_dtype(df[c]):
+            try:
+                types = df[c].dropna().map(lambda v: type(v).__name__).unique()
+                if len(types) > 1:
+                    df[c] = df[c].astype(str)
+            except Exception:
                 df[c] = df[c].astype(str)
 
-    # 4) NaN → None (cleaner for Arrow)
-    df = df.where(pd.notna(df), None)
+    # 2) NaN → None (cleaner for Arrow)
+    try:
+        df = df.where(pd.notna(df), None)
+    except Exception:
+        pass
+
     return df
 
 def st_dataframe_safe(df: pd.DataFrame, **kwargs):
-    """Small wrapper so you never forget to sanitize."""
     return st.dataframe(make_arrow_safe(df), **kwargs)
 
 
