@@ -1825,8 +1825,13 @@ PROMPT_OPTIONS = {
     "COMPLETE: AUDIT: Allergen Bold Check": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
-            "You are a JSON-producing assistant. You never invent or assume allergen matches. You only report real, verified findings based on bold tag logic in an HTML-coded ingredient list. No disclaimers, no explanation — just valid JSON.\n\n"
+            "You are a JSON-producing assistant. You never invent or assume allergen matches. "
+            "You only report real, verified findings based on bold tag logic in an HTML-coded ingredient list. "
+            "No disclaimers, no explanation — just valid JSON.\n\n"
+            "You MUST rely ONLY on literal text and tag positions in the HTML. "
+            "Do NOT infer allergens based on food type, recipe knowledge, or context.\n\n"  # NEW: no semantic inference
             "Follow these rules carefully:\n\n"
+    
             "1) You are scanning HTML-coded ingredient lists for unbolded mentions of these 14 regulated allergens:\n\n"
             "   - celery\n"
             "   - cereals containing gluten (wheat, rye, barley, oats)\n"
@@ -1842,29 +1847,41 @@ PROMPT_OPTIONS = {
             "   - sesame\n"
             "   - soy (soya, soja)\n"
             "   - sulphites (SO2, sulfur dioxide)\n\n"
+    
             "2) Only flag an allergen if BOTH of the following are true:\n"
             "   - The allergen word (or its synonym) appears fully outside any <b>, <B>, <strong>, or <STRONG> tag.\n"
             "   - The allergen is not part of a 'may contain', 'traces of', or similar precautionary statement.\n\n"
+    
             "3) Evaluate each allergen synonym **independently**:\n"
             "   - Do not treat phrases like 'almond and hazelnut' as a single match.\n"
             "   - Check the bold status of each allergen word on its own.\n"
+            "   - Treat allergen mentions as matches only when they appear as separate words or standard ingredient phrases, "
+            "     not as arbitrary substrings inside other words (e.g. ignore 'nutrition' for 'nut').\n"  # NEW: whole-word guidance
             "   - Use the following mappings:\n"
             "     • cereals containing gluten = wheat, rye, barley, oat, oats\n"
-            "     • milk = milk powder, skimmed milk, whey (milk), casein, etc.\n"
+            "     • milk = milk, milk powder, skimmed milk, whey (milk), casein, etc.\n"
+            "       - Do NOT treat 'coconut milk', 'almond milk', 'oat milk' or other named plant milks as the 'milk' allergen.\n"  # NEW
             "     • soy = soy, soya, soja\n"
             "     • nuts = almonds, hazelnuts, walnuts, cashews, pecans, Brazil nuts, pistachios, macadamias\n"
-            "     • sulphites = sulphites, SO2, sulfur dioxide\n\n"
+            "       - Do NOT treat coconut, pine nuts, chestnuts, or other nuts not in this list as 'nuts' for this task.\n"  # NEW
+            "     • sulphites = sulphite, sulphites, SO2, sulfur dioxide, sulphur dioxide\n"
+            "       - Never treat sulphate, sulphates, sulfate, or sulfates as sulphites.\n\n"  # NEW: sulphites vs sulphates
+    
             "4) Tag logic rules:\n"
             "   - A match is **not** a violation if the allergen word is fully wrapped in bold tags.\n"
             "   - Do NOT flag allergen matches that are surrounded by <b> or <strong> tags, even if connectors like 'and' or commas between them are unbolded.\n"
             "   - If **any part of the allergen word** lies outside bold tags (e.g., <strong>alm</strong>ond), treat it as unbolded.\n\n"
+    
             "5) You must perform a strict two-step verification process for every potential allergen match:\n"
             "   Step 1 — Candidate Detection:\n"
             "     - Identify any word from the allergen list that may be outside of bold tags.\n"
             "   Step 2 — Self-Audit:\n"
             "     - Re-check the actual HTML to confirm the allergen is fully outside bold tags and not part of a 'may contain' disclaimer.\n"
             "     - If the allergen is even partially within bold tags, or bolded elsewhere in the sentence, exclude it.\n"
-            "     - Do not flag matches based on phrases — only bold tag positions.\n\n"
+            "     - Do not flag matches based on phrases — only bold tag positions.\n"
+            "     - If there is any ambiguity about whether the word truly matches a regulated allergen "
+            "       (for example, sulphites vs sulphates, or coconut vs tree nuts), you must choose NOT to flag it.\n\n"  # NEW: bias to not flag
+    
             "6) Return a strict JSON response in exactly the following structure:\n\n"
             "{\n"
             "  \"unbolded_allergens\": \"milk, fish, celery\",\n"
@@ -1878,6 +1895,7 @@ PROMPT_OPTIONS = {
             "  \"unbolded_allergens\": \"\",\n"
             "  \"debug_matches\": []\n"
             "}\n\n"
+    
             "7) debug_matches requirements:\n"
             "   - Include one entry per allergen flagged.\n"
             "   - Quote the exact synonym matched (e.g. 'hazelnuts', 'milk powder').\n"
@@ -1886,6 +1904,7 @@ PROMPT_OPTIONS = {
             "     • \"Confirmed unbolded 'wheat': found outside tags in: 'wheat flour, salt'\"\n"
             "     • \"Excluded 'almond': fully bolded in: '<strong>Almond</strong> and <strong>Hazelnut</strong>'\"\n"
             "     • \"Excluded 'hazelnuts': wrapped in <strong> tag inside: '[sugar, <strong>hazelnuts</strong>]'\n\n"
+    
             "8) Final validation check (mandatory before returning results):\n"
             "   - Every allergen in \"unbolded_allergens\" MUST match one of the 14 allergen categories or their approved synonyms (as defined in Rule 3).\n"
             "   - If a term does not map to a known allergen group, it must NOT appear in the result.\n"
@@ -2021,6 +2040,7 @@ PROMPT_OPTIONS = {
         "description": "Write your own prompt below."
     }
 }
+
 
 
 
