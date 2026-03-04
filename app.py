@@ -144,24 +144,13 @@ from pandas.api.types import (
 )
 
 def chat_create(client: OpenAI, model: str, messages: list, temperature=None, top_p=None, **kwargs):
+    """
+    Wrapper to avoid sending sampling params to GPT-5 family models.
+    Some GPT-5 models will error if temperature/top_p are provided. :contentReference[oaicite:15]{index=15}
+    """
     params = {"model": model, "messages": messages, **kwargs}
 
-    if model.startswith("gpt-5"):
-        # Make GPT-5 behave “snappy”
-        params["verbosity"] = "low"  # reduces output length :contentReference[oaicite:3]{index=3}
-
-        # Reasoning effort = biggest latency lever :contentReference[oaicite:4]{index=4}
-        if model in ("gpt-5.2-pro", "gpt-5-pro"):
-            params["reasoning_effort"] = "medium"   # lowest practical for pro (pro forces high on gpt-5-pro) :contentReference[oaicite:5]{index=5}
-        elif model.startswith(("gpt-5.2", "gpt-5.1")):
-            params["reasoning_effort"] = "none"     # lowest latency :contentReference[oaicite:6]{index=6}
-        else:
-            params["reasoning_effort"] = "minimal"  # for gpt-5 / gpt-5-mini / gpt-5-nano :contentReference[oaicite:7]{index=7}
-
-        # Hard cap output+reasoning tokens (prevents “thinking forever”) :contentReference[oaicite:8]{index=8}
-        params["max_completion_tokens"] = 600
-
-    else:
+    if not model.startswith("gpt-5"):
         # Keep existing behavior for non-GPT-5 models
         if temperature is not None:
             params["temperature"] = temperature
