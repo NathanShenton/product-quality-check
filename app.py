@@ -86,12 +86,26 @@ def estimate_cost(model: str, df: pd.DataFrame, user_prompt: str, cols_to_use: l
     Costs are per 1k tokens (input, output).
     """
     model_costs_per_1k = {
-        "gpt-3.5-turbo": (0.0005, 0.002),
-        "gpt-4.1-mini":  (0.0004, 0.0016),
-        "gpt-4.1-nano":  (0.0001, 0.0004),
-        "gpt-4o-mini":   (0.00015, 0.0006),
-        "gpt-4o":        (0.005,  0.015),  # baseline as of 2024-05
-        "gpt-4-turbo":   (0.01,   0.03)
+        # --- GPT-3.5 / legacy ---
+        "gpt-3.5-turbo": (0.0005, 0.0015),  # $0.50 / $1.50 per 1M :contentReference[oaicite:4]{index=4}
+    
+        # --- GPT-4.1 family ---
+        "gpt-4.1-mini":  (0.0004, 0.0016),  # $0.40 / $1.60 per 1M :contentReference[oaicite:5]{index=5}
+        "gpt-4.1-nano":  (0.0001, 0.0004),  # $0.10 / $0.40 per 1M :contentReference[oaicite:6]{index=6}
+    
+        # --- GPT-4o family ---
+        "gpt-4o-mini":   (0.00015, 0.0006), # $0.15 / $0.60 per 1M :contentReference[oaicite:7]{index=7}
+        "gpt-4o":        (0.0025, 0.01),    # $2.50 / $10.00 per 1M :contentReference[oaicite:8]{index=8}
+    
+        # --- GPT-4 Turbo (legacy) ---
+        "gpt-4-turbo":   (0.01, 0.03),      # $10.00 / $30.00 per 1M :contentReference[oaicite:9]{index=9}
+    
+        # --- GPT-5 family (added) ---
+        "gpt-5.2":       (0.00175, 0.014),  # $1.75 / $14.00 per 1M :contentReference[oaicite:10]{index=10}
+        "gpt-5.2-pro":   (0.021, 0.168),    # $21.00 / $168.00 per 1M :contentReference[oaicite:11]{index=11}
+        "gpt-5":         (0.00125, 0.01),   # $1.25 / $10.00 per 1M :contentReference[oaicite:12]{index=12}
+        "gpt-5-mini":    (0.00025, 0.002),  # $0.25 / $2.00 per 1M :contentReference[oaicite:13]{index=13}
+        "gpt-5-nano":    (0.00005, 0.0004), # $0.05 / $0.40 per 1M :contentReference[oaicite:14]{index=14}
     }
     cost_in, cost_out = model_costs_per_1k.get(model, (0.001, 0.003))
     total_input_tokens = 0
@@ -128,6 +142,22 @@ def clean_gpt_json_block(text: str) -> str:
 from pandas.api.types import (
     is_datetime64_any_dtype, is_object_dtype, is_bool_dtype, is_integer_dtype
 )
+
+def chat_create(client: OpenAI, model: str, messages: list, temperature=None, top_p=None, **kwargs):
+    """
+    Wrapper to avoid sending sampling params to GPT-5 family models.
+    Some GPT-5 models will error if temperature/top_p are provided. :contentReference[oaicite:15]{index=15}
+    """
+    params = {"model": model, "messages": messages, **kwargs}
+
+    if not model.startswith("gpt-5"):
+        # Keep existing behavior for non-GPT-5 models
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+
+    return client.chat.completions.create(**params)
 
 def _dedupe_columns(cols):
     seen = {}
@@ -243,12 +273,19 @@ def _flatten(x):
 # Model Descriptions + UI   #
 #############################
 MODEL_OPTIONS = {
-    "gpt-3.5-turbo": "Cheapest, good for basic tasks with acceptable quality.",
+    "gpt-3.5-turbo": "Legacy cheap model; OK for basic tasks.",
     "gpt-4.1-mini":  "Balanced cost and intelligence, great for language tasks.",
     "gpt-4.1-nano":  "Ultra-cheap and fast, best for very lightweight checks.",
     "gpt-4o-mini":   "Higher quality than 4.1-mini, still affordable.",
-    "gpt-4o":        "The latest multimodal GPT-4 (vision + text).",
-    "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases."
+    "gpt-4o":        "Multimodal GPT-4o (vision + text).",
+    "gpt-4-turbo":   "Very powerful and expensive — best for complex, high-value use cases.",
+
+    # --- GPT-5 family (added) ---
+    "gpt-5.2":       "Flagship GPT-5 family model (best overall).",
+    "gpt-5.2-pro":   "Highest-accuracy GPT-5.2 variant (very expensive).",
+    "gpt-5":         "Previous GPT-5 flagship (reasoning model).",
+    "gpt-5-mini":    "Cheaper GPT-5 for well-defined tasks.",
+    "gpt-5-nano":    "Ultra-cheap GPT-5 for high-throughput/simple checks.",
 }
 
 # ---- Main Page Layout ----
@@ -1076,11 +1113,13 @@ if uploaded_file and (
                                 sys_txt, user_txt = build_green_claims_prompt(
                                     candidates=candidates, product_text=row_text, language_name=gc_language
                                 )
-                                resp = client.chat.completions.create(
+                                resp = chat_create(
+                                    client=client,
                                     model=model_choice,
                                     messages=[{"role": "system", "content": sys_txt},
                                               {"role": "user",   "content": user_txt}],
-                                    temperature=temperature_val, top_p=0
+                                    temperature=temperature_val,
+                                    top_p=0
                                 )
                                 content = resp.choices[0].message.content.strip()
                                 try:
@@ -1280,10 +1319,13 @@ if uploaded_file and (
 
                             system_prompt = build_match_prompt(my_sku, cand_list)
                             status_placeholder.info(f"Row {idx+1}/{n_rows}: calling GPT to pick best match…")
-                            resp = client.chat.completions.create(
+                            resp = chat_create(
+                                client=client,
                                 model=model_choice,
-                                messages=[{"role": "system", "content": system_prompt}],
-                                temperature=temperature_val, top_p=0
+                                messages=[{"role": "system", "content": sys_txt},
+                                          {"role": "user",   "content": user_txt}],
+                                temperature=temperature_val,
+                                top_p=0
                             )
                             gpt_json = json.loads(resp.choices[0].message.content)
                             status_placeholder.success(f"Row {idx+1}/{n_rows}: GPT done (match_found={gpt_json.get('match_found')})")
@@ -1339,10 +1381,13 @@ if uploaded_file and (
                                     })
                                 else:
                                     system_txt = build_banned_prompt(cands, ing_text)
-                                    resp = client.chat.completions.create(
+                                    resp = chat_create(
+                                        client=client,
                                         model=model_choice,
-                                        messages=[{"role": "system", "content": system_txt}, {"role": "user", "content": ""}],
-                                        temperature=temperature_val, top_p=0
+                                        messages=[{"role": "system", "content": sys_txt},
+                                                  {"role": "user",   "content": user_txt}],
+                                        temperature=temperature_val,
+                                        top_p=0
                                     )
                                     content = resp.choices[0].message.content.strip()
                                     try:
@@ -1427,11 +1472,13 @@ if uploaded_file and (
                     user_txt = user_txt.strip().format(**row_data)
                     user_txt += f"\n\nSelected fields:\n{json.dumps(row_data, ensure_ascii=False)}"
 
-                    response = client.chat.completions.create(
+                    response = chat_create(
+                        client=client,
                         model=model_choice,
                         messages=[{"role": "system", "content": system_txt},
                                   {"role": "user",   "content": user_txt}],
-                        temperature=temperature_val, top_p=0
+                        temperature=temperature_val,
+                        top_p=0
                     )
                     content = response.choices[0].message.content.strip()
                     if content.startswith("```"):
