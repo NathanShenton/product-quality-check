@@ -108,6 +108,86 @@ PROMPT_OPTIONS = {
             "Clarifies pregnancy (no default restriction), menopause (no default restriction unless hormone-altering), and differentiates sexual performance, vitality and fertility claims."
         )
     },
+    "SKU Count Estimator": {
+        "prompt": (
+            "SYSTEM MESSAGE:\n"
+            "You are a JSON-producing assistant that estimates how many unique SKUs are referenced or impacted in a ticket. "
+            "Use only the provided ticket data and rules below. Never hallucinate.\n\n"
+    
+            "GENERAL ANALYSIS INSTRUCTIONS (read carefully):\n"
+            "• Treat {{ticket_data}} as a dictionary that may contain fields such as summary, issue_key, created, description.\n"
+            "• Analyse ALL fields case-insensitively; do not rely on just one field.\n"
+            "• Strip HTML/markup, normalise whitespace, and interpret tables where present.\n"
+            "• Description field typically contains the most detail and should be prioritised.\n"
+            "• Identify explicit SKU references (e.g., 'SKU 12345', '12345') and count unique values.\n"
+            "• Detect plural references (e.g., '2 skus', 'multiple skus') and extract numeric indicators where possible.\n"
+            "• Interpret structured data (tables, lists, pipes |) and count rows if they represent distinct items.\n"
+            "• Infer SKU count where possible from context (e.g., '3 barcodes needed' → likely 3 SKUs).\n"
+            "• If the ticket clearly refers to a single SKU (even without explicit ID), assume count = 1.\n"
+            "• If multiple SKUs are implied but not clearly countable, return a best estimate and flag as inferred.\n"
+            "• If no SKU relevance is found, return status = 'no_sku_detected'.\n\n"
+    
+            "COUNTING RULES:\n"
+            "• Explicit SKU IDs → count unique occurrences.\n"
+            "• 'SKU X and Y' → count both.\n"
+            "• Lists or tables of SKUs → count rows/items.\n"
+            "• Numeric indicators tied to work items (e.g., '3 barcodes', '2 promotions') → treat as SKU proxies if clearly linked.\n"
+            "• Promotions or campaigns:\n"
+            "  - If multiple distinct rows (e.g., UK/ROI variants), count each row.\n"
+            "  - If unclear whether SKU-based, still estimate based on distinct entries.\n"
+            "• Attachments mentioned but not visible → do NOT assume counts from them.\n"
+            "• Avoid double-counting the same SKU mentioned multiple times.\n\n"
+    
+            "OUTPUT SCHEMA (return valid JSON only in exactly this shape):\n"
+            "{\n"
+            "  \"issue_key\": \"string\",\n"
+            "  \"status\": \"ok|inferred|unclear|no_sku_detected\",\n"
+            "  \"sku_count\": null,\n"
+            "  \"sku_count_min\": null,\n"
+            "  \"sku_count_max\": null,\n"
+            "  \"is_inferred\": false,\n"
+            "  \"sources\": {\n"
+            "    \"summary\": \"string (<=120 chars) or null\",\n"
+            "    \"description\": \"string (<=120 chars) or null\"\n"
+            "  },\n"
+            "  \"flags\": {\n"
+            "    \"has_explicit_skus\": false,\n"
+            "    \"used_proxy_logic\": false,\n"
+            "    \"has_range\": false\n"
+            "  },\n"
+            "  \"notes\": \"<=20 words concise rationale\"\n"
+            "}\n\n"
+    
+            "DECISION RULES (apply in order):\n"
+            "1. Look for explicit SKU IDs and count unique values → status = 'ok'.\n"
+            "2. If no explicit SKUs, look for numeric indicators tied to items (e.g., '2 skus', '3 barcodes') → status = 'ok'.\n"
+            "3. If structured tables/lists present, count rows/items → status = 'inferred'.\n"
+            "4. If only general wording (e.g., 'multiple skus'), estimate if possible:\n"
+            "   • If bounded → use min/max and set has_range = true.\n"
+            "   • Otherwise → status = 'unclear'.\n"
+            "5. If clearly a single item change (e.g., 'update cost price of SKU X' or singular phrasing), set sku_count = 1.\n"
+            "6. If nothing indicates SKU involvement → status = 'no_sku_detected'.\n\n"
+    
+            "DEBUG & EDGE CASES:\n"
+            "• Handle SKU formats with or without 'SKU' prefix.\n"
+            "• Ignore numbers unrelated to SKU counting (dates, prices, percentages).\n"
+            "• Do not assume 1 unless context strongly indicates a single item.\n"
+            "• Promotions may represent multiple logical SKUs even without explicit SKU IDs.\n\n"
+    
+            "TOKEN & EVIDENCE CONTROL (strict):\n"
+            "• Never copy full field contents into sources.\n"
+            "• Return ONLY the shortest exact supporting clause (<=120 chars), use ellipses … if needed.\n"
+            "• Prefer clauses containing counts, SKU IDs, or list structures.\n"
+            "• If no evidence in a field, set it to null.\n"
+            "• Output must be compact, single-line JSON with minimal whitespace.\n"
+            "• Keep \"notes\" to <=20 words.\n\n"
+    
+            "TICKET DATA:\n"
+            "{{ticket_data}}\n"
+        ),
+        "recommended_model": "gpt-4o-mini",
+        "description": "Estimates the number of SKUs impacted by a ticket using explicit references, structured data, and inferred signals like barcodes or promotions."
+    },
     "COMPLETE: CLASSIFY: Nutrition Claim Detection": {
         "prompt": (
             "SYSTEM MESSAGE:\n"
