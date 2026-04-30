@@ -162,13 +162,17 @@ def chat_create(client: OpenAI, model: str, messages: list, temperature=None, to
 def _dedupe_columns(cols):
     seen = {}
     out = []
-    for c in map(str, cols):
-        if c not in seen:
-            seen[c] = 1
-            out.append(c)
+
+    for c in cols:
+        base = str(c).strip() or "unnamed_column"
+
+        if base not in seen:
+            seen[base] = 0
+            out.append(base)
         else:
-            out.append(f"{c}.{seen[c]}")
-            seen[c] += 1
+            seen[base] += 1
+            out.append(f"{base}_{seen[base]}")
+
     return out
 
 def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
@@ -1543,18 +1547,30 @@ if uploaded_file and (
             st.success("✅ GPT processing complete!")
 
             st.markdown("<h3 style='color:#005A3F;'>🔍 Final Result</h3>", unsafe_allow_html=True)
-            final_df = final_df.applymap(_flatten).astype(str)
+            final_df = final_df.map(_flatten).astype(str)
 
+            # Critical: make final_df columns unique BEFORE preview and download
+            original_columns = list(final_df.columns)
+            final_df.columns = _dedupe_columns(final_df.columns)
+            
+            if len(set(original_columns)) != len(original_columns):
+                st.warning("Duplicate column names were detected in the final output. Suffixes have been added, e.g. column_1, column_2.")
+            
             max_preview = st.number_input(
                 "How many rows would you like to preview?",
-                min_value=1, max_value=min(1000, len(final_df)), value=min(20, len(final_df)), step=1
+                min_value=1,
+                max_value=min(1000, len(final_df)),
+                value=min(20, len(final_df)),
+                step=1
             )
+            
             preview_df = final_df.head(int(max_preview))
-            st_dataframe_safe(preview_df, use_container_width=True)
-
-            # After building preview_df but before st_dataframe_safe()
-            if len(set(preview_df.columns)) != len(preview_df.columns):
-                st.warning("Detected duplicate column names; suffixes have been added for display.")
+            
+            try:
+                st_dataframe_safe(preview_df, use_container_width=True)
+            except Exception as e:
+                st.error(f"Preview failed, but your results are still available to download. Error: {e}")
+                st.write(preview_df.astype(str).head(20))
             
             st.download_button("⬇️ Download Full Results CSV",
                                final_df.to_csv(index=False).encode("utf-8"),
