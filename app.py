@@ -9,7 +9,7 @@ from PIL import Image
 import io
 from openai import OpenAI
 
-# ── Project modules ────────────────────────────────────────────────────────────
+# ── Project  modules ────────────────────────────────────────────────────────────
 from sidebar import render_sidebar
 from style import inject_css
 
